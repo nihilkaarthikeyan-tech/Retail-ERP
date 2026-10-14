@@ -47,9 +47,11 @@ interface AuditTableProps {
   path: "/audit" | "/audit/logins";
   /** Show the entity type filter and column (changes only). */
   withEntity: boolean;
+  /** Fixed to one record (e.g. an item's own history tab); hides the record-type filter. */
+  record?: { entityType: string; entityId: string };
 }
 
-export function AuditTable({ path, withEntity }: AuditTableProps) {
+export function AuditTable({ path, withEntity, record }: AuditTableProps) {
   const { user: me } = useAuth();
   const canListUsers = hasPermission(me, "users.view");
   const users = useLoad<UserDto[]>(() => (canListUsers ? api.get<UserDto[]>("/users") : Promise.resolve([])), [canListUsers]);
@@ -64,9 +66,17 @@ export function AuditTable({ path, withEntity }: AuditTableProps) {
   const fetchPage = useCallback(
     (before: string | null) =>
       api.get<AuditPage>(
-        `${path}${query({ userId: applied.userId, entityType: applied.entityType.trim(), from: applied.from, to: applied.to, limit: 50, before })}`,
+        `${path}${query({
+          userId: applied.userId,
+          entityType: record ? record.entityType : applied.entityType.trim(),
+          entityId: record?.entityId,
+          from: applied.from,
+          to: applied.to,
+          limit: 50,
+          before,
+        })}`,
       ),
-    [path, applied],
+    [path, applied, record],
   );
 
   // First page, again whenever the filters change.
@@ -153,7 +163,7 @@ export function AuditTable({ path, withEntity }: AuditTableProps) {
               ))}
             </SelectInput>
           ) : null}
-          {withEntity ? (
+          {withEntity && !record ? (
             <TextInput id="audit-entity" label="Record type" value={filters.entityType} onChange={(e) => setFilters({ ...filters, entityType: e.target.value })} hint="For example user, store, role, company, number_series." />
           ) : null}
           <TextInput id="audit-from" label="From" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />

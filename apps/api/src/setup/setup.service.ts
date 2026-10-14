@@ -4,6 +4,7 @@ import { codeFromName, type SetupInput, SYSTEM_ROLES } from 'shared';
 import { AuditService } from '../audit/audit.service.js';
 import { AuthService } from '../auth/auth.service.js';
 import { hashPassword } from '../auth/password.js';
+import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
@@ -26,6 +27,7 @@ export class SetupService {
     private readonly company: CompanyService,
     private readonly years: FinancialYearsService,
     private readonly stores: StoresService,
+    private readonly catalogueSettings: CatalogueSettingsService,
   ) {}
 
   async status(): Promise<{ needed: boolean }> {
@@ -111,6 +113,7 @@ export class SetupService {
       );
 
       await this.stores.createIn(tx, company.id, { ...input.store, gstRegistrationId }, actor);
+      await this.catalogueSettings.ensureCompanyDefaults(tx, company.id);
 
       await this.audit.record(tx, actor, { action: 'setup', entityType: 'company', entityId: company.id });
       return { companyId: company.id, userId: admin.id };

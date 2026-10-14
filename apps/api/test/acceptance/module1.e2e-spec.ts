@@ -128,7 +128,8 @@ describe('1.2 Creating a cashier limited to one store', () => {
 
   it('has no back-office rights and cannot touch the other store', async () => {
     const me = (await priya.get('/auth/me').expect(200)).body;
-    expect(me.permissions).toEqual([]);
+    // Module 2 gives cashiers item and selling-price lookup only (decision 70).
+    expect(me.permissions).toEqual(['catalogue.view', 'prices.view']);
     expect(me.stores.map((s: { code: string }) => s.code)).toEqual(['ANNA']);
     await priya.get('/users').expect(403);
     await priya.get(`/stores/${mainId}`).expect(403); // lacks stores.view at all
@@ -272,6 +273,7 @@ describe('1.5 Store manager cannot change access rights', () => {
     const arun = await loginAndChange('arun@rademics.test', 'Temp-pass-1234', 'Arun-own-pass-9');
     const cashierRole = await roleId(prisma, SYSTEM_ROLES.CASHIER);
     const usersBefore = await prisma.user.count();
+    const cashierRightsBefore = await prisma.rolePermission.count({ where: { roleId: cashierRole } });
 
     await arun.get('/users').expect(200); // store managers may see the list
     await arun
@@ -281,7 +283,8 @@ describe('1.5 Store manager cannot change access rights', () => {
     await arun.patch(`/roles/${cashierRole}`).send({ permissions: ['users.manage'] }).expect(403);
 
     expect(await prisma.user.count()).toBe(usersBefore);
-    expect(await prisma.rolePermission.count({ where: { roleId: cashierRole } })).toBe(0);
+    expect(await prisma.rolePermission.count({ where: { roleId: cashierRole } })).toBe(cashierRightsBefore);
+    expect(await prisma.rolePermission.count({ where: { roleId: cashierRole, permissionKey: 'users.manage' } })).toBe(0);
   });
 });
 

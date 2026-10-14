@@ -1,8 +1,10 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { hasPermission } from "shared";
+import { ItemSearchBox } from "@/components/items/item-search-box";
 import { SystemStatus } from "@/components/system-status";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -25,6 +27,7 @@ function useGreeting(): string {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const canSeeCompany = hasPermission(user, "company.view");
   const company = useLoad<CompanyDto | null>(
     () => (canSeeCompany ? api.get<CompanyDto>("/company") : Promise.resolve(null)),
@@ -44,6 +47,13 @@ export default function DashboardPage() {
               ? (company.data.tradeName ?? company.data.legalName)
               : (company.error ?? "")}
         </p>
+      ) : null}
+
+      {hasPermission(user, "catalogue.view") ? (
+        <>
+          <h2>Find an item</h2>
+          <ItemSearchBox onSearch={(text) => router.push(`/items${text ? `?search=${encodeURIComponent(text)}` : ""}`)} />
+        </>
       ) : null}
 
       <h2>Your stores</h2>

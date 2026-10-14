@@ -1,0 +1,137 @@
+// Copyright (c) 2026, Rademics. All rights reserved.
+"use client";
+
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { hasPermission } from "shared";
+import { ItemSearchBox } from "@/components/items/item-search-box";
+import { ActiveBadge, Alert, Button, DataTable, SelectInput, type Column } from "@/components/ui";
+import { api, query } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { flattenGroups, itemKindLabel, showMoney } from "@/lib/catalogue";
+import type { BrandDto, ItemDto, ItemGroupNode, ItemPage } from "@/lib/types";
+import { useLoad } from "@/lib/use-load";
+
+const PAGE_SIZE = 50;
+
+interface Filters {
+  search: string;
+  groupId: string;
+  brandId: string;
+  kind: string;
+  active: string;
+}
+
+export function ItemsList() {
+  const params = useSearchParams();
+  const { user } = useAuth();
+  const canManage = hasPermission(user, "catalogue.manage");
+  const [filters, setFilters] = useState<Filters>({ search: params.get("search") ?? "", groupId: "", brandId: "", kind: "", active: "true" });
+  const [page, setPage] = useState(1);
+
+  const groups = useLoad(() => api.get<ItemGroupNode[]>("/catalogue/item-groups"));
+  const brands = useLoad(() => api.get<BrandDto[]>("/catalogue/brands"));
+  const items = useLoad(
+    () => api.get<ItemPage>(`/items${query({ ...filters, page, pageSize: PAGE_SIZE })}`),
+    [filters.search, filters.groupId, filters.brandId, filters.kind, filters.active, page],
+  );
+
+  function setFilter(key: keyof Filters, value: string) {
+    setFilters((f) => ({ ...f, [key]: value }));
+    setPage(1);
+  }
+
+  const columns: Column<ItemDto>[] = [
+    {
+      key: "code",
+      header: "Code",
+      render: (i) => (
+        <Link href={`/items/${i.id}`} className="mono">
+          {i.code}
+        </Link>
+      ),
+    },
+    { key: "name", header: "Name", render: (i) => i.name },
+    { key: "group", header: "Group", render: (i) => i.itemGroup.name },
+    { key: "brand", header: "Brand", render: (i) => i.brand?.name ?? "—" },
+    { key: "kind", header: "Kind", render: (i) => itemKindLabel(i) },
+    { key: "unit", header: "Basic unit", render: (i) => i.baseUnit.code },
+    { key: "mrp", header: "MRP", align: "right", render: (i) => showMoney(i.mrp) },
+    { key: "variants", header: "Variants", align: "right", render: (i) => (i.isParentStyle ? i.variantCount : "—") },
+    { key: "active", header: "Status", render: (i) => <ActiveBadge active={i.active} /> },
+  ];
+
+  const total = items.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const groupOptions = groups.data ? flattenGroups(groups.data) : [];
+
+  return (
+    <>
+      <div className="toolbar">
+        <h1 style={{ margin: 0 }}>Items</h1>
+        <span className="spacer" />
+        {canManage ? (
+          <Link href="/items/new" className="btn btn-primary">
+            Add item
+          </Link>
+        ) : null}
+      </div>
+      <ItemSearchBox key={filters.search} initial={filters.search} onSearch={(text) => setFilter("search", text)} />
+      <div className="filter-row">
+        <SelectInput id="items-group" label="Group" value={filters.groupId} onChange={(e) => setFilter("groupId", e.target.value)}>
+          <option value="">All groups</option>
+          {groupOptions.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.label}
+            </option>
+          ))}
+        </SelectInput>
+        <SelectInput id="items-brand" label="Brand" value={filters.brandId} onChange={(e) => setFilter("brandId", e.target.value)}>
+          <option value="">All brands</option>
+          {(brands.data ?? []).map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </SelectInput>
+        <SelectInput id="items-kind" label="Kind" value={filters.kind} onChange={(e) => setFilter("kind", e.target.value)}>
+          <option value="">All kinds</option>
+          <option value="stock">Stock items</option>
+          <option value="service">Services</option>
+          <option value="style">Styles</option>
+        </SelectInput>
+        <SelectInput id="items-active" label="Status" value={filters.active} onChange={(e) => setFilter("active", e.target.value)}>
+          <option value="">All</option>
+          <option value="true">Active</option>
+          <option value="false">Switched off</option>
+        </SelectInput>
+      </div>
+      <Alert kind="error">{items.error ?? groups.error ?? brands.error}</Alert>
+      <DataTable
+        columns={columns}
+        rows={items.data?.rows}
+        rowKey={(i) => i.id}
+        loading={items.loading}
+        empty={filters.search ? `No items match "${filters.search}".` : "No items yet."}
+      />
+      <div className="toolbar">
+        <span className="muted">
+          {total} item{total === 1 ? "" : "s"}
+          {pageCount > 1 ? `, page ${page} of ${pageCount}` : ""}
+        </span>
+        <span className="spacer" />
+        {pageCount > 1 ? (
+          <>
+            <Button size="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button size="small" disabled={page >= pageCount} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </>
+        ) : null}
+      </div>
+    </>
+  );
+}

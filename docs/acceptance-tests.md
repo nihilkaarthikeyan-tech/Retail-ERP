@@ -88,13 +88,13 @@ Stock, accounts and tax are not affected by anything in this module.
 
 ### 2.1 A simple item with two pack sizes
 - **Given** units PCS and BOX exist and the group Grocery > Staples > Rice is a leaf group
-- **When** the catalogue manager creates item "Basmati Rice 1 kg" without typing a code, basic unit PCS, another unit BOX = 12 PCS, barcode `8901234567894` (EAN-13) for PCS and `18901234567891` for BOX, HSN 1006, MRP ₹120.00, selling price ₹110.00 in Standard Selling
-- **Then** the item gets code `ITM-000001`; scanning `8901234567894` returns the item in PCS; scanning `18901234567891` returns the item in BOX with 12 basic units; the price lookup for 1 BOX returns ₹1,320.00 (12 × 110) because prices are per basic unit.
+- **When** the catalogue manager creates item "Basmati Rice 1 kg" without typing a code, basic unit PCS, another unit BOX = 12 PCS, barcode `8901234567890` (EAN-13) for PCS and `5901234123457` (EAN-13) for BOX, HSN 1006, MRP ₹120.00, selling price ₹110.00 in Standard Selling
+- **Then** the item gets code `ITM-000001`; scanning `8901234567890` returns the item in PCS; scanning `5901234123457` returns the item in BOX with 12 basic units; the price lookup for 1 BOX returns ₹1,320.00 (12 × 110) because prices are per basic unit.
 
 ### 2.2 Barcodes are unique and checked
-- **When** another item is given barcode `8901234567894`
+- **When** another item is given barcode `8901234567890`
 - **Then** it is refused, naming the item that already has it.
-- **When** an item is given EAN-13 `8901234567895` (wrong check digit)
+- **When** an item is given EAN-13 `8901234567894` (wrong check digit)
 - **Then** it is refused.
 
 ### 2.3 A style with sizes and colours
@@ -111,7 +111,7 @@ Stock, accounts and tax are not affected by anything in this module.
 
 ### 2.5 The right price is found
 - **Given** item X with Standard Selling price ₹100 (from 1 Apr 2026), a scheduled price ₹105 from 1 Nov 2026, a contract price ₹90 for customer C (module 3; until then recorded with a placeholder customer id), and a Wholesale list with no price for X
-- **Then** on 14 Oct 2026 a walk-in sale gets ₹100; on 1 Nov 2026 it gets ₹105; customer C gets ₹90 on both dates; a bill on the Wholesale list gets ₹100 through the default-list fallback when that setting is on, and no price when it is off; variant `SHIRT-RED-M` with no own price takes the parent's price if one is set at parent level for lookup only (prices are stored on variants; parent fallback is read-only).
+- **Then** on 14 Oct 2026 a walk-in sale gets ₹100; on 1 Nov 2026 it gets ₹105; customer C gets ₹90 on both dates (a contract price wins over a newer general price); a bill on the Wholesale list gets ₹100 through the default-list fallback when that setting is on, and no price when it is off; a supplier price on a selling list and an identical duplicate price are refused.
 
 ### 2.6 Cashiers never see cost or buying prices
 - **Given** Priya is a Cashier
@@ -129,3 +129,44 @@ Stock, accounts and tax are not affected by anything in this module.
 ### 2.9 Item codes never repeat
 - **When** two staff create items at the same instant without codes
 - **Then** they get `ITM-000002` and `ITM-000003`, never the same code.
+
+---
+
+## Module 3 — Customers and suppliers (draft; approved with the module 3 plan)
+
+Stock, accounts and tax are not affected by anything in this module.
+
+### 3.1 Quick add at the till warns about a duplicate mobile
+- **Given** customer Lakshmi with mobile 9876543210 exists
+- **When** a cashier quick-adds "Lakshmi S" with the same mobile
+- **Then** the system refuses and shows the existing customer; when the cashier confirms it is a different person, a second customer is created; nothing is merged.
+
+### 3.2 A business customer with a GSTIN in another state
+- **When** a Wholesale customer is created with GSTIN `29…` (Karnataka) while the company is in Tamil Nadu
+- **Then** its state is recorded as 29 and the GST treatment helper answers "other state" for its billing address; a GSTIN whose state digits differ from the typed state is refused.
+
+### 3.3 Due dates from payment terms
+- **Given** terms "Net 15" (15 days after bill date), "Month end + 10" and "50 % advance / 50 % at 30 days"
+- **Then** for a bill dated 20 Feb 2027: Net 15 → 7 Mar 2027; Month end + 10 → 10 Mar 2027; the split terms → two parts due 20 Feb and 22 Mar 2027; a due date before the bill date is impossible.
+
+### 3.4 Credit limits are protected
+- **When** a Store Manager tries to change a customer's credit limit or block them
+- **Then** it is refused; an Accountant can, and the history shows old and new limit.
+
+### 3.5 Blocked versus switched off
+- **When** a customer is switched off
+- **Then** any document naming them is refused for everyone; **when** blocked, the Accountant may still post for them.
+
+### 3.6 Supplier holds
+- **Given** supplier Metro Distributors is on hold for payments only until 30 Nov 2026
+- **Then** a purchase order or bill helper check passes, a payment helper check is refused with the reason; after 30 Nov the hold lifts by itself.
+
+### 3.7 Same party as customer and supplier
+- **When** "Arun Traders" exists as a supplier and is created as a customer with a link to that supplier
+- **Then** both records exist with separate numbers and the link is shown on each; balances stay separate.
+
+### 3.8 Group defaults are copied
+- **Given** customer group Wholesale with price list Wholesale and Net 30 terms
+- **When** a customer is created in that group without terms
+- **Then** the customer shows Wholesale prices and Net 30; changing the group's defaults later does not change existing customers.
+

@@ -1,17 +1,21 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Shared helpers for the end-to-end and acceptance tests.
 import type { INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import type { SetupInput } from 'shared';
 import { AppModule } from '../src/app.module.js';
+import { AuditService } from '../src/audit/audit.service.js';
+import { UnitsService } from '../src/catalogue/units.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 
 export async function createTestApp(): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const app = moduleFixture.createNestApplication<INestApplication<App>>();
+  const app = moduleFixture.createNestApplication<NestExpressApplication>({ bodyParser: false });
+  app.useBodyParser('json', { limit: '1mb' });
   app.use(cookieParser());
   await app.init();
   return app;
@@ -23,9 +27,13 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
     TRUNCATE TABLE
       "AuditLog", "Session", "UserStore", "UserRole", "RolePermission", "Role", "User",
       "NumberSeriesCounter", "NumberSeries", "FinancialYear", "Store", "GstRegistration",
+      "Price", "PriceList", "CatalogueSettings", "Barcode", "ItemUnit", "ItemVariantValue",
+      "ItemVariantAttribute", "Item", "VariantAttributeValue", "VariantAttribute", "HsnCode",
+      "Brand", "ItemGroup", "UnitConversion", "Unit",
       "Company", "SecuritySettings"
     RESTART IDENTITY CASCADE`);
   await prisma.securitySettings.create({ data: { id: 1 } });
+  await new UnitsService(prisma, new AuditService(prisma)).ensureStandardUnits(prisma);
 }
 
 export const OWNER = {

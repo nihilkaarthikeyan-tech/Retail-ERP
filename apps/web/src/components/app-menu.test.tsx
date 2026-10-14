@@ -55,6 +55,33 @@ describe("AppMenu", () => {
     expect(screen.getByRole("link", { name: "Dashboard" }).getAttribute("aria-current")).toBeNull();
   });
 
+  it("shows the catalogue section only to users with catalogue or price rights", () => {
+    render(<AppMenu user={user({ permissions: ["catalogue.view"] })} pathname="/" />);
+    expect(screen.getByText("Catalogue")).toBeTruthy();
+    for (const label of ["Items", "Item groups", "Brands", "Units", "Attributes", "HSN codes"]) {
+      expect(screen.getByRole("link", { name: label })).toBeTruthy();
+    }
+    expect(screen.queryByRole("link", { name: "Price lists" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Prices" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Catalogue settings" })).toBeNull();
+    cleanup();
+
+    render(<AppMenu user={user({ permissions: ["prices.view"] })} pathname="/" />);
+    expect(screen.getByRole("link", { name: "Price lists" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Prices" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Items" })).toBeNull();
+    cleanup();
+
+    render(<AppMenu user={user({})} pathname="/" />);
+    expect(screen.queryByText("Catalogue")).toBeNull();
+  });
+
+  it("shows catalogue settings only to an Owner/Admin", () => {
+    render(<AppMenu user={user({ isOwnerAdmin: true })} pathname="/catalogue/settings" />);
+    expect(screen.getByRole("link", { name: "Catalogue settings" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Items" })).toBeTruthy();
+  });
+
   it("renders nothing when nobody is logged in", () => {
     render(<AppMenu user={null} pathname="/" />);
     expect(screen.queryAllByRole("link")).toHaveLength(0);

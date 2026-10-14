@@ -14,6 +14,13 @@ export const PERMISSIONS = {
   'roles.manage': 'Create and change roles and their permissions',
   'audit.view': 'See the change history and login history',
   'sessions.manage_others': 'End other users’ sessions',
+  // Module 2
+  'catalogue.view': 'See items, groups, brands, units and barcodes',
+  'catalogue.manage': 'Create and change items, groups, brands, units, barcodes and attributes',
+  'prices.view': 'See selling prices',
+  'prices.manage': 'Create and change price lists and prices',
+  'buying_prices.view': 'See buying price lists and prices',
+  'cost_price.view': 'See last purchase price, cost and margin',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -39,11 +46,30 @@ export type SystemRoleCode = (typeof SYSTEM_ROLES)[keyof typeof SYSTEM_ROLES];
 /** Rights of each system role within this module. Owner/Admin bypasses checks. */
 export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = {
   owner_admin: PERMISSION_KEYS,
-  accountant: ['company.view', 'stores.view', 'financial_years.manage', 'audit.view'],
-  store_manager: ['company.view', 'stores.view', 'users.view'],
-  cashier: [],
-  stock_receiving: ['stores.view'],
-  viewer_auditor: ['company.view', 'stores.view', 'users.view', 'audit.view'],
+  accountant: [
+    'company.view',
+    'stores.view',
+    'financial_years.manage',
+    'audit.view',
+    'catalogue.view',
+    'prices.view',
+    'buying_prices.view',
+    'cost_price.view',
+  ],
+  store_manager: ['company.view', 'stores.view', 'users.view', 'catalogue.view', 'prices.view'],
+  // Decision 70: cashiers never see cost, margin or buying prices.
+  cashier: ['catalogue.view', 'prices.view'],
+  stock_receiving: ['stores.view', 'catalogue.view'],
+  viewer_auditor: [
+    'company.view',
+    'stores.view',
+    'users.view',
+    'audit.view',
+    'catalogue.view',
+    'prices.view',
+    'buying_prices.view',
+    'cost_price.view',
+  ],
 };
 
 export const SYSTEM_ROLE_NAMES: Record<SystemRoleCode, string> = {

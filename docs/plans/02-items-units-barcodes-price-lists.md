@@ -149,6 +149,13 @@ Acceptance scenarios: `docs/acceptance-tests.md`, section "Module 2".
 | Merging two items | Rare; needs stock recalculation; later. |
 | Multi-currency price lists | INR only (module 1 decision). |
 
+## 7b. Decisions made while building (for the project owner to confirm)
+
+1. **Price precedence.** Blueprint 04 lists the preference as "latest start date, then batch price, then unit price, then their own price", but its edge case says "a customer contract price wins over the general price". Taken literally, a newer general price would override an older contract price. Built as: **the party's own price first, then a batch price, then a pack-size price, then the latest start date, then the line's unit**. Tested in `packages/shared/src/pricing.spec.ts`.
+2. **No price lookup on the parent style.** The blueprint both forbids prices on a parent style and says the lookup "repeats the search for the parent style". Since parents can never hold a price, that step can never find one; it is not built. Variants carry their own prices.
+3. **HSN code on an item is validated by format only** (4, 6 or 8 digits); it does not have to exist in the HSN list, which is a helper for lookup. The GST module will require a rate per HSN later.
+4. **Switched-off attribute values** are kept rather than deleted when in use by variants; the value list of an attribute can only be replaced if every value already used by a variant is still present.
+
 ## 8. Questions for the project owner
 
 1. **Kits and substitutes** (a gift hamper sold as one line; "offer item B when A is out"). Build now, or wait until a customer asks? Recommendation: wait.
