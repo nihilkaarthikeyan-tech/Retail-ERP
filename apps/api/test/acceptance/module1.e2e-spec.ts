@@ -233,6 +233,32 @@ describe('1.4b The last Owner/Admin cannot be removed', () => {
   });
 });
 
+describe('1.4c Every endpoint checks permissions: a cashier is refused', () => {
+  it('cannot list financial years, roles or permissions', async () => {
+    owner = await setUpCompany(app, prisma);
+    await createUser(owner, {
+      firstName: 'Priya',
+      email: 'priya@rademics.test',
+      password: 'Temp-pass-1234',
+      roles: [SYSTEM_ROLES.CASHIER],
+      stores: ['MAIN'],
+    });
+    const priya = await loginAndChange('priya@rademics.test', 'Temp-pass-1234', 'Priya-own-pass-9');
+    await priya.get('/financial-years').expect(403);
+    await priya.get('/roles').expect(403);
+    await priya.get('/permissions').expect(403);
+    await priya.get('/company').expect(403);
+    await priya.get('/stores').expect(403);
+    await priya.get('/number-series').expect(403);
+    await priya.get('/audit').expect(403);
+    await priya.get('/auth/me').expect(200); // own details are always allowed
+
+    await owner.get('/financial-years').expect(200);
+    await owner.get('/roles').expect(200);
+    await owner.get('/permissions').expect(200);
+  });
+});
+
 describe('1.5 Store manager cannot change access rights', () => {
   it('refuses user creation and role changes, and nothing changes', async () => {
     owner = await setUpCompany(app, prisma);
@@ -348,12 +374,51 @@ describe('1.7 Document numbering never repeats', () => {
     expect(await allocate(mainId)).toBe('INV-MAIN-2026-27-00003');
   });
 
+  it('a sale at 00:05 Indian time on 1 April is numbered in the new financial year (CLAUDE.md rule 15)', async () => {
+    const years = app.get(FinancialYearsService);
+    await years.createNextYearsIfDue('2027-03-28'); // 2027-28 now exists
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // 31 March 2027 18:35 UTC = 1 April 2027 00:05 IST: no date passed, so "today" is used.
+      vi.setSystemTime(new Date('2027-03-31T18:35:00Z'));
+      const afterMidnight = await prisma.$transaction((tx) =>
+        numbering.allocate(tx, { companyId, documentKind: 'sales_invoice', storeId: annaId }),
+      );
+      expect(afterMidnight).toBe('INV-ANNA-2027-28-00001');
+
+      // Twenty minutes earlier (23:45 IST on 31 March) still belongs to 2026-27.
+      vi.setSystemTime(new Date('2027-03-31T18:15:00Z'));
+      const beforeMidnight = await prisma.$transaction((tx) =>
+        numbering.allocate(tx, { companyId, documentKind: 'sales_invoice', storeId: annaId }),
+      );
+      expect(beforeMidnight).toMatch(/^INV-ANNA-2026-27-/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refuses a date outside any financial year', async () => {
     await expect(
       prisma.$transaction((tx) =>
         numbering.allocate(tx, { companyId, documentKind: 'sales_invoice', storeId: mainId, date: '2030-01-01' }),
       ),
     ).rejects.toThrow(/No financial year/);
+  });
+
+  it('the nightly job uses the Indian date (runs last: it resets the company)', async () => {
+    // Fresh company so no 2027-28 exists yet.
+    owner = await setUpCompany(app, prisma);
+    const years = app.get(FinancialYearsService);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // 27 March 2027 20:30 UTC is already 28 March in India: three days before year end.
+      vi.setSystemTime(new Date('2027-03-27T20:30:00Z'));
+      await years.nightly();
+      const names = (await prisma.financialYear.findMany()).map((y) => y.name).sort();
+      expect(names).toEqual(['2026-27', '2027-28']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

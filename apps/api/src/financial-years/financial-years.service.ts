@@ -2,8 +2,10 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
+  businessDate,
   type CreateFinancialYearInput,
   daysUntil,
+  INDIA_TIME_ZONE,
   endsAfterStart,
   financialYearName,
   isRegularYear,
@@ -122,10 +124,11 @@ export class FinancialYearsService {
     return db.financialYear.findFirst({ where: { companyId, startDate: { lte: d }, endDate: { gte: d } } });
   }
 
-  @Cron('0 2 * * *')
+  /** Runs at 02:00 Indian time; "today" is the Indian calendar date. */
+  @Cron('0 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
     try {
-      const created = await this.createNextYearsIfDue(toIsoDate(new Date()));
+      const created = await this.createNextYearsIfDue(businessDate());
       if (created.length) this.log.log(`Created financial year(s): ${created.map((y) => y.name).join(', ')}`);
     } catch (err) {
       this.log.error('Nightly financial-year check failed', err instanceof Error ? err.stack : String(err));

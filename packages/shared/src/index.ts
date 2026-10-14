@@ -2,6 +2,7 @@
 // Types, rules and validation shared by the web app and the API.
 
 export * from './auth.js';
+export * from './business-date.js';
 export * from './company.js';
 export * from './financial-year.js';
 export * from './health.js';

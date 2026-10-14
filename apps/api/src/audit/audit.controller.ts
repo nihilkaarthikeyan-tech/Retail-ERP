@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { Controller, Get, Query } from '@nestjs/common';
-import { type AuditQuery, auditQuerySchema } from 'shared';
+import { type AuditQuery, auditQuerySchema, endOfBusinessDay, startOfBusinessDay } from 'shared';
 import { RequirePermission } from '../auth/decorators.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import type { Prisma } from '../generated/prisma/client.js';
@@ -32,11 +32,12 @@ export class AuditController {
       ...(q.userId ? { userId: q.userId } : {}),
       ...(q.entityType ? { entityType: q.entityType } : {}),
       ...(q.entityId ? { entityId: q.entityId } : {}),
+      // Date filters are Indian calendar days.
       ...(q.from || q.to
         ? {
             at: {
-              ...(q.from ? { gte: new Date(`${q.from}T00:00:00Z`) } : {}),
-              ...(q.to ? { lt: new Date(new Date(`${q.to}T00:00:00Z`).getTime() + 86_400_000) } : {}),
+              ...(q.from ? { gte: startOfBusinessDay(q.from) } : {}),
+              ...(q.to ? { lt: endOfBusinessDay(q.to) } : {}),
             },
           }
         : {}),

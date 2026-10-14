@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  businessDate,
   type ChangeCounterInput,
   type CreateNumberSeriesInput,
   type CurrentUser,
@@ -13,7 +14,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import { allowedStoreIds } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
-import { FinancialYearsService, toIsoDate } from '../financial-years/financial-years.service.js';
+import { FinancialYearsService } from '../financial-years/financial-years.service.js';
 import type { NumberSeries } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -22,7 +23,7 @@ export interface AllocateRequest {
   documentKind: string;
   /** Required when the chosen series pattern uses {STORE}. */
   storeId?: string | null;
-  /** ISO date the number is for; defaults to today. */
+  /** ISO date the number is for; defaults to today's Indian business date. */
   date?: string;
 }
 
@@ -45,7 +46,7 @@ export class NumberingService {
    */
   async allocate(tx: Db, req: AllocateRequest): Promise<string> {
     const series = await this.seriesFor(tx, req.companyId, req.documentKind, req.storeId ?? null);
-    const filledPrefix = await this.filledPrefix(tx, series, req.storeId ?? null, req.date ?? toIsoDate(new Date()));
+    const filledPrefix = await this.filledPrefix(tx, series, req.storeId ?? null, req.date ?? businessDate());
 
     await tx.$executeRaw`
       INSERT INTO "NumberSeriesCounter" ("id", "numberSeriesId", "filledPrefix", "nextNumber", "updatedAt")
@@ -141,7 +142,7 @@ export class NumberingService {
   }
 
   /** What the next number would be, per store the user may see, without consuming it. */
-  async preview(id: string, user: CurrentUser, date = toIsoDate(new Date())) {
+  async preview(id: string, user: CurrentUser, date = businessDate()) {
     const series = await this.prisma.numberSeries.findUnique({ where: { id } });
     if (!series) throw new NotFoundException('Number series not found');
     const usesStore = patternUsesStore(series.pattern);

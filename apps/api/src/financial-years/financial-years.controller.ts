@@ -15,8 +15,9 @@ import { FinancialYearsService } from './financial-years.service.js';
 export class FinancialYearsController {
   constructor(private readonly years: FinancialYearsService) {}
 
-  /** Every logged-in user may see the years (document dates depend on them). */
+  /** Financial years are company settings; cashiers have no reason to list them. */
   @Get()
+  @RequirePermission('company.view')
   list() {
     return this.years.list();
   }

@@ -97,6 +97,9 @@ All business rules (prices, tax, stock, accounting) live in the backend. The fro
 13. **Every calculation involving money, tax or stock has automated tests**, including returns, cancellations and rounding.
 14. A feature is not done until its tests pass.
 
+### Dates and time
+15. **All business dates use Indian time (Asia/Kolkata), never the server's UTC date.** This covers bill dates, shift dates, financial years, document numbers, report periods, history filters and scheduled jobs. A sale at 00:05 Indian time on 1 April belongs to 1 April (and to the new financial year) even though it is still 31 March in UTC. Use the `businessDate()` helper from `packages/shared`; never `new Date().toISOString().slice(0, 10)` for a business date. Timestamps (when something was saved) are still stored as UTC instants.
+
 ---
 
 ## 5. Setup on Windows (development)

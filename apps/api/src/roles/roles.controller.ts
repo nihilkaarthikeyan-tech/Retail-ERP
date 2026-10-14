@@ -10,13 +10,14 @@ import { RolesService } from './roles.service.js';
 export class RolesController {
   constructor(private readonly roles: RolesService) {}
 
-  /** Any logged-in user may read the permission list (it has no business data). */
+  /** The permission catalogue is only needed when editing roles. */
   @Get('permissions')
+  @RequirePermission('roles.manage')
   permissions() {
     return this.roles.listPermissions();
   }
 
-  /** Users with users.view need the role list to show who has what. */
+  /** Users with users.view need the role list to show who has what; cashiers have neither. */
   @Get('roles')
   @RequirePermission('users.view')
   list() {

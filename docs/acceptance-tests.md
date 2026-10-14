@@ -35,6 +35,11 @@ Stock, accounts and tax are not affected by anything in this module.
 - **When** anyone tries to take the Owner/Admin role from him or switch him off
 - **Then** it is refused until another active user holds Owner/Admin.
 
+### 1.4c Every endpoint checks permissions
+- **Given** Priya is a Cashier
+- **When** she calls the financial years, roles, permissions, company, stores, numbering or history endpoints directly
+- **Then** each is refused; only her own login details are returned.
+
 ### 1.5 Store manager cannot change access rights
 - **Given** user Arun with role Store Manager
 - **When** Arun tries to create a user or change a role
@@ -53,6 +58,13 @@ Stock, accounts and tax are not affected by anything in this module.
 - **Given** a series for sales invoices with pattern `INV-{STORE}-{FY}-` and a 5-digit counter
 - **When** two tills at store `MAIN` ask for a number at the same instant
 - **Then** one gets `INV-MAIN-2026-27-00001` and the other `INV-MAIN-2026-27-00002`; store `ANNA` separately starts at `INV-ANNA-2026-27-00001`.
+
+### 1.7b Business dates are Indian dates
+- **Given** financial years 2026-27 and 2027-28 exist
+- **When** a bill is numbered at 00:05 Indian time on 1 April 2027 (still 31 March in UTC)
+- **Then** its number is in the 2027-28 series; a bill at 23:45 Indian time on 31 March is in 2026-27.
+- **When** the nightly job runs on what is already 28 March in India but still 27 March in UTC
+- **Then** it creates 2027-28 (three days before year end, by the Indian date).
 
 ### 1.8 Counter change is restricted and logged
 - **When** a Store Manager tries to change a counter
