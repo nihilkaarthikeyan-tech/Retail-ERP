@@ -1,0 +1,10 @@
+# Next.js build output and generated files
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+/coverage
+
+# Local overrides of .env.example (secrets never committed)
+.env.local
+.env.*.local

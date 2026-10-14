@@ -1,0 +1,22 @@
+{
+  "name": "retail-erp",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "dev": "pnpm --filter shared run build && pnpm --parallel --filter shared --filter api --filter web run dev",
+    "build": "pnpm --filter shared run build && pnpm --filter api run build && pnpm --filter web run build",
+    "test": "pnpm --filter shared run build && pnpm -r --workspace-concurrency=1 run test",
+    "test:e2e": "pnpm --filter api run test:e2e",
+    "lint": "pnpm -r run lint"
+  },
+  "pnpm": {
+    "overrides": {
+      "sharp": "-"
+    }
+  }
+}

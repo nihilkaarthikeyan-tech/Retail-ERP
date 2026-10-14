@@ -1,0 +1,13 @@
+// Copyright (c) 2026, Rademics. All rights reserved.
+// Database schema. Change it only through `pnpm --filter api prisma migrate dev`
+// and commit the generated migration in prisma/migrations.
+// No business tables yet: modules are added one at a time per docs/plans/.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

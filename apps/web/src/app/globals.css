@@ -1,0 +1,31 @@
+/* Copyright (c) 2026, Rademics. All rights reserved. */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --muted: #666666;
+  --ok: #1a7f37;
+  --error: #c62828;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --muted: #a0a0a0;
+    --ok: #4ac26b;
+    --error: #ff6b6b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  line-height: 1.5;
+}
