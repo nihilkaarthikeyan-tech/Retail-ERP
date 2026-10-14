@@ -1,7 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Database schema. Change it only through `pnpm --filter api prisma migrate dev`
 // and commit the generated migration in prisma/migrations.
-// No business tables yet: modules are added one at a time per docs/plans/.
+// Module 1: users, roles, permissions, company, stores, financial years,
+// document numbering, sessions and audit history (docs/plans/01-users-company-stores.md).
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +11,290 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Company and stores
+// ---------------------------------------------------------------------------
+
+model Company {
+  id                     String   @id @default(uuid()) @db.Uuid
+  code                   String   @unique
+  legalName              String
+  tradeName              String?
+  pan                    String?
+  stateCode              String
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  pincode                String?
+  phone                  String?
+  email                  String?
+  logo                   Bytes?
+  logoMimeType           String?
+  homeCurrency           String   @default("INR")
+  fiscalYearStartMonth   Int      @default(4)
+  /// Set by the accounting module; nothing is dated on or before it.
+  lockDate               DateTime? @db.Date
+  active                 Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  gstRegistrations GstRegistration[]
+  stores           Store[]
+  financialYears   FinancialYear[]
+  numberSeries     NumberSeries[]
+}
+
+model GstRegistration {
+  id                     String  @id @default(uuid()) @db.Uuid
+  companyId              String  @db.Uuid
+  gstin                  String  @unique
+  stateCode              String
+  legalNameOnCertificate String?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  pincode                String?
+  isDefault              Boolean @default(false)
+  active                 Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id])
+  stores  Store[]
+
+  @@index([companyId])
+}
+
+model Store {
+  id                String  @id @default(uuid()) @db.Uuid
+  companyId         String  @db.Uuid
+  code              String
+  name              String
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  pincode           String?
+  stateCode         String?
+  phone             String?
+  email             String?
+  gstRegistrationId String? @db.Uuid
+  active            Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company         Company          @relation(fields: [companyId], references: [id])
+  gstRegistration GstRegistration? @relation(fields: [gstRegistrationId], references: [id])
+  userStores      UserStore[]
+  numberSeries    NumberSeries[]
+
+  @@unique([companyId, code])
+}
+
+enum FinancialYearStatus {
+  open
+  locked
+}
+
+model FinancialYear {
+  id                   String              @id @default(uuid()) @db.Uuid
+  companyId            String              @db.Uuid
+  name                 String
+  startDate            DateTime            @db.Date
+  endDate              DateTime            @db.Date
+  /// A short or long first/bridging year that is not exactly twelve months.
+  isIrregular          Boolean             @default(false)
+  status               FinancialYearStatus @default(open)
+  createdAutomatically Boolean             @default(false)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, name])
+  @@index([companyId, startDate])
+}
+
+// ---------------------------------------------------------------------------
+// Document numbering
+// ---------------------------------------------------------------------------
+
+model NumberSeries {
+  id            String  @id @default(uuid()) @db.Uuid
+  companyId     String  @db.Uuid
+  documentKind  String
+  /// Prefix pattern with tokens, e.g. "INV-{STORE}-{FY}-".
+  pattern       String
+  counterLength Int     @default(5)
+  /// Null = applies to every store without its own series.
+  storeId       String? @db.Uuid
+  active        Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company  Company               @relation(fields: [companyId], references: [id])
+  store    Store?                @relation(fields: [storeId], references: [id])
+  counters NumberSeriesCounter[]
+
+  @@unique([companyId, documentKind, storeId])
+}
+
+/// One running number per filled-in prefix; locked row-by-row when allocating.
+model NumberSeriesCounter {
+  id             String @id @default(uuid()) @db.Uuid
+  numberSeriesId String @db.Uuid
+  filledPrefix   String
+  nextNumber     Int    @default(1)
+
+  updatedAt DateTime @updatedAt
+
+  numberSeries NumberSeries @relation(fields: [numberSeriesId], references: [id])
+
+  @@unique([numberSeriesId, filledPrefix])
+}
+
+// ---------------------------------------------------------------------------
+// Users, roles, sessions
+// ---------------------------------------------------------------------------
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  email              String    @unique
+  firstName          String
+  lastName           String?
+  mobile             String?
+  passwordHash       String
+  mustChangePassword Boolean   @default(true)
+  passwordChangedAt  DateTime  @default(now())
+  active             Boolean   @default(true)
+  /// True = may work in every store; otherwise limited to UserStore rows.
+  allStores          Boolean   @default(false)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  roles    UserRole[]
+  stores   UserStore[]
+  sessions Session[]
+}
+
+model Role {
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique
+  name        String
+  description String?
+  /// Seeded roles cannot be deleted or renamed in code; their permissions can be edited.
+  isSystem    Boolean @default(false)
+  active      Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model RolePermission {
+  roleId        String @db.Uuid
+  permissionKey String
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model UserStore {
+  userId    String  @db.Uuid
+  storeId   String  @db.Uuid
+  isDefault Boolean @default(false)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@id([userId, storeId])
+}
+
+model Session {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  tokenHash    String    @unique
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Single-row table of security settings.
+model SecuritySettings {
+  id                   Int     @id @default(1)
+  minPasswordLength    Int     @default(10)
+  lockoutAttempts      Int     @default(5)
+  lockoutSeconds       Int     @default(900)
+  sessionIdleMinutes   Int     @default(30)
+  sessionMaxHours      Int     @default(12)
+  singleSessionPerUser Boolean @default(false)
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+// ---------------------------------------------------------------------------
+// History (append-only; UPDATE and DELETE are refused by a database trigger
+// created in the migration)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  userId     String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  /// { field: { old, new } } for changes; free-form details for other actions.
+  changes    Json?
+  reason     String?
+  ipAddress  String?
+
+  @@index([entityType, entityId])
+  @@index([userId, at])
+  @@index([at])
 }

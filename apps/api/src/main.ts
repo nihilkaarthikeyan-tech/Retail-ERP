@@ -1,5 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { NestFactory } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { loadRootEnv } from './env.js';
 
 loadRootEnv();
@@ -8,10 +9,10 @@ const { AppModule } = await import('./app.module.js');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.use(cookieParser());
   app.enableCors({
-    origin: (process.env.WEB_ORIGIN ?? 'http://localhost:3000')
-      .split(',')
-      .map((o) => o.trim()),
+    origin: (process.env.WEB_ORIGIN ?? 'http://localhost:3000').split(',').map((o) => o.trim()),
+    credentials: true,
   });
   app.enableShutdownHooks();
   const port = Number(process.env.API_PORT ?? 4000);

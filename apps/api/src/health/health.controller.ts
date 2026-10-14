@@ -2,6 +2,7 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import type { HealthStatus } from 'shared';
+import { Public } from '../auth/decorators.js';
 import { HealthService } from './health.service.js';
 
 /**
@@ -9,6 +10,7 @@ import { HealthService } from './health.service.js';
  * the one endpoint that will not require a logged-in user.
  */
 @Controller('health')
+@Public()
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 

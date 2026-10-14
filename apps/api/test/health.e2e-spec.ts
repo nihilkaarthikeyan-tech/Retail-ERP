@@ -1,30 +1,22 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// End-to-end check against the real local database (docker compose up -d).
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+// End-to-end check against the real test database (docker compose up -d).
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { App } from 'supertest/types.js';
-import { loadRootEnv } from '../src/env.js';
+import type { App } from 'supertest/types.js';
+import { createTestApp } from './helpers.js';
 
 describe('GET /health (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeAll(async () => {
-    loadRootEnv();
-    const { AppModule } = await import('../src/app.module.js');
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    app = await createTestApp();
   });
 
   afterAll(async () => {
     await app.close();
   });
 
-  it('reaches PostgreSQL through Prisma', async () => {
+  it('reaches PostgreSQL through Prisma without logging in', async () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.database.connected).toBe(true);
