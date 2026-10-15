@@ -1,6 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Display helpers. Everything here runs in the browser after data has loaded.
 
+import { businessDate } from "shared";
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -28,16 +30,15 @@ export function fullName(user: { firstName?: string | null; lastName?: string | 
   return [user.firstName, user.lastName].filter((p) => p && p.trim()).join(" ") || "—";
 }
 
-/** Today's date in ISO form (local calendar). */
-export function todayIso(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** Today's business date in ISO form (YYYY-MM-DD), on the Indian calendar whatever the browser's time zone. */
+export function todayIso(now: Date = new Date()): string {
+  return businessDate(now);
 }
 
-/** The Indian financial year (1 April to 31 March) that contains the given date. */
-export function financialYearFor(date: Date): { startDate: string; endDate: string } {
-  const startYear = date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+/** The Indian financial year (1 April to 31 March) containing the Indian business date of the given instant. */
+export function financialYearFor(now: Date = new Date()): { startDate: string; endDate: string } {
+  const [year, month] = businessDate(now).split("-").map(Number);
+  const startYear = month >= 4 ? year : year - 1;
   return { startDate: `${startYear}-04-01`, endDate: `${startYear + 1}-03-31` };
 }
 

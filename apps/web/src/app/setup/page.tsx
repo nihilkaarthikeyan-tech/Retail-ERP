@@ -9,7 +9,7 @@ import { api, errorMessage } from "@/lib/api";
 import { blankToNull, blankToUndefined, financialYearFor } from "@/lib/format";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 
-const defaultYear = financialYearFor(new Date());
+const defaultYear = financialYearFor();
 
 const initial = {
   firstName: "",

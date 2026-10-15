@@ -26,7 +26,7 @@ export default function FinancialYearsPage() {
 
   function suggestNext() {
     const latest = years.data?.[0];
-    const next = latest ? nextFinancialYear(latest) : financialYearFor(new Date());
+    const next = latest ? nextFinancialYear(latest) : financialYearFor();
     setStartDate(next.startDate);
     setEndDate(next.endDate);
   }
