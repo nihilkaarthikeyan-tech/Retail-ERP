@@ -3,7 +3,8 @@
 
 import Link from "next/link";
 import type { CurrentUser } from "shared";
-import { isActive, type MenuEntry, visibleMenu } from "@/lib/menu";
+import { Icon } from "@/components/icons";
+import { areaOf, isActive, type MenuEntry, visibleMenu } from "@/lib/menu";
 
 interface AppMenuProps {
   user: CurrentUser | null;
@@ -21,25 +22,30 @@ function groupBySection(entries: MenuEntry[]): { section: string | undefined; en
   return groups;
 }
 
-/** Left-hand menu: only the pages the user has rights for. */
+/** Left-hand menu: only the pages the user has rights for, coloured by area of the shop. */
 export function AppMenu({ user, pathname }: AppMenuProps) {
   const groups = groupBySection(visibleMenu(user));
   return (
     <nav className="shell-nav" aria-label="Main menu">
-      {groups.map((group, i) => (
-        <div key={group.section ?? `top-${i}`} className="shell-nav-group">
-          {group.section ? <div className="shell-nav-heading">{group.section}</div> : null}
-          <ul>
-            {group.entries.map((entry) => (
-              <li key={entry.href}>
-                <Link href={entry.href} aria-current={isActive(entry, pathname) ? "page" : undefined}>
-                  {entry.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      {groups.map((group, i) => {
+        const area = areaOf(group.section);
+        const classes = ["shell-nav-group", `area-${area}`, area === "admin" ? "shell-nav-group-admin" : ""];
+        return (
+          <div key={group.section ?? `top-${i}`} className={classes.filter(Boolean).join(" ")}>
+            {group.section ? <div className="shell-nav-heading">{group.section}</div> : null}
+            <ul>
+              {group.entries.map((entry) => (
+                <li key={entry.href}>
+                  <Link href={entry.href} aria-current={isActive(entry, pathname) ? "page" : undefined}>
+                    <Icon name={entry.icon} />
+                    {entry.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
     </nav>
   );
 }
