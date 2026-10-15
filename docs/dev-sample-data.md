@@ -32,6 +32,14 @@ Used only on developers' machines. Never use these on the company server.
 - `SUP-000002` Fast Movers Logistics — Transporters, marked as a transporter.
 - Payment terms Cash, Net 15, Net 30; customer groups Retail, Wholesale, Staff; supplier groups Distributors, Local vendors, Services, Transporters.
 
+## Sample stock (module 4, loaded through the API on 15 October 2026)
+
+- Second store `ANNA` (Anna Nagar, Chennai) with its own Shop floor, Back room and Rejected locations; one company-wide Transit location.
+- `CNT-MAIN-2026-27-00001` opening count at MAIN shop floor: 120 × Basmati Rice 1 kg at ₹90, 250 kg loose Sona Masoori at ₹52, 5 each of five Oxford Shirt variants at ₹650 — ₹40,050.00.
+- `TRS-MAIN-2026-27-00001` / `TRR-ANNA-2026-27-00001`: 2 boxes (24 pieces) of Basmati Rice sent to ANNA and received.
+- `SOT-MAIN-2026-27-00001`: 2 bags of Basmati Rice written off (damage), ₹180.00.
+- Result: MAIN 94 and ANNA 24 Basmati Rice; total stock value ₹39,870.00.
+
 To start again from an empty database:
 
 ```bash

@@ -522,3 +522,171 @@ export interface PartySettingsDto {
   gstTreatmentFrom: "billing" | "delivery";
   updatedAt: string;
 }
+
+// ---- Module 4: inventory ----
+
+export type LocationKindDto = "folder" | "shelf" | "transit" | "rejected";
+export type StockDocKindDto = "stock_in" | "stock_out" | "move" | "transfer_send" | "transfer_receive" | "count";
+export type StockDocStatus = "draft" | "finalised" | "cancelled";
+
+/** A store as carried on a stock location. */
+export interface StoreRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+/** GET /stock/locations. The transit location has no store. */
+export interface StockLocationDto {
+  id: string;
+  code: string;
+  name: string;
+  kind: LocationKindDto;
+  parentId: string | null;
+  store: StoreRef | null;
+  active: boolean;
+}
+
+/** List row of GET /stock/documents (values only with stock.cost.view). */
+export interface StockDocHeaderDto {
+  id: string;
+  number: string;
+  kind: StockDocKindDto;
+  reason: string | null;
+  countType: "opening" | "normal" | null;
+  status: StockDocStatus;
+  postingDate: string;
+  postingAt: string;
+  storeId: string;
+  toStoreId: string | null;
+  fromLocationId: string | null;
+  toLocationId: string | null;
+  sendDocumentId: string | null;
+  remarks: string | null;
+  isBackDated: boolean;
+  totalValueIn?: string;
+  totalValueOut?: string;
+  cancelReason: string | null;
+  createdAt: string;
+  finalisedAt: string | null;
+}
+
+export interface StockDocLineDto {
+  id: string;
+  lineNo: number;
+  item: { id: string; code: string; name: string; trackBatches: boolean; trackSerials: boolean };
+  unitId: string;
+  /** In the line's unit. */
+  quantity: string;
+  factor: string;
+  basicQuantity: string;
+  batch: { id: string; batchNumber: string; expiryDate: string | null } | null;
+  newBatchNumber: string | null;
+  newExpiryOn: string | null;
+  serialNumbers: string[];
+  /** Cost per basic unit; only with stock.cost.view. */
+  unitCost?: string | null;
+  valueChange?: string;
+  /** Null on a blind draft count for users without stock.adjust_finalise. */
+  expectedQuantity: string | null;
+  countedQuantity: string | null;
+  /** Transfer sends: basic units received so far. */
+  receivedQuantity: string;
+  sendLineId: string | null;
+}
+
+/** GET /stock/documents/:id and every write answer. */
+export interface StockDocumentDto extends StockDocHeaderDto {
+  blind: boolean;
+  lines: StockDocLineDto[];
+}
+
+export interface StockDocPage {
+  rows: StockDocHeaderDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface StockBalanceRow {
+  item: { id: string; code: string; name: string; unit: string };
+  location: { id: string; code: string; name: string; kind: LocationKindDto; store: StoreRef | null };
+  quantity: string;
+  unitCost?: string;
+  value?: string;
+}
+
+export interface StockBalanceResult {
+  rows: StockBalanceRow[];
+  totals: { value?: string };
+}
+
+/** A location as named in reports: store is the store code (null for transit). */
+export interface ReportLocationRef {
+  id: string;
+  name?: string;
+  store: string | null;
+}
+
+export interface StockLedgerRow {
+  id: string;
+  postingDate: string;
+  postingAt: string;
+  document: { id: string; number: string; kind: StockDocKindDto; reason: string | null } | null;
+  item: { id: string; code: string; name: string } | null;
+  location: ReportLocationRef;
+  batchId: string | null;
+  quantityChange: string;
+  quantityAfter: string;
+  isCancellation: boolean;
+  wentNegative: boolean;
+  unitCost?: string;
+  valueChange?: string;
+  unitCostAfter?: string;
+  valueAfter?: string;
+  accountRole?: string;
+}
+
+export interface StockLookupResult {
+  item: { id: string; code: string; name: string; unit: string };
+  usable: boolean;
+  reason: string | null;
+  locations: { location: ReportLocationRef; quantity: string; value?: string }[];
+}
+
+export interface BatchStockRow {
+  batch: { id: string; batchNumber: string; expiryDate: string | null; manufactureDate: string | null };
+  item: { id: string; code: string; name: string };
+  location: ReportLocationRef;
+  quantity: string;
+  daysLeft: number | null;
+  expired: boolean;
+}
+
+export interface NegativeStockRow {
+  item: { id: string; code: string; name: string } | undefined;
+  location: ReportLocationRef;
+  quantity: string;
+  since: string;
+}
+
+export interface ReorderLevelDto {
+  id: string;
+  itemId: string;
+  storeId: string;
+  level: string;
+  quantity: string;
+  requestType: "buy" | "move";
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InventorySettingsDto {
+  companyId: string;
+  stockLockDate: string | null;
+  allowNegativeAtTill: boolean;
+  batchPickOrder: "earliest_expiry" | "oldest_first";
+  transitLocationId?: string | null;
+  updatedAt: string;
+}

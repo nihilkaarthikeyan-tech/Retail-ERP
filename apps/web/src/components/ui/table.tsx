@@ -16,10 +16,12 @@ interface DataTableProps<T> {
   loading?: boolean;
   empty?: ReactNode;
   caption?: ReactNode;
+  /** Extra class for a row (e.g. to highlight expired or negative rows). */
+  rowClassName?: (row: T) => string | undefined;
 }
 
 /** A plain data table that scrolls sideways on narrow screens instead of the page. */
-export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing to show.", caption }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing to show.", caption, rowClassName }: DataTableProps<T>) {
   return (
     <div className="table-wrap">
       <table className="table">
@@ -48,7 +50,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing 
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={rowKey(row)}>
+              <tr key={rowKey(row)} className={rowClassName?.(row)}>
                 {columns.map((c) => (
                   <td key={c.key} className={c.align === "right" ? "num" : undefined}>
                     {c.render(row)}

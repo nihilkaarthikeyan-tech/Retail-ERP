@@ -30,6 +30,15 @@ export const PERMISSIONS = {
   'suppliers.manage': 'Create and change suppliers, groups, addresses and contacts',
   'suppliers.hold': 'Hold, block or switch off suppliers',
   'payment_terms.manage': 'Create and change payment terms',
+  // Module 4
+  'stock.view': 'See stock quantities and stock documents',
+  'stock.move': 'Draft and finalise moves and transfers between locations and stores',
+  'stock.count': 'Draft stock-ins, write-offs and stock counts',
+  'stock.adjust_finalise': 'Finalise stock-ins, write-offs and stock counts',
+  'stock.backdate': 'Post stock movements dated before later ones (current month only)',
+  'stock.lock': 'Set the month-end stock lock date and inventory settings',
+  'stock.cost.view': 'See stock values and costs per unit',
+  'stock.locations.manage': 'Create and change stock locations and reorder levels',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -69,6 +78,11 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'suppliers.view',
     'suppliers.hold',
     'payment_terms.manage',
+    'stock.view',
+    'stock.adjust_finalise',
+    'stock.backdate',
+    'stock.lock',
+    'stock.cost.view',
   ],
   store_manager: [
     'company.view',
@@ -80,10 +94,16 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'customers.quick_add',
     'customers.manage',
     'suppliers.view',
+    'stock.view',
+    'stock.move',
+    'stock.count',
+    'stock.adjust_finalise',
+    'stock.cost.view',
+    'stock.locations.manage',
   ],
-  // Decision 70: cashiers never see cost, margin or buying prices.
-  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add'],
-  stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view'],
+  // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
+  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view'],
+  stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count'],
   viewer_auditor: [
     'company.view',
     'stores.view',
@@ -95,6 +115,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'cost_price.view',
     'customers.view',
     'suppliers.view',
+    'stock.view',
+    'stock.cost.view',
   ],
 };
 

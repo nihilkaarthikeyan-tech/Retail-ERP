@@ -111,6 +111,26 @@ describe("AppMenu", () => {
     expect(screen.queryByText("Parties")).toBeNull();
   });
 
+  it("shows the Inventory entries only with stock.view, and settings only with stock.lock", () => {
+    const inventory = ["Stock on hand", "Stock documents", "In transit", "Stock history", "Batches", "Negative stock", "Locations", "Reorder levels"];
+    render(<AppMenu user={user({ permissions: ["stock.view"] })} pathname="/stock/documents/abc" />);
+    expect(screen.getByText("Inventory")).toBeTruthy();
+    for (const label of inventory) expect(screen.getByRole("link", { name: label })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Inventory settings" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Stock documents" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Stock on hand" }).getAttribute("aria-current")).toBeNull();
+    cleanup();
+
+    render(<AppMenu user={user({ permissions: ["catalogue.view", "customers.view"] })} pathname="/" />);
+    expect(screen.queryByText("Inventory")).toBeNull();
+    for (const label of [...inventory, "Inventory settings"]) expect(screen.queryByRole("link", { name: label })).toBeNull();
+    cleanup();
+
+    render(<AppMenu user={user({ permissions: ["stock.view", "stock.lock"] })} pathname="/stock" />);
+    expect(screen.getByRole("link", { name: "Inventory settings" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Stock on hand" }).getAttribute("aria-current")).toBe("page");
+  });
+
   it("renders nothing when nobody is logged in", () => {
     render(<AppMenu user={null} pathname="/" />);
     expect(screen.queryAllByRole("link")).toHaveLength(0);

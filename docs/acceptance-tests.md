@@ -170,3 +170,69 @@ Stock, accounts and tax are not affected by anything in this module.
 - **When** a customer is created in that group without terms
 - **Then** the customer shows Wholesale prices and Net 30; changing the group's defaults later does not change existing customers.
 
+
+---
+
+## Module 4 — Inventory
+
+Sample data: item Basmati Rice 1 kg (PCS), stores MAIN and ANNA. Values in rupees. Accounts are not posted until module 7; each scenario names the **account roles** stored on the stock lines, which module 7 will post (stock account against the role shown).
+
+### 4.1 Opening stock
+- **When** an opening-stock count of 100 at ₹90 is finalised at MAIN shop floor
+- **Then** MAIN shop floor has 100 at ₹90.0000, value ₹9,000.00; roles: stock +9,000.00 / temporary opening −9,000.00.
+
+### 4.2 Moving average cost
+- **When** a stock-in of 50 at ₹96 is finalised
+- **Then** MAIN has 150 at ₹92.0000, value ₹13,800.00.
+
+### 4.3 Write-off
+- **When** a stock-out (damage) of 3 is finalised
+- **Then** MAIN has 147, value ₹13,524.00; roles: write-off +276.00 / stock −276.00.
+
+### 4.4 Transfer between shops (two steps through transit)
+- **When** 20 are sent from MAIN to ANNA
+- **Then** MAIN has 127 (₹11,684.00) and transit 20 (₹1,840.00).
+- **When** ANNA receives 15
+- **Then** transit has 5 (₹460.00) and ANNA shop floor 15 at ₹92.0000 (₹1,380.00); the send shows 15 of 20 received.
+- **When** ANNA receives the last 5
+- **Then** transit is empty and the send is complete. The company's total stock value is ₹13,524.00 at every step.
+
+### 4.5 Negative stock blocked in the back office (decision 32)
+- **When** a write-off of 200 from MAIN is attempted
+- **Then** it is refused naming 127 available and 73 more needed; nothing changes.
+
+### 4.6 Two people take the last units at once (rule 7)
+- **Given** 5 left of an item
+- **When** 20 write-offs of 1 are finalised at the same instant
+- **Then** exactly 5 succeed, 15 are refused, and the quantity is 0, never negative.
+
+### 4.7 Stock count
+- **When** a count at MAIN finds 125 where 127 are expected
+- **Then** the difference −2 is posted at ₹92.0000 (−₹184.00); roles: stock adjustment +184.00 / stock −184.00. A blind count does not show the expected figure to the counter.
+
+### 4.8 Expired batches (decision 13)
+- **Given** a batch-tracked item with a batch that expired yesterday
+- **Then** it cannot be received, moved or transferred; it can only be written off with reason "expiry".
+
+### 4.9 Back-dating (decision 35)
+- **Given** a stock-in on the 10th and a write-off on the 12th of the current month
+- **When** a Store Manager posts a stock-in dated the 11th
+- **Then** it is refused.
+- **When** the Accountant posts it
+- **Then** it is accepted and the write-off of the 12th is re-costed at the new average; a date in the previous month is refused even for the Accountant.
+
+### 4.10 Month-end stock lock (decision 36)
+- **When** stock is locked up to the end of last month
+- **Then** any movement dated on or before that date is refused, for everyone.
+
+### 4.11 Cancelling
+- **Given** 100 at ₹90 and then a stock-in of 50 at ₹96
+- **When** the stock-in is cancelled
+- **Then** the item is back to 100 at ₹90.0000, value ₹9,000.00; the stock-in stays visible as cancelled with its reversing lines.
+
+### 4.12 The ledger explains the stock (rule 6)
+- After every scenario above, each stock position equals the sum of its ledger lines, and each batch position equals the sum of its batch's ledger lines.
+
+### 4.13 Serial numbers
+- **When** a phone is received with serials S1, S2, S3 and S2 is transferred to ANNA
+- **Then** S1 and S3 are in stock at MAIN, S2 is in transit and, after receipt, in stock at ANNA; receiving a serial already in stock is refused.

@@ -18,25 +18,25 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Company {
-  id                     String   @id @default(uuid()) @db.Uuid
-  code                   String   @unique
-  legalName              String
-  tradeName              String?
-  pan                    String?
-  stateCode              String
-  addressLine1           String?
-  addressLine2           String?
-  city                   String?
-  pincode                String?
-  phone                  String?
-  email                  String?
-  logo                   Bytes?
-  logoMimeType           String?
-  homeCurrency           String   @default("INR")
-  fiscalYearStartMonth   Int      @default(4)
+  id                   String    @id @default(uuid()) @db.Uuid
+  code                 String    @unique
+  legalName            String
+  tradeName            String?
+  pan                  String?
+  stateCode            String
+  addressLine1         String?
+  addressLine2         String?
+  city                 String?
+  pincode              String?
+  phone                String?
+  email                String?
+  logo                 Bytes?
+  logoMimeType         String?
+  homeCurrency         String    @default("INR")
+  fiscalYearStartMonth Int       @default(4)
   /// Set by the accounting module; nothing is dated on or before it.
-  lockDate               DateTime? @db.Date
-  active                 Boolean  @default(true)
+  lockDate             DateTime? @db.Date
+  active               Boolean   @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -52,6 +52,7 @@ model Company {
   customers         Customer[]
   suppliers         Supplier[]
   partySettings     PartySettings?
+  stockLocations    StockLocation[]
 }
 
 model GstRegistration {
@@ -102,6 +103,7 @@ model Store {
   gstRegistration GstRegistration? @relation(fields: [gstRegistrationId], references: [id])
   userStores      UserStore[]
   numberSeries    NumberSeries[]
+  stockLocations  StockLocation[]
 
   @@unique([companyId, code])
 }
@@ -507,6 +509,8 @@ model Item {
   variantValues     ItemVariantValue[]
   prices            Price[]
   preferredSupplier Supplier?              @relation(fields: [preferredSupplierId], references: [id])
+  stockLines        StockDocumentLine[]
+  batches           Batch[]
 
   @@unique([parentItemId, variantKey])
   @@index([name])
@@ -808,11 +812,11 @@ model Customer {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  company        Company        @relation(fields: [companyId], references: [id])
-  customerGroup  CustomerGroup  @relation(fields: [customerGroupId], references: [id])
-  priceList      PriceList?     @relation(fields: [priceListId], references: [id])
-  paymentTerms   PaymentTerms?  @relation(fields: [paymentTermsId], references: [id])
-  linkedSupplier Supplier?      @relation("customerSupplierLink", fields: [linkedSupplierId], references: [id])
+  company        Company       @relation(fields: [companyId], references: [id])
+  customerGroup  CustomerGroup @relation(fields: [customerGroupId], references: [id])
+  priceList      PriceList?    @relation(fields: [priceListId], references: [id])
+  paymentTerms   PaymentTerms? @relation(fields: [paymentTermsId], references: [id])
+  linkedSupplier Supplier?     @relation("customerSupplierLink", fields: [linkedSupplierId], references: [id])
   prices         Price[]
 
   @@index([mobile])
@@ -871,12 +875,12 @@ model Supplier {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  company         Company       @relation(fields: [companyId], references: [id])
-  supplierGroup   SupplierGroup @relation(fields: [supplierGroupId], references: [id])
-  priceList       PriceList?    @relation(fields: [priceListId], references: [id])
-  paymentTerms    PaymentTerms? @relation(fields: [paymentTermsId], references: [id])
-  linkedCustomers Customer[]    @relation("customerSupplierLink")
-  prices          Price[]
+  company           Company       @relation(fields: [companyId], references: [id])
+  supplierGroup     SupplierGroup @relation(fields: [supplierGroupId], references: [id])
+  priceList         PriceList?    @relation(fields: [priceListId], references: [id])
+  paymentTerms      PaymentTerms? @relation(fields: [paymentTermsId], references: [id])
+  linkedCustomers   Customer[]    @relation("customerSupplierLink")
+  prices            Price[]
   preferredForItems Item[]
 
   @@index([name])
@@ -896,4 +900,287 @@ model PartySettings {
   updatedById String?  @db.Uuid
 
   company Company @relation(fields: [companyId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Module 4: inventory (docs/plans/04-inventory.md)
+// ---------------------------------------------------------------------------
+
+enum LocationKind {
+  folder
+  shelf
+  transit
+  rejected
+}
+
+enum StockDocKind {
+  stock_in
+  stock_out
+  move
+  transfer_send
+  transfer_receive
+  count
+}
+
+enum StockDocStatus {
+  draft
+  finalised
+  cancelled
+}
+
+enum StockEntryKind {
+  in
+  out
+  set
+  reverse
+}
+
+enum SerialStatus {
+  in_stock
+  in_transit
+  out
+}
+
+/// A place stock is counted. Only `shelf`, `transit` and `rejected` locations hold stock.
+model StockLocation {
+  id        String       @id @default(uuid()) @db.Uuid
+  companyId String       @db.Uuid
+  /// Null only for the company's transit location.
+  storeId   String?      @db.Uuid
+  parentId  String?      @db.Uuid
+  code      String
+  name      String
+  kind      LocationKind
+  active    Boolean      @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  store    Store?          @relation(fields: [storeId], references: [id])
+  parent   StockLocation?  @relation("locationTree", fields: [parentId], references: [id])
+  children StockLocation[] @relation("locationTree")
+
+  @@unique([companyId, code])
+  @@index([storeId])
+}
+
+model StockDocument {
+  id             String         @id @default(uuid()) @db.Uuid
+  companyId      String         @db.Uuid
+  number         String         @unique
+  kind           StockDocKind
+  reason         String?
+  /// Counts: opening or normal.
+  countType      String?
+  blind          Boolean        @default(false)
+  status         StockDocStatus @default(draft)
+  /// Indian business date (rule 15) and the instant used to order movements.
+  postingDate    DateTime       @db.Date
+  postingAt      DateTime
+  storeId        String         @db.Uuid
+  toStoreId      String?        @db.Uuid
+  fromLocationId String?        @db.Uuid
+  toLocationId   String?        @db.Uuid
+  /// A transfer receive points at its send.
+  sendDocumentId String?        @db.Uuid
+  remarks        String?
+  isBackDated    Boolean        @default(false)
+  totalValueIn   Decimal        @default(0) @db.Decimal(16, 2)
+  totalValueOut  Decimal        @default(0) @db.Decimal(16, 2)
+  finalisedAt    DateTime?
+  finalisedById  String?        @db.Uuid
+  cancelledAt    DateTime?
+  cancelledById  String?        @db.Uuid
+  cancelReason   String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  lines        StockDocumentLine[]
+  sendDocument StockDocument?      @relation("transferPair", fields: [sendDocumentId], references: [id])
+  receipts     StockDocument[]     @relation("transferPair")
+
+  @@index([companyId, kind, status])
+  @@index([storeId, postingDate])
+}
+
+model StockDocumentLine {
+  id               String    @id @default(uuid()) @db.Uuid
+  documentId       String    @db.Uuid
+  lineNo           Int
+  itemId           String    @db.Uuid
+  unitId           String    @db.Uuid
+  /// In the line unit; `basicQuantity` = quantity × factor.
+  quantity         Decimal   @db.Decimal(18, 3)
+  factor           Decimal   @db.Decimal(18, 6)
+  basicQuantity    Decimal   @db.Decimal(18, 3)
+  batchId          String?   @db.Uuid
+  /// New batch to create on finalising a stock-in (number, dates).
+  newBatchNumber   String?
+  newManufactureOn DateTime? @db.Date
+  newExpiryOn      DateTime? @db.Date
+  serialNumbers    String[]
+  /// Cost per basic unit given by the user (stock-in, counts).
+  unitCost         Decimal?  @db.Decimal(16, 4)
+  /// Counts: what the system expected at the count's time.
+  expectedQuantity Decimal?  @db.Decimal(18, 3)
+  countedQuantity  Decimal?  @db.Decimal(18, 3)
+  /// Value moved by this line once finalised (sum of its ledger entries).
+  valueChange      Decimal   @default(0) @db.Decimal(16, 2)
+  /// Transfer sends: how much has been received so far.
+  receivedQuantity Decimal   @default(0) @db.Decimal(18, 3)
+  /// Transfer receives: the send line it takes from.
+  sendLineId       String?   @db.Uuid
+
+  document StockDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  item     Item          @relation(fields: [itemId], references: [id])
+  batch    Batch?        @relation(fields: [batchId], references: [id])
+
+  @@index([documentId])
+}
+
+/// Stock history: one line per item, location and movement. Append-only
+/// (trigger); only the re-costing routine may rewrite the derived figures.
+model StockLedgerEntry {
+  id             BigInt         @id @default(autoincrement())
+  companyId      String         @db.Uuid
+  itemId         String         @db.Uuid
+  locationId     String         @db.Uuid
+  batchId        String?        @db.Uuid
+  documentId     String         @db.Uuid
+  documentLineId String         @db.Uuid
+  postingDate    DateTime       @db.Date
+  postingAt      DateTime
+  kind           StockEntryKind
+  /// Intent: quantity in/out (basic units), incoming cost, count target, reversal of.
+  intentQuantity Decimal        @db.Decimal(18, 3)
+  incomingCost   Decimal?       @db.Decimal(16, 4)
+  targetCost     Decimal?       @db.Decimal(16, 4)
+  /// Takes its cost from this entry (transfers and moves).
+  costSourceId   BigInt?
+  reversesId     BigInt?
+  /// Derived (rewritten by re-costing).
+  quantityChange Decimal        @db.Decimal(18, 3)
+  valueChange    Decimal        @db.Decimal(16, 2)
+  unitCost       Decimal        @db.Decimal(16, 4)
+  quantityAfter  Decimal        @db.Decimal(18, 3)
+  unitCostAfter  Decimal        @db.Decimal(16, 4)
+  valueAfter     Decimal        @db.Decimal(16, 2)
+  /// What module 7 posts the value against (stock account on the other side).
+  accountRole    String
+  isCancellation Boolean        @default(false)
+  /// Quantity went below zero (only the till may do this; reported daily).
+  wentNegative   Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  createdById    String?        @db.Uuid
+
+  @@index([itemId, locationId, postingAt, id])
+  @@index([documentId])
+  @@index([costSourceId])
+  @@index([postingDate])
+}
+
+/// Current stock per item × location. Always equals the sum of the ledger.
+model StockPosition {
+  itemId        String    @db.Uuid
+  locationId    String    @db.Uuid
+  companyId     String    @db.Uuid
+  quantity      Decimal   @default(0) @db.Decimal(18, 3)
+  unitCost      Decimal   @default(0) @db.Decimal(16, 4)
+  value         Decimal   @default(0) @db.Decimal(16, 2)
+  lastPostingAt DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@id([itemId, locationId])
+  @@index([locationId])
+}
+
+model Batch {
+  id              String    @id @default(uuid()) @db.Uuid
+  itemId          String    @db.Uuid
+  batchNumber     String
+  manufactureDate DateTime? @db.Date
+  expiryDate      DateTime? @db.Date
+  supplierId      String?   @db.Uuid
+  active          Boolean   @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  item      Item                @relation(fields: [itemId], references: [id])
+  lines     StockDocumentLine[]
+  positions BatchPosition[]
+
+  @@unique([itemId, batchNumber])
+}
+
+/// Quantity of a batch in a location (values are kept per item, decision 34).
+model BatchPosition {
+  batchId    String   @db.Uuid
+  locationId String   @db.Uuid
+  quantity   Decimal  @default(0) @db.Decimal(18, 3)
+  updatedAt  DateTime @updatedAt
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
+  @@id([batchId, locationId])
+}
+
+model SerialNumber {
+  id            String       @id @default(uuid()) @db.Uuid
+  itemId        String       @db.Uuid
+  serial        String
+  status        SerialStatus
+  locationId    String?      @db.Uuid
+  batchId       String?      @db.Uuid
+  inDocumentId  String?      @db.Uuid
+  outDocumentId String?      @db.Uuid
+  warrantyUntil DateTime?    @db.Date
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([itemId, serial])
+  @@index([locationId])
+}
+
+model ReorderLevel {
+  id          String  @id @default(uuid()) @db.Uuid
+  itemId      String  @db.Uuid
+  storeId     String  @db.Uuid
+  level       Decimal @db.Decimal(18, 3)
+  quantity    Decimal @db.Decimal(18, 3)
+  /// buy (purchase request) or move (from another store); used by module 5.
+  requestType String  @default("buy")
+  active      Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([itemId, storeId])
+}
+
+/// One row per company.
+model InventorySettings {
+  companyId           String    @id @db.Uuid
+  /// Month-end lock (decision 36): nothing on or before this date.
+  stockLockDate       DateTime? @db.Date
+  /// Decision 32: the till may sell below zero (flagged); used by module 6.
+  allowNegativeAtTill Boolean   @default(true)
+  batchPickOrder      String    @default("earliest_expiry")
+  transitLocationId   String?   @db.Uuid
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
 }

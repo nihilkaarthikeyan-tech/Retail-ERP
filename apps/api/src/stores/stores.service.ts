@@ -5,6 +5,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
+import { ensureStoreLocations } from '../inventory/location-defaults.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const storeInclude = { gstRegistration: { select: { id: true, gstin: true } } };
@@ -70,6 +71,8 @@ export class StoresService {
       entityId: created.id,
       changes: { code: created.code, name: created.name, gstin: registration?.gstin ?? null },
     });
+    // Every store gets its stock locations at once (module 4, approved plan question 2).
+    await ensureStoreLocations(db, created);
     return created;
   }
 

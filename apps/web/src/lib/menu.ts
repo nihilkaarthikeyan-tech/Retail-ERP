@@ -10,6 +10,8 @@ export interface MenuEntry {
   ownerAdminOnly?: boolean;
   /** Heading the entry sits under; entries without one come first. */
   section?: string;
+  /** Active only on its own path, not on sub-paths (e.g. /stock vs /stock/documents). */
+  exact?: boolean;
 }
 
 export const MENU: MenuEntry[] = [
@@ -40,6 +42,16 @@ export const MENU: MenuEntry[] = [
   { href: "/supplier-groups", label: "Supplier groups", permissions: ["suppliers.view"], section: "Parties" },
   { href: "/payment-terms", label: "Payment terms", permissions: ["customers.view"], section: "Parties" },
   { href: "/party-settings", label: "Party settings", ownerAdminOnly: true, section: "Parties" },
+  // Module 4
+  { href: "/stock", label: "Stock on hand", permissions: ["stock.view"], section: "Inventory", exact: true },
+  { href: "/stock/documents", label: "Stock documents", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/transfers", label: "In transit", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/ledger", label: "Stock history", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/batches", label: "Batches", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/exceptions", label: "Negative stock", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/locations", label: "Locations", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/reorder-levels", label: "Reorder levels", permissions: ["stock.view"], section: "Inventory" },
+  { href: "/stock/settings", label: "Inventory settings", permissions: ["stock.lock"], section: "Inventory" },
 ];
 
 export function visibleMenu(user: CurrentUser | null): MenuEntry[] {
@@ -53,6 +65,6 @@ export function visibleMenu(user: CurrentUser | null): MenuEntry[] {
 /** Entry is active for its own path and for sub-paths (except the dashboard). */
 export function isActive(entry: MenuEntry, pathname: string): boolean {
   if (entry.href === "/") return pathname === "/";
-  if (entry.href === "/history") return pathname === "/history";
+  if (entry.href === "/history" || entry.exact) return pathname === entry.href;
   return pathname === entry.href || pathname.startsWith(`${entry.href}/`);
 }

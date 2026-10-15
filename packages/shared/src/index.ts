@@ -16,5 +16,7 @@ export * from './rounding.js';
 export * from './schemas/index.js';
 export * from './schemas/catalogue.js';
 export * from './schemas/parties.js';
+export * from './schemas/stock.js';
+export * from './stock-costing.js';
 export * from './units.js';
 export * from './variants.js';

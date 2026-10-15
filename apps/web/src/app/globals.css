@@ -767,3 +767,35 @@ legend {
 .table .field label {
   margin: 0;
 }
+
+/* Inventory: highlighted rows (expired batches, negative stock, cancellations). */
+.row-alert td {
+  background: var(--error-bg);
+}
+
+.row-warn td {
+  background: var(--warn-bg);
+}
+
+.row-muted td {
+  color: var(--muted);
+}
+
+.num-negative {
+  color: var(--error);
+  font-weight: 600;
+}
+
+/* Stock document lines: compact inputs inside the grid. */
+.line-grid .input {
+  min-width: 80px;
+}
+
+.line-grid textarea.input {
+  min-width: 160px;
+  min-height: 60px;
+}
+
+.lookup-panel {
+  margin: 8px 0 16px;
+}
