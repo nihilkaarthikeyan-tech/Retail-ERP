@@ -11,6 +11,8 @@ export type EntryKind = 'in' | 'out' | 'set' | 'reverse';
 
 export interface Movement {
   companyId: string;
+  /** stock_document (default), goods_receipt or landed_charge. */
+  documentType?: string;
   documentId: string;
   documentLineId: string;
   itemId: string;
@@ -66,6 +68,7 @@ export class StockEngine {
           itemId: m.itemId,
           locationId: m.locationId,
           batchId: m.batchId ?? null,
+          documentType: m.documentType ?? 'stock_document',
           documentId: m.documentId,
           documentLineId: m.documentLineId,
           postingDate: new Date(`${m.postingDate}T00:00:00Z`),
@@ -99,6 +102,7 @@ export class StockEngine {
     const originals = await tx.stockLedgerEntry.findMany({ where: { documentId, isCancellation: false }, orderBy: ORDER });
     const movements: Movement[] = originals.map((e) => ({
       companyId: e.companyId,
+      documentType: e.documentType,
       documentId,
       documentLineId: cancelDocumentLine(e),
       itemId: e.itemId,
@@ -113,6 +117,26 @@ export class StockEngine {
     }));
     // Undo in reverse order so a later leg (e.g. into transit) is undone before the leg it took its cost from.
     return this.post(tx, movements.reverse(), opts);
+  }
+
+  /**
+   * Changes the incoming cost of finalised "in" entries (extra charges added to
+   * goods already received, blueprint 07 process 7) and re-costs everything
+   * after them, in the caller's transaction. Quantities never change here.
+   */
+  async revalueIncoming(tx: Db, changes: { entryId: bigint; incomingCost: string }[], opts: PostOptions): Promise<void> {
+    if (changes.length === 0) return;
+    const entries = await tx.stockLedgerEntry.findMany({ where: { id: { in: changes.map((c) => c.entryId) } } });
+    if (entries.length !== changes.length) throw new BadRequestException('Stock entry not found');
+    for (const e of entries) {
+      if (e.kind !== 'in' || e.isCancellation) throw new BadRequestException('Only goods that came in can be revalued');
+    }
+    await this.lockPositions(tx, entries.map((e) => ({ itemId: e.itemId, locationId: e.locationId, companyId: e.companyId, batchId: e.batchId }) as Movement));
+    await tx.$executeRaw`SELECT set_config('app.stock_recost', 'on', true)`;
+    for (const c of changes) {
+      const updated = await tx.stockLedgerEntry.update({ where: { id: c.entryId }, data: { incomingCost: c.incomingCost } });
+      await this.recompute(tx, updated, opts, false);
+    }
   }
 
   // ---- internals ----
@@ -182,6 +206,10 @@ export class StockEngine {
     const recomputed = new Map<bigint, { quantityChange: Decimal; valueChange: Decimal; unitCost: Decimal }>();
     let oldMin = startQuantity;
     let newMin = startQuantity;
+    // A cancelled document counts as never having happened for the negative-stock
+    // check: an entry and its reversal are left out of the running minimum.
+    const reversedLater = new Set(entries.filter((e) => e.kind === 'reverse' && e.reversesId !== null).map((e) => e.reversesId!));
+    let pending = new Decimal(0);
 
     for (const e of entries) {
       const intent = await this.intentOf(tx, e, recomputed);
@@ -195,7 +223,11 @@ export class StockEngine {
         throw new BadRequestException(err instanceof Error ? err.message : String(err));
       }
       if (e.id !== start.id || !checkNegative) oldMin = Decimal.min(oldMin, D(e.quantityAfter));
-      newMin = Decimal.min(newMin, applied.after.quantity);
+      if (reversedLater.has(e.id)) pending = pending.add(applied.quantityChange);
+      if (e.kind === 'reverse' && e.reversesId !== null && reversedLater.has(e.reversesId) && recomputed.has(e.reversesId)) {
+        pending = pending.sub(recomputed.get(e.reversesId)!.quantityChange);
+      }
+      newMin = Decimal.min(newMin, applied.after.quantity.sub(pending));
       recomputed.set(e.id, { quantityChange: applied.quantityChange, valueChange: applied.valueChange, unitCost: applied.unitCost });
 
       const changed =

@@ -236,3 +236,55 @@ Sample data: item Basmati Rice 1 kg (PCS), stores MAIN and ANNA. Values in rupee
 ### 4.13 Serial numbers
 - **When** a phone is received with serials S1, S2, S3 and S2 is transferred to ANNA
 - **Then** S1 and S3 are in stock at MAIN, S2 is in transit and, after receipt, in stock at ANNA; receiving a serial already in stock is refused.
+
+## Module 5 — Purchasing
+
+Sample data: supplier Sri Murugan Traders (Net 30), item Basmati Rice 1 kg (PCS, GST 5% as written on the supplier's bill), store MAIN with 100 at ₹90.0000 on the shop floor. Accounts are not posted until module 7; each scenario names the **account roles** stored on the lines. GST is recorded as stated by the supplier (plan 05, answer 2).
+
+### 5.1 Purchase order
+- **When** an order for 200 × ₹95.00 to MAIN is finalised
+- **Then** taxable ₹19,000.00, GST ₹950.00 (CGST ₹475.00 + SGST ₹475.00), total ₹19,950.00; on-order quantity 200; no stock change. Above ₹50,000 the order needs a Store Manager or Owner to finalise.
+
+### 5.2 Purchase receipt (CLAUDE.md minimum)
+- **When** 120 arrive against the order: 118 accepted, 2 rejected
+- **Then** shop floor 218 at ₹92.7064 (value ₹20,210.00); Rejected location 2 at ₹95.0000 (value ₹190.00, decision 30); roles: stock +11,400.00 / goods received not billed −11,400.00; order received 60%, on order 80, status "waiting for goods and bill"; last purchase price ₹95.0000.
+
+### 5.3 Supplier bill against the receipt
+- **When** bill SMT/1182 for 120 × ₹95 is recorded: ₹11,400.00 + GST ₹570.00 = ₹11,970.00
+- **Then** due 30 days from the supplier's bill date; roles: goods received not billed +11,400.00, GST input +570.00 / supplier payable −11,970.00; receipt fully billed; order billed 60%.
+
+### 5.4 Duplicate supplier bill number
+- **Then** a second bill SMT/1182 from the same supplier in 2026-27 is refused; the same number from another supplier, or in the next financial year, is accepted.
+
+### 5.5 Returning the rejected goods
+- **When** the 2 rejected bags are returned from the Rejected location
+- **Then** Rejected 0 (value ₹0.00); they leave at ₹95.0000, the original cost; the order's received quantity goes back to 118, so 82 can still be received.
+
+### 5.6 Receipt without an order (decision 31)
+- **Then** Stock/Receiving staff are refused; a Store Manager succeeds only with a reason, and the reason appears in the history.
+
+### 5.7 Over-receipt
+- **Given** a 0% allowance and 82 still expected on the order line
+- **Then** receiving 83 is refused; a user with the over-receive right gets a warning and it is accepted.
+
+### 5.8 Free goods (decision 27)
+- **When** 10 are bought at ₹100.00 with 2 free
+- **Then** 12 enter stock at ₹83.3333 each, value ₹1,000.00.
+
+### 5.9 Extra charges on goods received
+- **When** freight of ₹600.00 is shared by value over a receipt of rice ₹9,500.00 and dal ₹2,500.00
+- **Then** rice gets ₹475.00 and dal ₹125.00; their unit costs rise accordingly; a stock movement made after the receipt is re-costed.
+
+### 5.10 Bill that also receives the goods
+- **When** a bill for 5 × ₹40.00 (GST 5%) receives the goods at MAIN
+- **Then** stock +5 at ₹40.0000; roles: stock +200.00, GST input +10.00 / supplier payable −210.00.
+
+### 5.11 Cancelling
+- **Then** cancelling the receipt of 5.2 is refused while its bill exists; after cancelling the bill and then the receipt, MAIN is back to 100 at ₹90.0000 and the order to 0% received.
+
+### 5.12 Held supplier and expired batch
+- **Then** a supplier held for bills cannot get a new order or bill; a batch whose expiry date was yesterday cannot be received (decision 13).
+
+### 5.13 Reorder suggestions
+- **Given** reorder level 50 and reorder quantity 100 at MAIN, on hand 30, nothing on order
+- **Then** the suggestion is 100 from the item's usual supplier; "Create orders" makes one draft order per supplier and marks the suggestion ordered; nothing is suggested while on hand + on order ≥ 50.

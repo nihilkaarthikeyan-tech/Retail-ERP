@@ -8,6 +8,7 @@ import { CompanyModule } from './company/company.module.js';
 import { FinancialYearsModule } from './financial-years/financial-years.module.js';
 import { HealthModule } from './health/health.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
+import { PurchasingModule } from './purchasing/purchasing.module.js';
 import { ItemsModule } from './items/items.module.js';
 import { NumberingModule } from './numbering/numbering.module.js';
 import { PartiesModule } from './parties/parties.module.js';
@@ -37,6 +38,7 @@ import { UsersModule } from './users/users.module.js';
     PricingModule,
     PartiesModule,
     InventoryModule,
+    PurchasingModule,
   ],
 })
 export class AppModule {}

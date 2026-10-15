@@ -22,7 +22,8 @@ export type MenuArea = "sales" | "stock" | "purchase" | "accounts" | "admin";
 
 const SECTION_AREA: Record<string, MenuArea> = {
   Catalogue: "sales",
-  Parties: "purchase",
+  Parties: "accounts",
+  Purchases: "purchase",
   Inventory: "stock",
   Administration: "admin",
 };
@@ -61,6 +62,14 @@ export const MENU: MenuEntry[] = [
   { href: "/stock/locations", label: "Locations", permissions: ["stock.view"], section: "Inventory", icon: "pin" },
   { href: "/stock/reorder-levels", label: "Reorder levels", permissions: ["stock.view"], section: "Inventory", icon: "refresh" },
   { href: "/stock/settings", label: "Inventory settings", permissions: ["stock.lock"], section: "Inventory", icon: "settings" },
+  // Module 5
+  { href: "/purchases/orders", label: "Purchase orders", permissions: ["purchase.view"], section: "Purchases", icon: "file" },
+  { href: "/purchases/receipts", label: "Goods receipts", permissions: ["purchase.view"], section: "Purchases", icon: "truck" },
+  { href: "/purchases/bills", label: "Supplier bills", permissions: ["purchase.view"], section: "Purchases", icon: "receipt" },
+  { href: "/purchases/charges", label: "Freight and charges", permissions: ["purchase.view"], section: "Purchases", icon: "rupee" },
+  { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
+  { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
+  { href: "/purchases/settings", label: "Purchase settings", permissions: ["purchase.settings"], section: "Purchases", icon: "settings" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },

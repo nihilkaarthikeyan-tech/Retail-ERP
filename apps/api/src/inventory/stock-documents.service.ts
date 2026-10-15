@@ -760,7 +760,8 @@ export class StockDocumentsService {
 
   // ---- Batches and serials ----
 
-  private async ensureBatch(tx: Db, itemId: string, batchNumber: string | null, manufactureOn: string | null, expiryOn: string | null, actor: Actor) {
+  /** Finds or creates a batch (automatic number when none is given); used by purchasing too. */
+  async ensureBatch(tx: Db, itemId: string, batchNumber: string | null, manufactureOn: string | null, expiryOn: string | null, actor: Actor) {
     const item = await tx.item.findUniqueOrThrow({ where: { id: itemId } });
     let number = batchNumber;
     if (!number) {

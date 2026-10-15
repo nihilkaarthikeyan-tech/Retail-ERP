@@ -101,9 +101,17 @@ export class StockReportsService {
       orderBy: [{ postingAt: 'desc' }, { id: 'desc' }],
       take: q.limit ?? 200,
     });
-    const docs = await this.prisma.stockDocument.findMany({ where: { id: { in: [...new Set(entries.map((e) => e.documentId))] } }, select: { id: true, number: true, kind: true, reason: true } });
+    const idsOf = (type: string) => [...new Set(entries.filter((e) => e.documentType === type).map((e) => e.documentId))];
+    const docs = await this.prisma.stockDocument.findMany({ where: { id: { in: idsOf('stock_document') } }, select: { id: true, number: true, kind: true, reason: true } });
+    // Module 5: goods receipts (and returns) and extra-charge entries post to the same ledger.
+    const receipts = await this.prisma.goodsReceipt.findMany({ where: { id: { in: idsOf('goods_receipt') } }, select: { id: true, number: true, isReturn: true } });
+    const charges = await this.prisma.landedCharge.findMany({ where: { id: { in: idsOf('landed_charge') } }, select: { id: true, number: true } });
     const items = await this.prisma.item.findMany({ where: { id: { in: [...new Set(entries.map((e) => e.itemId))] } }, select: { id: true, code: true, name: true } });
-    const docMap = new Map(docs.map((d) => [d.id, d]));
+    const docMap = new Map<string, { id: string; number: string; kind: string; reason: string | null }>([
+      ...docs.map((d) => [d.id, d] as const),
+      ...receipts.map((r) => [r.id, { id: r.id, number: r.number, kind: r.isReturn ? 'purchase_return' : 'goods_receipt', reason: null }] as const),
+      ...charges.map((c) => [c.id, { id: c.id, number: c.number, kind: 'landed_charge', reason: null }] as const),
+    ]);
     const itemMap = new Map(items.map((i) => [i.id, i]));
     const locMap = new Map(locations.map((l) => [l.id, l]));
     return entries.map((e) => ({

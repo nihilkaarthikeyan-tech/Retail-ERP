@@ -104,6 +104,8 @@ model Store {
   userStores      UserStore[]
   numberSeries    NumberSeries[]
   stockLocations  StockLocation[]
+  purchaseOrders  PurchaseOrder[]
+  goodsReceipts   GoodsReceipt[]
 
   @@unique([companyId, code])
 }
@@ -492,25 +494,32 @@ model Item {
   lastPurchasePrice   Decimal?  @db.Decimal(16, 4)
   /// Filled by module 3 (suppliers).
   preferredSupplierId String?   @db.Uuid
+  /// Module 5: overrides the company over-receipt / over-billing allowance (percent).
+  overReceiptPercent  Decimal?  @db.Decimal(5, 2)
+  /// Module 5: smallest total per order, in basic units.
+  minOrderQuantity    Decimal?  @db.Decimal(18, 3)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  itemGroup         ItemGroup              @relation(fields: [itemGroupId], references: [id])
-  brand             Brand?                 @relation(fields: [brandId], references: [id])
-  baseUnit          Unit                   @relation(fields: [baseUnitId], references: [id])
-  parent            Item?                  @relation("variants", fields: [parentItemId], references: [id])
-  variants          Item[]                 @relation("variants")
-  units             ItemUnit[]
-  barcodes          Barcode[]
-  variantAttributes ItemVariantAttribute[]
-  variantValues     ItemVariantValue[]
-  prices            Price[]
-  preferredSupplier Supplier?              @relation(fields: [preferredSupplierId], references: [id])
-  stockLines        StockDocumentLine[]
-  batches           Batch[]
+  itemGroup          ItemGroup              @relation(fields: [itemGroupId], references: [id])
+  brand              Brand?                 @relation(fields: [brandId], references: [id])
+  baseUnit           Unit                   @relation(fields: [baseUnitId], references: [id])
+  parent             Item?                  @relation("variants", fields: [parentItemId], references: [id])
+  variants           Item[]                 @relation("variants")
+  units              ItemUnit[]
+  barcodes           Barcode[]
+  variantAttributes  ItemVariantAttribute[]
+  variantValues      ItemVariantValue[]
+  prices             Price[]
+  preferredSupplier  Supplier?              @relation(fields: [preferredSupplierId], references: [id])
+  stockLines         StockDocumentLine[]
+  batches            Batch[]
+  purchaseOrderLines PurchaseOrderLine[]
+  goodsReceiptLines  GoodsReceiptLine[]
+  supplierBillLines  SupplierBillLine[]
 
   @@unique([parentItemId, variantKey])
   @@index([name])
@@ -875,13 +884,16 @@ model Supplier {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  company           Company       @relation(fields: [companyId], references: [id])
-  supplierGroup     SupplierGroup @relation(fields: [supplierGroupId], references: [id])
-  priceList         PriceList?    @relation(fields: [priceListId], references: [id])
-  paymentTerms      PaymentTerms? @relation(fields: [paymentTermsId], references: [id])
-  linkedCustomers   Customer[]    @relation("customerSupplierLink")
+  company           Company         @relation(fields: [companyId], references: [id])
+  supplierGroup     SupplierGroup   @relation(fields: [supplierGroupId], references: [id])
+  priceList         PriceList?      @relation(fields: [priceListId], references: [id])
+  paymentTerms      PaymentTerms?   @relation(fields: [paymentTermsId], references: [id])
+  linkedCustomers   Customer[]      @relation("customerSupplierLink")
   prices            Price[]
   preferredForItems Item[]
+  purchaseOrders    PurchaseOrder[]
+  goodsReceipts     GoodsReceipt[]
+  supplierBills     SupplierBill[]
 
   @@index([name])
 }
@@ -1052,6 +1064,8 @@ model StockLedgerEntry {
   itemId         String         @db.Uuid
   locationId     String         @db.Uuid
   batchId        String?        @db.Uuid
+  /// stock_document, goods_receipt or landed_charge (module 5).
+  documentType   String         @default("stock_document")
   documentId     String         @db.Uuid
   documentLineId String         @db.Uuid
   postingDate    DateTime       @db.Date
@@ -1181,6 +1195,430 @@ model InventorySettings {
   batchPickOrder      String    @default("earliest_expiry")
   transitLocationId   String?   @db.Uuid
 
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+// ---------------------------------------------------------------------------
+// Module 5 — Purchasing (plan 05). Values and account roles are stored on the
+// lines; module 7 posts them to the books (plan 05 answer 1). GST is recorded
+// as stated on the supplier's document (answer 2). Rupees only (answer 6).
+// ---------------------------------------------------------------------------
+
+enum PurchaseOrderStatus {
+  draft
+  to_receive_and_bill
+  to_receive
+  to_bill
+  completed
+  on_hold
+  closed
+  cancelled
+}
+
+enum GoodsReceiptStatus {
+  draft
+  to_bill
+  partly_billed
+  completed
+  returned
+  closed
+  cancelled
+}
+
+enum SupplierBillStatus {
+  draft
+  unpaid
+  cancelled
+}
+
+enum SupplierBillKind {
+  against_receipt
+  receives_goods
+  services
+  debit_note
+}
+
+enum PurchaseDocStatus {
+  draft
+  finalised
+  cancelled
+}
+
+model PurchaseOrder {
+  id                 String               @id @default(uuid()) @db.Uuid
+  companyId          String               @db.Uuid
+  number             String               @unique
+  supplierId         String               @db.Uuid
+  /// Indian business dates (rule 15).
+  orderDate          DateTime             @db.Date
+  neededBy           DateTime             @db.Date
+  storeId            String               @db.Uuid
+  supplierQuoteRef   String?
+  paymentTermsId     String?              @db.Uuid
+  dueDate            DateTime?            @db.Date
+  status             PurchaseOrderStatus  @default(draft)
+  /// The status to return to when a hold is released.
+  statusBeforeHold   PurchaseOrderStatus?
+  taxableAmount      Decimal              @default(0) @db.Decimal(16, 2)
+  taxAmount          Decimal              @default(0) @db.Decimal(16, 2)
+  roundingAdjustment Decimal              @default(0) @db.Decimal(16, 2)
+  total              Decimal              @default(0) @db.Decimal(16, 2)
+  receivedPercent    Decimal              @default(0) @db.Decimal(5, 2)
+  billedPercent      Decimal              @default(0) @db.Decimal(5, 2)
+  /// Set when the total was above the approval limit (decision 69).
+  approvedById       String?              @db.Uuid
+  holdReason         String?
+  closeReason        String?
+  remarks            String?
+  finalisedAt        DateTime?
+  finalisedById      String?              @db.Uuid
+  cancelledAt        DateTime?
+  cancelledById      String?              @db.Uuid
+  cancelReason       String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  supplier Supplier            @relation(fields: [supplierId], references: [id])
+  store    Store               @relation(fields: [storeId], references: [id])
+  lines    PurchaseOrderLine[]
+
+  @@index([companyId, status])
+  @@index([supplierId])
+}
+
+model PurchaseOrderLine {
+  id               String   @id @default(uuid()) @db.Uuid
+  orderId          String   @db.Uuid
+  lineNo           Int
+  itemId           String   @db.Uuid
+  unitId           String   @db.Uuid
+  factor           Decimal  @db.Decimal(18, 6)
+  /// Charged quantity in the line unit; free units are extra (decision 27).
+  quantity         Decimal  @db.Decimal(18, 3)
+  freeQuantity     Decimal  @default(0) @db.Decimal(18, 3)
+  /// (quantity + free) × factor.
+  basicQuantity    Decimal  @db.Decimal(18, 3)
+  rate             Decimal  @db.Decimal(16, 4)
+  discountPercent  Decimal  @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal  @default(0) @db.Decimal(16, 2)
+  taxableAmount    Decimal  @db.Decimal(16, 2)
+  gstRate          Decimal  @default(0) @db.Decimal(5, 2)
+  cgst             Decimal  @default(0) @db.Decimal(16, 2)
+  sgst             Decimal  @default(0) @db.Decimal(16, 2)
+  igst             Decimal  @default(0) @db.Decimal(16, 2)
+  lineTotal        Decimal  @db.Decimal(16, 2)
+  storeId          String   @db.Uuid
+  neededBy         DateTime @db.Date
+  /// Basic units received so far (accepted + rejected, net of returns).
+  receivedQuantity Decimal  @default(0) @db.Decimal(18, 3)
+  /// Taxable amount billed so far.
+  billedAmount     Decimal  @default(0) @db.Decimal(16, 2)
+
+  order        PurchaseOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item         Item                @relation(fields: [itemId], references: [id])
+  receiptLines GoodsReceiptLine[]
+  billLines    SupplierBillLine[]
+  suggestions  ReorderSuggestion[]
+
+  @@index([orderId])
+  @@index([itemId])
+}
+
+model GoodsReceipt {
+  id              String             @id @default(uuid()) @db.Uuid
+  companyId       String             @db.Uuid
+  number          String             @unique
+  supplierId      String             @db.Uuid
+  storeId         String             @db.Uuid
+  postingDate     DateTime           @db.Date
+  postingAt       DateTime
+  deliveryNoteNo  String?
+  transporterName String?
+  vehicleNo       String?
+  /// Decision 31: why goods were taken without an order.
+  noOrderReason   String?
+  status          GoodsReceiptStatus @default(draft)
+  isReturn        Boolean            @default(false)
+  returnOfId      String?            @db.Uuid
+  /// Set when a bill that also receives the goods made this receipt.
+  billId          String?            @db.Uuid
+  taxableAmount   Decimal            @default(0) @db.Decimal(16, 2)
+  taxAmount       Decimal            @default(0) @db.Decimal(16, 2)
+  total           Decimal            @default(0) @db.Decimal(16, 2)
+  /// Value that went into stock (accepted + rejected, after charges).
+  stockValue      Decimal            @default(0) @db.Decimal(16, 2)
+  billedPercent   Decimal            @default(0) @db.Decimal(5, 2)
+  returnedPercent Decimal            @default(0) @db.Decimal(5, 2)
+  /// Decision 29: the received-goods check.
+  checkedById     String?            @db.Uuid
+  checkedAt       DateTime?
+  checkResult     String?
+  checkRemarks    String?
+  isBackDated     Boolean            @default(false)
+  remarks         String?
+  finalisedAt     DateTime?
+  finalisedById   String?            @db.Uuid
+  cancelledAt     DateTime?
+  cancelledById   String?            @db.Uuid
+  cancelReason    String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  supplier Supplier           @relation(fields: [supplierId], references: [id])
+  store    Store              @relation(fields: [storeId], references: [id])
+  returnOf GoodsReceipt?      @relation("receiptReturns", fields: [returnOfId], references: [id])
+  returns  GoodsReceipt[]     @relation("receiptReturns")
+  lines    GoodsReceiptLine[]
+
+  @@index([companyId, status])
+  @@index([supplierId])
+}
+
+model GoodsReceiptLine {
+  id                       String    @id @default(uuid()) @db.Uuid
+  receiptId                String    @db.Uuid
+  lineNo                   Int
+  orderLineId              String?   @db.Uuid
+  itemId                   String    @db.Uuid
+  unitId                   String    @db.Uuid
+  factor                   Decimal   @db.Decimal(18, 6)
+  /// In the line unit; received = accepted + rejected; free is part of received.
+  receivedQuantity         Decimal   @db.Decimal(18, 3)
+  acceptedQuantity         Decimal   @db.Decimal(18, 3)
+  rejectedQuantity         Decimal   @default(0) @db.Decimal(18, 3)
+  freeQuantity             Decimal   @default(0) @db.Decimal(18, 3)
+  basicAcceptedQuantity    Decimal   @db.Decimal(18, 3)
+  basicRejectedQuantity    Decimal   @default(0) @db.Decimal(18, 3)
+  rate                     Decimal   @db.Decimal(16, 4)
+  discountPercent          Decimal   @default(0) @db.Decimal(5, 2)
+  discountAmount           Decimal   @default(0) @db.Decimal(16, 2)
+  taxableAmount            Decimal   @db.Decimal(16, 2)
+  gstRate                  Decimal   @default(0) @db.Decimal(5, 2)
+  cgst                     Decimal   @default(0) @db.Decimal(16, 2)
+  sgst                     Decimal   @default(0) @db.Decimal(16, 2)
+  igst                     Decimal   @default(0) @db.Decimal(16, 2)
+  lineTotal                Decimal   @db.Decimal(16, 2)
+  /// Extra charges shared onto this line (landed cost).
+  extraCharges             Decimal   @default(0) @db.Decimal(16, 2)
+  /// Per basic unit, before GST, after free goods and charges.
+  unitCost                 Decimal   @default(0) @db.Decimal(16, 4)
+  shelfLocationId          String    @db.Uuid
+  rejectedLocationId       String?   @db.Uuid
+  batchId                  String?   @db.Uuid
+  newBatchNumber           String?
+  newManufactureOn         DateTime? @db.Date
+  newExpiryOn              DateTime? @db.Date
+  serialNumbers            String[]
+  rejectedSerialNumbers    String[]
+  /// Basic units billed / returned so far against this line.
+  billedQuantity           Decimal   @default(0) @db.Decimal(18, 3)
+  returnedAcceptedQuantity Decimal   @default(0) @db.Decimal(18, 3)
+  returnedRejectedQuantity Decimal   @default(0) @db.Decimal(18, 3)
+  /// Return lines: the line they take back.
+  returnOfLineId           String?   @db.Uuid
+
+  receipt   GoodsReceipt        @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  orderLine PurchaseOrderLine?  @relation(fields: [orderLineId], references: [id])
+  item      Item                @relation(fields: [itemId], references: [id])
+  billLines SupplierBillLine[]
+  shares    LandedChargeShare[]
+
+  @@index([receiptId])
+  @@index([orderLineId])
+}
+
+model SupplierBill {
+  id                           String             @id @default(uuid()) @db.Uuid
+  companyId                    String             @db.Uuid
+  number                       String             @unique
+  supplierId                   String             @db.Uuid
+  kind                         SupplierBillKind
+  /// The supplier's own number and date; unique per supplier per financial year.
+  supplierBillNo               String
+  supplierBillDate             DateTime           @db.Date
+  postingDate                  DateTime           @db.Date
+  postingAt                    DateTime
+  financialYearId              String             @db.Uuid
+  storeId                      String?            @db.Uuid
+  paymentTermsId               String?            @db.Uuid
+  dueDate                      DateTime           @db.Date
+  status                       SupplierBillStatus @default(draft)
+  holdReason                   String?
+  holdUntil                    DateTime?          @db.Date
+  taxableAmount                Decimal            @default(0) @db.Decimal(16, 2)
+  taxAmount                    Decimal            @default(0) @db.Decimal(16, 2)
+  roundingAdjustment           Decimal            @default(0) @db.Decimal(16, 2)
+  total                        Decimal            @default(0) @db.Decimal(16, 2)
+  /// Bill price minus receipt price over all lines (plan 05 answer 4).
+  priceDifference              Decimal            @default(0) @db.Decimal(16, 2)
+  priceDifferenceConfirmedById String?            @db.Uuid
+  /// Debit notes: the bill they reduce.
+  returnOfId                   String?            @db.Uuid
+  /// Bills that receive goods: the receipt made for them.
+  receiptId                    String?            @db.Uuid
+  remarks                      String?
+  finalisedAt                  DateTime?
+  finalisedById                String?            @db.Uuid
+  cancelledAt                  DateTime?
+  cancelledById                String?            @db.Uuid
+  cancelReason                 String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  supplier Supplier           @relation(fields: [supplierId], references: [id])
+  returnOf SupplierBill?      @relation("billReturns", fields: [returnOfId], references: [id])
+  returns  SupplierBill[]     @relation("billReturns")
+  lines    SupplierBillLine[]
+
+  @@index([companyId, status])
+  @@index([supplierId, supplierBillNo])
+}
+
+model SupplierBillLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  billId           String  @db.Uuid
+  lineNo           Int
+  receiptLineId    String? @db.Uuid
+  orderLineId      String? @db.Uuid
+  itemId           String  @db.Uuid
+  unitId           String  @db.Uuid
+  factor           Decimal @db.Decimal(18, 6)
+  quantity         Decimal @db.Decimal(18, 3)
+  freeQuantity     Decimal @default(0) @db.Decimal(18, 3)
+  basicQuantity    Decimal @db.Decimal(18, 3)
+  rate             Decimal @db.Decimal(16, 4)
+  discountPercent  Decimal @default(0) @db.Decimal(5, 2)
+  discountAmount   Decimal @default(0) @db.Decimal(16, 2)
+  taxableAmount    Decimal @db.Decimal(16, 2)
+  gstRate          Decimal @default(0) @db.Decimal(5, 2)
+  cgst             Decimal @default(0) @db.Decimal(16, 2)
+  sgst             Decimal @default(0) @db.Decimal(16, 2)
+  igst             Decimal @default(0) @db.Decimal(16, 2)
+  lineTotal        Decimal @db.Decimal(16, 2)
+  /// Taxable amount on the bill minus the receipt's for the same quantity.
+  priceDifference  Decimal @default(0) @db.Decimal(16, 2)
+  /// goods_received_not_billed, stock or purchase_expense (module 7 posts it).
+  accountRole      String
+  /// Debit notes: the bill line they reduce; and how much was already returned from a bill line.
+  returnOfLineId   String? @db.Uuid
+  returnedQuantity Decimal @default(0) @db.Decimal(18, 3)
+
+  bill        SupplierBill       @relation(fields: [billId], references: [id], onDelete: Cascade)
+  receiptLine GoodsReceiptLine?  @relation(fields: [receiptLineId], references: [id])
+  orderLine   PurchaseOrderLine? @relation(fields: [orderLineId], references: [id])
+  item        Item               @relation(fields: [itemId], references: [id])
+
+  @@index([billId])
+  @@index([receiptLineId])
+}
+
+model LandedCharge {
+  id                String            @id @default(uuid()) @db.Uuid
+  companyId         String            @db.Uuid
+  number            String            @unique
+  postingDate       DateTime          @db.Date
+  status            PurchaseDocStatus @default(draft)
+  /// quantity, value or manual.
+  shareBy           String
+  transporterBillId String?           @db.Uuid
+  total             Decimal           @db.Decimal(16, 2)
+  receiptIds        String[]          @db.Uuid
+  remarks           String?
+  finalisedAt       DateTime?
+  finalisedById     String?           @db.Uuid
+  cancelledAt       DateTime?
+  cancelledById     String?           @db.Uuid
+  cancelReason      String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  items  LandedChargeItem[]
+  shares LandedChargeShare[]
+
+  @@index([companyId, status])
+}
+
+model LandedChargeItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  chargeId    String  @db.Uuid
+  lineNo      Int
+  description String
+  /// freight, loading, insurance or other (module 7 maps them to accounts).
+  chargeType  String
+  amount      Decimal @db.Decimal(16, 2)
+
+  charge LandedCharge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+}
+
+model LandedChargeShare {
+  id            String  @id @default(uuid()) @db.Uuid
+  chargeId      String  @db.Uuid
+  receiptLineId String  @db.Uuid
+  amount        Decimal @db.Decimal(16, 2)
+
+  charge      LandedCharge     @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+  receiptLine GoodsReceiptLine @relation(fields: [receiptLineId], references: [id])
+
+  @@unique([chargeId, receiptLineId])
+}
+
+model ReorderSuggestion {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @db.Uuid
+  storeId           String   @db.Uuid
+  itemId            String   @db.Uuid
+  supplierId        String?  @db.Uuid
+  onHand            Decimal  @db.Decimal(18, 3)
+  onOrder           Decimal  @db.Decimal(18, 3)
+  reorderLevel      Decimal  @db.Decimal(18, 3)
+  reorderQuantity   Decimal  @db.Decimal(18, 3)
+  suggestedQuantity Decimal  @db.Decimal(18, 3)
+  /// Indian business date the suggestion was made for (rule 15).
+  businessDate      DateTime @db.Date
+  /// open, ordered or dismissed.
+  status            String   @default("open")
+  orderLineId       String?  @db.Uuid
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  orderLine PurchaseOrderLine? @relation(fields: [orderLineId], references: [id])
+
+  @@index([companyId, status])
+  @@index([storeId, itemId])
+}
+
+model PurchaseSettings {
+  companyId              String  @id @db.Uuid
+  /// Decision 31: receipts without an order are allowed (with a reason) unless this is on.
+  requireOrderForReceipt Boolean @default(false)
+  overOrderPercent       Decimal @default(0) @db.Decimal(5, 2)
+  overReceiptPercent     Decimal @default(0) @db.Decimal(5, 2)
+  overBillingPercent     Decimal @default(0) @db.Decimal(5, 2)
+  /// allow, warn or block (plan 05 answer 4: warn).
+  priceMismatch          String  @default("warn")
+  checkSupplierBillNo    Boolean @default(true)
+  /// Decision 69 / plan 05 answer 3: ₹50,000.
+  approvalLimit          Decimal @default(50000) @db.Decimal(16, 2)
+  fillLastPurchasePrice  Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 }
