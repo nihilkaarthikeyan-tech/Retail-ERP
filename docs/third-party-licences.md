@@ -4,7 +4,7 @@ CLAUDE.md rule 7: only packages under permissive licences (MIT, Apache-2.0, BSD,
 
 None of these libraries contain ERP logic. They are general building blocks (web framework, database driver, test runner, type checker). All business rules are written from the blueprint in our own code.
 
-Last checked: 14 October 2026 (module 1).
+Last checked: 15 October 2026 (Till Helper added; module 1 list unchanged).
 
 ## Used by the running product (apps/api, apps/web, packages/shared)
 
@@ -20,6 +20,12 @@ Last checked: 14 October 2026 (module 1).
 | reflect-metadata, rxjs | Required by NestJS | Apache-2.0 |
 
 PostgreSQL itself (Docker image `postgres:17-alpine`) is under the PostgreSQL Licence, a permissive BSD-style licence.
+
+## Till Helper (apps/till-helper, runs on each till computer)
+
+No third-party libraries at run time. The printer commands (ESC/POS), the local HTTP service, and the network, Windows-share and serial (COM port) printer connections use only our own code and Node.js's built-in modules. The `serialport` package (MIT) mentioned in the POS offline plan section 9 was not needed: serial printers are reached through Windows' own `mode` command and the `\\.\COMn` device. If a later device (customer display, weighing scale) needs two-way serial, `serialport` (MIT) is the planned choice and will be listed here.
+
+Development only: typescript, vitest, oxlint, oxlint-tsgolint, @types/node (already listed below).
 
 ## Development and testing only (not shipped)
 

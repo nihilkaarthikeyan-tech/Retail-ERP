@@ -54,6 +54,8 @@ export interface RequestOptions {
    * Used by the login form itself and by the "who am I" check.
    */
   redirectOnUnauthorized?: boolean;
+  /** Extra request headers (e.g. the till computer's token). */
+  headers?: Record<string, string>;
 }
 
 /** Pages a logged-out visitor may be on; a 401 there never redirects. */
@@ -124,7 +126,7 @@ async function request<T>(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
+  const headers: Record<string, string> = { Accept: "application/json", ...options.headers };
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
   let res: Response;

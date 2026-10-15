@@ -288,3 +288,47 @@ Sample data: supplier Sri Murugan Traders (Net 30), item Basmati Rice 1 kg (PCS,
 ### 5.13 Reorder suggestions
 - **Given** reorder level 50 and reorder quantity 100 at MAIN, on hand 30, nothing on order
 - **Then** the suggestion is 100 from the item's usual supplier; "Create orders" makes one draft order per supplier and marks the suggestion ordered; nothing is suggested while on hand + on order ≥ 50.
+
+## Module 6 — Point of sale
+
+Sample data: store MAIN, till T1, opening cash ₹2,000. Basmati Rice 1 kg sold at ₹120 including 5% GST (stock 100 at cost ₹90); Surf Excel 1 kg at ₹132 including 18% GST (stock 50 at cost ₹95); Ariel 1 kg at ₹150 including 18%. GST figures use the HSN rate list and stay **provisional until the CA approves the rates** (plan 06 answer 1). Accounts are posted from module 7; each scenario names the values stored. Scenarios marked ★ are the CLAUDE.md §6.6 minimums.
+
+### 6.1 A sale ★
+- **When** 2 Basmati and 1 Surf are billed and paid with ₹500 cash
+- **Then** total ₹372.00. Basmati: taxable ₹228.57, CGST ₹5.72, SGST ₹5.71. Surf: taxable ₹111.86, CGST ₹10.07, SGST ₹10.07. Change ₹128.00. Stock Basmati 98, Surf 49. Cost of goods sold stored: ₹180.00 and ₹95.00.
+
+### 6.2 A return ★
+- **When** 1 Basmati from 6.1 comes back
+- **Then** the refund is ₹120.00 in cash (taxable ₹114.29, CGST ₹2.86, SGST ₹2.85), and stock is 99 at the original cost of ₹90.00. Returning 2 more is refused: only 1 is left to return.
+
+### 6.3 An exchange ★
+- **When** the Surf comes back and the customer takes Ariel at ₹150 on the same screen
+- **Then** a return bill and a sale bill are linked and the customer pays ₹18.00. Stock: Surf +1, Ariel −1.
+
+### 6.4 Selling beyond stock at the till ★ (decision 32)
+- **When** 3 are sold with 1 in stock
+- **Then** the sale succeeds, stock is −2 and flagged, and the item appears on the negative-stock report. The same write-off in the back office is still refused.
+
+### 6.5 Shift close with cash count ★
+- **Then** expected cash = ₹2,000 + ₹372 − ₹120 + ₹18 − ₹200 cash out = ₹2,070.00. Counted ₹2,068.00 in notes and coins gives a difference of −₹2.00. The closing and the day-end summary are stored. Billing on that till is refused until a new shift is opened.
+
+### 6.6 Card and UPI payments recorded ★
+- **When** a ₹899 bill is paid ₹500 by card (approval 482913) and ₹399 by UPI (with its reference)
+- **Then** the payments report shows card ₹500 and UPI ₹399, and neither is in the expected cash. A card payment without its approval code is refused.
+
+### 6.7 Never saved twice
+- **Then** the same bill sent 5 times makes 1 bill, reduces stock once and records 1 set of payments. Two tills billing offline never produce the same number.
+
+### 6.8 Discount limits (decisions 19, 40, 76)
+- **Then** a cashier may give 5%. 12% is refused without a manager PIN and allowed with one, and the manager is recorded. A discount above the item's maximum is refused even with a PIN. A price above MRP is always refused.
+
+### 6.9 Offers (decision 17)
+- **When** "buy 2 get 1 free" on Parle-G and "10% off Biscuits" both apply
+- **Then** the bigger saving is applied automatically and the sale is never blocked. A coupon can be used once; cancelling the bill gives the use back.
+
+### 6.10 Expired batch (decision 13)
+- **Then** the earliest batch that has not expired is picked. A batch that expired yesterday is refused, even for a manager.
+
+### 6.11 Offline bill at an old price
+- **When** a bill is made offline at ₹120 after the price changed to ₹125
+- **Then** it is accepted as sold and appears on "Offline bills to check".

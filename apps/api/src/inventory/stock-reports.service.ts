@@ -106,11 +106,14 @@ export class StockReportsService {
     // Module 5: goods receipts (and returns) and extra-charge entries post to the same ledger.
     const receipts = await this.prisma.goodsReceipt.findMany({ where: { id: { in: idsOf('goods_receipt') } }, select: { id: true, number: true, isReturn: true } });
     const charges = await this.prisma.landedCharge.findMany({ where: { id: { in: idsOf('landed_charge') } }, select: { id: true, number: true } });
+    // Module 6: till bills reduce stock at once (decision 39).
+    const tillBills = await this.prisma.posBill.findMany({ where: { id: { in: idsOf('pos_bill') } }, select: { id: true, number: true, kind: true } });
     const items = await this.prisma.item.findMany({ where: { id: { in: [...new Set(entries.map((e) => e.itemId))] } }, select: { id: true, code: true, name: true } });
     const docMap = new Map<string, { id: string; number: string; kind: string; reason: string | null }>([
       ...docs.map((d) => [d.id, d] as const),
       ...receipts.map((r) => [r.id, { id: r.id, number: r.number, kind: r.isReturn ? 'purchase_return' : 'goods_receipt', reason: null }] as const),
       ...charges.map((c) => [c.id, { id: c.id, number: c.number, kind: 'landed_charge', reason: null }] as const),
+      ...tillBills.map((b) => [b.id, { id: b.id, number: b.number, kind: b.kind === 'sale' ? 'pos_sale' : 'pos_return', reason: null }] as const),
     ]);
     const itemMap = new Map(items.map((i) => [i.id, i]));
     const locMap = new Map(locations.map((l) => [l.id, l]));

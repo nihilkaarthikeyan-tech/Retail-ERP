@@ -1,0 +1,26 @@
+{
+  "name": "till-helper",
+  "version": "0.1.0",
+  "description": "Retail ERP Till Helper: drives the receipt printer and cash drawer on a till computer.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/main.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint --type-aware src/"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.58.0",
+    "oxlint-tsgolint": "^7.0.2001",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}

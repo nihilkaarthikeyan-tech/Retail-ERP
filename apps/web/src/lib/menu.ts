@@ -24,6 +24,7 @@ const SECTION_AREA: Record<string, MenuArea> = {
   Catalogue: "sales",
   Parties: "accounts",
   Purchases: "purchase",
+  "Billing counter": "sales",
   Inventory: "stock",
   Administration: "admin",
 };
@@ -70,6 +71,16 @@ export const MENU: MenuEntry[] = [
   { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
   { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
   { href: "/purchases/settings", label: "Purchase settings", permissions: ["purchase.settings"], section: "Purchases", icon: "settings" },
+  // Module 6
+  { href: "/till", label: "Open the till", permissions: ["pos.sell"], section: "Billing counter", icon: "receipt" },
+  { href: "/pos/bills", label: "Till bills", permissions: ["pos.sell", "pos.reports"], section: "Billing counter", icon: "list" },
+  { href: "/pos/reports", label: "Till reports", permissions: ["pos.reports"], section: "Billing counter", icon: "history" },
+  { href: "/pos/offers", label: "Offers and coupons", permissions: ["offers.manage"], section: "Billing counter", icon: "tag" },
+  { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
+  { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
+  { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
+  { href: "/pos/settings", label: "Till settings", permissions: ["pos.setup"], section: "Billing counter", icon: "settings" },
+  { href: "/pos/my-pin", label: "My till PIN", permissions: ["pos.sell", "pos.approve"], section: "Billing counter", icon: "key" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },

@@ -50,6 +50,17 @@ export const PERMISSIONS = {
   'purchase.return': 'Return goods to suppliers and record debit notes',
   'purchase.charges': 'Add freight and other charges to the cost of goods received',
   'purchase.settings': 'Change purchase settings (allowances, approval limit, price checks)',
+  // Module 6
+  'pos.sell': 'Open a till shift, bill customers, park bills, record cash in and out',
+  'pos.return': 'Take returns and exchanges against a bill',
+  'pos.approve': 'Approve at the till with a PIN: price changes, large discounts, returns without a bill, cancelling bills, opening the drawer',
+  'pos.close': 'Close a till shift with a cash count',
+  'pos.shift.manage': 'Close or cancel another person’s shift',
+  'pos.setup': 'Set up tills, payment methods and till computers',
+  'pos.reports': 'See till reports',
+  'offers.manage': 'Create and change offers and coupons',
+  'gst_rates.manage': 'Enter GST rates per HSN code',
+  'gst_rates.approve': 'Approve GST rates (after the Chartered Accountant signs off)',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -99,6 +110,10 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'purchase.return',
     'purchase.charges',
     'purchase.settings',
+    'pos.reports',
+    'pos.setup',
+    'gst_rates.manage',
+    'gst_rates.approve',
   ],
   store_manager: [
     'company.view',
@@ -122,9 +137,16 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'purchase.receive',
     'purchase.receive_without_order',
     'purchase.return',
+    'pos.sell',
+    'pos.return',
+    'pos.approve',
+    'pos.close',
+    'pos.shift.manage',
+    'pos.reports',
+    'offers.manage',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
-  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view'],
+  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close'],
   stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count', 'purchase.view', 'purchase.receive'],
   viewer_auditor: [
     'company.view',
@@ -140,6 +162,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'stock.view',
     'stock.cost.view',
     'purchase.view',
+    'pos.reports',
   ],
 };
 
