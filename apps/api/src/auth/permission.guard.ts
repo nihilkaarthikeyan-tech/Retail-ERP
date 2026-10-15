@@ -12,15 +12,17 @@ export class PermissionGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const targets = [context.getHandler(), context.getClass()];
-    const required = this.reflector.getAllAndOverride<PermissionKey | undefined>(REQUIRED_PERMISSION, targets);
+    const required = this.reflector.getAllAndOverride<PermissionKey | PermissionKey[] | undefined>(REQUIRED_PERMISSION, targets);
     const ownerOnly = this.reflector.getAllAndOverride<boolean>(OWNER_ADMIN_ONLY, targets);
     if (!required && !ownerOnly) return true;
 
     const user = context.switchToHttp().getRequest<RequestWithUser>().user;
     if (!user) return false; // public route with a permission: misconfiguration
     if (ownerOnly && !user.isOwnerAdmin) throw new ForbiddenException('Only the Owner/Admin may do this');
-    if (required && !hasPermission(user, required)) {
-      throw new ForbiddenException(`You do not have the right "${required}"`);
+    // A list means "any one of these rights is enough".
+    const anyOf = required === undefined ? [] : Array.isArray(required) ? required : [required];
+    if (anyOf.length && !anyOf.some((key) => hasPermission(user, key))) {
+      throw new ForbiddenException(`You do not have the right "${anyOf.join('" or "')}"`);
     }
     return true;
   }

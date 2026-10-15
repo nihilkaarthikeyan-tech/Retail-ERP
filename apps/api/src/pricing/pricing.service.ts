@@ -120,6 +120,12 @@ export class PricingService {
     if (!list.active) throw new BadRequestException('Price list is switched off');
     if (input.customerId && !list.forSelling) throw new BadRequestException('A customer price needs a selling list');
     if (input.supplierId && !list.forBuying) throw new BadRequestException('A supplier price needs a buying list');
+    if (input.customerId && !(await this.prisma.customer.findFirst({ where: { id: input.customerId, companyId: list.companyId } }))) {
+      throw new BadRequestException('Customer not found');
+    }
+    if (input.supplierId && !(await this.prisma.supplier.findFirst({ where: { id: input.supplierId, companyId: list.companyId } }))) {
+      throw new BadRequestException('Supplier not found');
+    }
     const item = await this.prisma.item.findUnique({ where: { id: input.itemId }, include: { units: true } });
     if (!item) throw new NotFoundException('Item not found');
     if (item.isParentStyle) throw new BadRequestException('Prices are set on variants, not on the style');

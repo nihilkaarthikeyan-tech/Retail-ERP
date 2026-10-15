@@ -2,23 +2,32 @@
 // Small helpers shared by the catalogue screens.
 import type { ItemDto, ItemGroupNode } from "./types";
 
-export interface GroupOption {
+/** Any group tree node (item, customer or supplier groups). */
+export interface TreeNode {
+  id: string;
+  name: string;
+  active: boolean;
+  isLeaf: boolean;
+  children: TreeNode[];
+}
+
+export interface GroupOption<N extends TreeNode = ItemGroupNode> {
   id: string;
   /** Name indented by depth, for a <select>. */
   label: string;
   depth: number;
   isLeaf: boolean;
   active: boolean;
-  node: ItemGroupNode;
+  node: N;
 }
 
 /** The tree flattened in display order (parents before children). */
-export function flattenGroups(roots: ItemGroupNode[]): GroupOption[] {
-  const out: GroupOption[] = [];
-  const walk = (nodes: ItemGroupNode[], depth: number) => {
+export function flattenGroups<N extends TreeNode>(roots: N[]): GroupOption<N>[] {
+  const out: GroupOption<N>[] = [];
+  const walk = (nodes: N[], depth: number) => {
     for (const node of nodes) {
       out.push({ id: node.id, label: `${"   ".repeat(depth)}${node.name}`, depth, isLeaf: node.isLeaf, active: node.active, node });
-      walk(node.children, depth + 1);
+      walk(node.children as N[], depth + 1);
     }
   };
   walk(roots, 0);

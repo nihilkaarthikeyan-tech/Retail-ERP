@@ -33,6 +33,13 @@ export const MENU: MenuEntry[] = [
   { href: "/price-lists", label: "Price lists", permissions: ["prices.view"], section: "Catalogue" },
   { href: "/prices", label: "Prices", permissions: ["prices.view"], section: "Catalogue" },
   { href: "/catalogue/settings", label: "Catalogue settings", ownerAdminOnly: true, section: "Catalogue" },
+  // Module 3
+  { href: "/customers", label: "Customers", permissions: ["customers.view"], section: "Parties" },
+  { href: "/suppliers", label: "Suppliers", permissions: ["suppliers.view"], section: "Parties" },
+  { href: "/customer-groups", label: "Customer groups", permissions: ["customers.view"], section: "Parties" },
+  { href: "/supplier-groups", label: "Supplier groups", permissions: ["suppliers.view"], section: "Parties" },
+  { href: "/payment-terms", label: "Payment terms", permissions: ["customers.view"], section: "Parties" },
+  { href: "/party-settings", label: "Party settings", ownerAdminOnly: true, section: "Parties" },
 ];
 
 export function visibleMenu(user: CurrentUser | null): MenuEntry[] {

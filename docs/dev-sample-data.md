@@ -22,6 +22,16 @@ Used only on developers' machines. Never use these on the company server.
 - `ITM-000003` Carry bag — service item (not stocked, not bought), ₹5.
 - `SHIRT-OXFORD` Oxford Shirt — style varying by Colour (Red, Blue, White) and Size (S, M, L, XL); 12 variants `SHIRT-OXFORD-RED-S` … `SHIRT-OXFORD-WHT-XL`, MRP ₹1,499, selling ₹1,299.
 
+## Sample parties (module 3, loaded through the API on 15 October 2026)
+
+- `WALK-IN-RRPL` Walk-in customer (created automatically; no credit, cannot be blocked).
+- `CUS-000001` Lakshmi — quick-added with mobile 9876543210 (Retail).
+- `CUS-000002` Bengaluru Traders — Wholesale, GSTIN `29AAACR1234A1ZD` (Karnataka → other-state GST), billing address in Bengaluru.
+- `CUS-000003` Arun Traders — Wholesale, linked to supplier `SUP-000001`.
+- `SUP-000001` Metro Distributors — Distributors, GSTIN `33AAACM1234B1ZQ`, Chennai address.
+- `SUP-000002` Fast Movers Logistics — Transporters, marked as a transporter.
+- Payment terms Cash, Net 15, Net 30; customer groups Retail, Wholesale, Staff; supplier groups Distributors, Local vendors, Services, Transporters.
+
 To start again from an empty database:
 
 ```bash

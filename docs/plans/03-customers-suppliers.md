@@ -1,6 +1,9 @@
 # Plan — Module 3: Customers and suppliers
 
-Status: **draft, for approval after module 2 is accepted** (written 14 October 2026)
+Status: **approved by the project owner on 15 October 2026** with these answers to section 8:
+1. Cashiers may quick-add customers at the till (name + mobile); duplicates are warned about.
+2. Default credit limit 0 (no credit) until an Accountant sets one.
+3. Areas left out of version 1.
 
 Sources: `docs/blueprint/05-customers.md`, `docs/blueprint/06-suppliers.md`, `docs/decisions.md` (questions 20–26, 62, 69), launch scope row "Customers and suppliers".
 
@@ -75,6 +78,14 @@ Unit: due-date rules (all three bases, month ends, February, never before the bi
 ## 7. Deliberately not built
 
 Areas (only offers, loyalty and tax rules use them; none exist yet), account statements (needs invoices), merging duplicates, supplier ratings (decision 24), TDS (decision 62), commissions and portals (decisions 23, 26), item restrictions per customer and order/delivery-before-invoice flags (Sales module), multi-currency, the credit *check* and overdue *check* (need balances; Sales/POS/Accounting).
+
+## 7b. Decisions made while building (for the project owner to confirm)
+
+1. **Changing a supplier's hold type resets its end date and reason** unless new ones are given. Otherwise an old, expired end date would silently make the new hold inactive (found by scenario 3.6).
+2. **Quick-add** is its own permission (`customers.quick_add`), so cashiers can add name + mobile without being able to edit full customer records.
+3. **The payment-terms list is readable by anyone with `customers.view`** (needed to show a customer's terms); only `payment_terms.manage` may change them.
+4. **A supplier's PAN is filled from its GSTIN** (characters 3–12) and a typed PAN that disagrees with the GSTIN is refused.
+5. **Group defaults are copied once at creation** (price list, terms, limits); later changes to a group do not alter existing customers or suppliers (scenario 3.8). The blueprint's "changing a customer's group updates the group on their open documents" applies to documents, which do not exist yet.
 
 ## 8. Questions for the project owner
 

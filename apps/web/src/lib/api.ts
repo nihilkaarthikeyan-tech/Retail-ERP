@@ -26,13 +26,16 @@ export class ApiError extends Error {
   readonly errors: FieldIssue[];
   /** Machine-readable code when the API sends one (e.g. PASSWORD_CHANGE_REQUIRED). */
   readonly code: string | undefined;
+  /** The parsed response body as sent, for answers that carry extra data (e.g. duplicate matches). */
+  readonly body: unknown;
 
-  constructor(statusCode: number, message: string, errors: FieldIssue[] = [], code?: string) {
+  constructor(statusCode: number, message: string, errors: FieldIssue[] = [], code?: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.statusCode = statusCode;
     this.errors = errors;
     this.code = code;
+    this.body = body;
   }
 
   /** Validation messages keyed by field path, for showing next to inputs. */
@@ -110,9 +113,9 @@ function errorFromBody(status: number, body: unknown): ApiError {
           return [];
         })
       : [];
-    return new ApiError(status, message, errors, typeof b.code === "string" ? b.code : undefined);
+    return new ApiError(status, message, errors, typeof b.code === "string" ? b.code : undefined, body);
   }
-  return new ApiError(status, `Request failed (HTTP ${status})`);
+  return new ApiError(status, `Request failed (HTTP ${status})`, [], undefined, body);
 }
 
 async function request<T>(

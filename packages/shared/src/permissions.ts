@@ -21,6 +21,15 @@ export const PERMISSIONS = {
   'prices.manage': 'Create and change price lists and prices',
   'buying_prices.view': 'See buying price lists and prices',
   'cost_price.view': 'See last purchase price, cost and margin',
+  // Module 3
+  'customers.view': 'See customers, their addresses and contacts',
+  'customers.quick_add': 'Add a customer with name and mobile at the till',
+  'customers.manage': 'Create and change customers, groups, addresses and contacts',
+  'customers.credit': 'Set credit limits, block or switch off customers (credit controller)',
+  'suppliers.view': 'See suppliers, their addresses and contacts',
+  'suppliers.manage': 'Create and change suppliers, groups, addresses and contacts',
+  'suppliers.hold': 'Hold, block or switch off suppliers',
+  'payment_terms.manage': 'Create and change payment terms',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -55,11 +64,26 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'prices.view',
     'buying_prices.view',
     'cost_price.view',
+    'customers.view',
+    'customers.credit',
+    'suppliers.view',
+    'suppliers.hold',
+    'payment_terms.manage',
   ],
-  store_manager: ['company.view', 'stores.view', 'users.view', 'catalogue.view', 'prices.view'],
+  store_manager: [
+    'company.view',
+    'stores.view',
+    'users.view',
+    'catalogue.view',
+    'prices.view',
+    'customers.view',
+    'customers.quick_add',
+    'customers.manage',
+    'suppliers.view',
+  ],
   // Decision 70: cashiers never see cost, margin or buying prices.
-  cashier: ['catalogue.view', 'prices.view'],
-  stock_receiving: ['stores.view', 'catalogue.view'],
+  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add'],
+  stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view'],
   viewer_auditor: [
     'company.view',
     'stores.view',
@@ -69,6 +93,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'prices.view',
     'buying_prices.view',
     'cost_price.view',
+    'customers.view',
+    'suppliers.view',
   ],
 };
 

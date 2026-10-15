@@ -49,6 +49,9 @@ model Company {
   numberSeries      NumberSeries[]
   priceLists        PriceList[]
   catalogueSettings CatalogueSettings?
+  customers         Customer[]
+  suppliers         Supplier[]
+  partySettings     PartySettings?
 }
 
 model GstRegistration {
@@ -503,6 +506,7 @@ model Item {
   variantAttributes ItemVariantAttribute[]
   variantValues     ItemVariantValue[]
   prices            Price[]
+  preferredSupplier Supplier?              @relation(fields: [preferredSupplierId], references: [id])
 
   @@unique([parentItemId, variantKey])
   @@index([name])
@@ -583,8 +587,12 @@ model PriceList {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  company Company @relation(fields: [companyId], references: [id])
-  prices  Price[]
+  company        Company         @relation(fields: [companyId], references: [id])
+  prices         Price[]
+  customerGroups CustomerGroup[]
+  customers      Customer[]
+  supplierGroups SupplierGroup[]
+  suppliers      Supplier[]
 
   @@unique([companyId, code])
 }
@@ -611,6 +619,8 @@ model Price {
   priceList PriceList @relation(fields: [priceListId], references: [id])
   item      Item      @relation(fields: [itemId], references: [id])
   unit      Unit      @relation(fields: [unitId], references: [id])
+  customer  Customer? @relation(fields: [customerId], references: [id])
+  supplier  Supplier? @relation(fields: [supplierId], references: [id])
 
   @@index([priceListId, itemId])
   @@index([itemId])
@@ -628,6 +638,259 @@ model CatalogueSettings {
   allowPriceChangeOnBill       Boolean @default(false)
   blockSellingBelowCost        Boolean @default(false)
   saveTypedPrices              Boolean @default(false)
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id])
+}
+
+// ---------------------------------------------------------------------------
+// Module 3: customers and suppliers (docs/plans/03-customers-suppliers.md)
+// ---------------------------------------------------------------------------
+
+enum PartyType {
+  customer
+  supplier
+}
+
+enum PartyStatus {
+  active
+  blocked
+  off
+}
+
+enum HoldType {
+  none
+  bills
+  payments
+  all
+}
+
+enum DueBasis {
+  days_after_date
+  days_after_month_end
+  months_then_month_end
+}
+
+/// Postal address of a customer or supplier. GSTIN per address (decision 21).
+model Address {
+  id           String    @id @default(uuid()) @db.Uuid
+  partyType    PartyType
+  partyId      String    @db.Uuid
+  label        String?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  stateCode    String
+  pincode      String?
+  phone        String?
+  email        String?
+  gstin        String?
+  isBilling    Boolean   @default(true)
+  isDelivery   Boolean   @default(true)
+  isMain       Boolean   @default(false)
+  active       Boolean   @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([partyType, partyId])
+}
+
+model ContactPerson {
+  id           String    @id @default(uuid()) @db.Uuid
+  partyType    PartyType
+  partyId      String    @db.Uuid
+  name         String
+  jobTitle     String?
+  email        String?
+  mobile       String?
+  isMain       Boolean   @default(false)
+  /// Decision 74: consent for promotional messages.
+  noPromotions Boolean   @default(false)
+  active       Boolean   @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([partyType, partyId])
+}
+
+model PaymentTerms {
+  id     String  @id @default(uuid()) @db.Uuid
+  code   String  @unique
+  name   String
+  active Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  parts          PaymentTermsPart[]
+  customerGroups CustomerGroup[]
+  customers      Customer[]
+  supplierGroups SupplierGroup[]
+  suppliers      Supplier[]
+}
+
+model PaymentTermsPart {
+  id                   String   @id @default(uuid()) @db.Uuid
+  paymentTermsId       String   @db.Uuid
+  sortOrder            Int      @default(0)
+  share                Decimal  @db.Decimal(5, 2)
+  dueBasis             DueBasis
+  days                 Int      @default(0)
+  months               Int      @default(0)
+  earlyDiscountPercent Decimal? @db.Decimal(5, 2)
+  earlyDiscountDays    Int?
+
+  paymentTerms PaymentTerms @relation(fields: [paymentTermsId], references: [id], onDelete: Cascade)
+}
+
+model CustomerGroup {
+  id              String  @id @default(uuid()) @db.Uuid
+  parentId        String? @db.Uuid
+  code            String  @unique
+  name            String
+  path            String
+  depth           Int     @default(0)
+  priceListId     String? @db.Uuid
+  paymentTermsId  String? @db.Uuid
+  creditLimit     Decimal @default(0) @db.Decimal(14, 2)
+  overdueLimit    Decimal @default(0) @db.Decimal(14, 2)
+  skipCreditCheck Boolean @default(false)
+  active          Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  parent       CustomerGroup?  @relation("customerGroupTree", fields: [parentId], references: [id])
+  children     CustomerGroup[] @relation("customerGroupTree")
+  priceList    PriceList?      @relation(fields: [priceListId], references: [id])
+  paymentTerms PaymentTerms?   @relation(fields: [paymentTermsId], references: [id])
+  customers    Customer[]
+}
+
+model Customer {
+  id                    String      @id @default(uuid()) @db.Uuid
+  companyId             String      @db.Uuid
+  code                  String      @unique
+  name                  String
+  isBusiness            Boolean     @default(false)
+  mobile                String?
+  email                 String?
+  notes                 String?
+  customerGroupId       String      @db.Uuid
+  gstin                 String?
+  stateCode             String?
+  priceListId           String?     @db.Uuid
+  paymentTermsId        String?     @db.Uuid
+  /// 0 = no credit (decision 22).
+  creditLimit           Decimal     @default(0) @db.Decimal(14, 2)
+  overdueLimit          Decimal     @default(0) @db.Decimal(14, 2)
+  creditCheckAtDelivery Boolean     @default(false)
+  status                PartyStatus @default(active)
+  isWalkIn              Boolean     @default(false)
+  linkedSupplierId      String?     @db.Uuid
+  /// Temporary number given by an offline till (module 6).
+  offlineTillRef        String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company        Company        @relation(fields: [companyId], references: [id])
+  customerGroup  CustomerGroup  @relation(fields: [customerGroupId], references: [id])
+  priceList      PriceList?     @relation(fields: [priceListId], references: [id])
+  paymentTerms   PaymentTerms?  @relation(fields: [paymentTermsId], references: [id])
+  linkedSupplier Supplier?      @relation("customerSupplierLink", fields: [linkedSupplierId], references: [id])
+  prices         Price[]
+
+  @@index([mobile])
+  @@index([name])
+}
+
+model SupplierGroup {
+  id             String  @id @default(uuid()) @db.Uuid
+  parentId       String? @db.Uuid
+  code           String  @unique
+  name           String
+  path           String
+  depth          Int     @default(0)
+  priceListId    String? @db.Uuid
+  paymentTermsId String? @db.Uuid
+  active         Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  parent       SupplierGroup?  @relation("supplierGroupTree", fields: [parentId], references: [id])
+  children     SupplierGroup[] @relation("supplierGroupTree")
+  priceList    PriceList?      @relation(fields: [priceListId], references: [id])
+  paymentTerms PaymentTerms?   @relation(fields: [paymentTermsId], references: [id])
+  suppliers    Supplier[]
+}
+
+model Supplier {
+  id                      String      @id @default(uuid()) @db.Uuid
+  companyId               String      @db.Uuid
+  code                    String      @unique
+  name                    String
+  isBusiness              Boolean     @default(true)
+  mobile                  String?
+  email                   String?
+  notes                   String?
+  supplierGroupId         String      @db.Uuid
+  isTransporter           Boolean     @default(false)
+  gstin                   String?
+  pan                     String?
+  stateCode               String?
+  priceListId             String?     @db.Uuid
+  paymentTermsId          String?     @db.Uuid
+  bankAccountNote         String?
+  status                  PartyStatus @default(active)
+  holdType                HoldType    @default(none)
+  holdUntil               DateTime?   @db.Date
+  holdReason              String?
+  allowBillWithoutOrder   Boolean     @default(false)
+  allowBillWithoutReceipt Boolean     @default(false)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  company         Company       @relation(fields: [companyId], references: [id])
+  supplierGroup   SupplierGroup @relation(fields: [supplierGroupId], references: [id])
+  priceList       PriceList?    @relation(fields: [priceListId], references: [id])
+  paymentTerms    PaymentTerms? @relation(fields: [paymentTermsId], references: [id])
+  linkedCustomers Customer[]    @relation("customerSupplierLink")
+  prices          Price[]
+  preferredForItems Item[]
+
+  @@index([name])
+}
+
+/// One row per company.
+model PartySettings {
+  companyId              String  @id @db.Uuid
+  defaultCustomerGroupId String? @db.Uuid
+  defaultSupplierGroupId String? @db.Uuid
+  defaultPaymentTermsId  String? @db.Uuid
+  defaultCreditLimit     Decimal @default(0) @db.Decimal(14, 2)
+  walkInCustomerId       String? @db.Uuid
+  gstTreatmentFrom       String  @default("billing")
 
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid

@@ -163,9 +163,12 @@ describe('2.4 Fractions only for weight, length and volume', () => {
 describe('2.5 The right price is found', () => {
   let x: { id: string };
   let wholesaleId: string;
-  const customerC = '11111111-1111-4111-8111-111111111111';
+  let customerC: string;
+  let supplierS: string;
 
   beforeAll(async () => {
+    customerC = (await owner.post('/customers').send({ name: 'Customer C' }).expect(201)).body.id;
+    supplierS = (await owner.post('/suppliers').send({ name: 'Supplier S' }).expect(201)).body.id;
     x = await createItem({ name: 'Item X' });
     await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '100', startDate: '2026-04-01' }).expect(201);
     await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '105', startDate: '2026-11-01' }).expect(201);
@@ -194,7 +197,8 @@ describe('2.5 The right price is found', () => {
   });
 
   it('refuses a supplier price on a selling list and a duplicate price', async () => {
-    await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '80', supplierId: customerC }).expect(400);
+    await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '80', supplierId: supplierS }).expect(400);
+    await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '80', customerId: '11111111-1111-4111-8111-111111111111' }).expect(400);
     await owner.post('/prices').send({ priceListId: sellingListId, itemId: x.id, price: '100', startDate: '2026-04-01' }).expect(409);
   });
 });

@@ -13,6 +13,8 @@ export const AllowPasswordChangePending = () => SetMetadata(ALLOW_PASSWORD_CHANG
 export const REQUIRED_PERMISSION = 'requiredPermission';
 /** The permission key a route needs. Owner/Admin always passes. */
 export const RequirePermission = (key: PermissionKey) => SetMetadata(REQUIRED_PERMISSION, key);
+/** The route needs at least one of these rights. Owner/Admin always passes. */
+export const RequireAnyPermission = (...keys: PermissionKey[]) => SetMetadata(REQUIRED_PERMISSION, keys);
 
 export const OWNER_ADMIN_ONLY = 'ownerAdminOnly';
 /** Routes only the Owner/Admin role may call (e.g. counter changes). */

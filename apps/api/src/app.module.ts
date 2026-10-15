@@ -9,6 +9,7 @@ import { FinancialYearsModule } from './financial-years/financial-years.module.j
 import { HealthModule } from './health/health.module.js';
 import { ItemsModule } from './items/items.module.js';
 import { NumberingModule } from './numbering/numbering.module.js';
+import { PartiesModule } from './parties/parties.module.js';
 import { PricingModule } from './pricing/pricing.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RolesModule } from './roles/roles.module.js';
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module.js';
     CatalogueModule,
     ItemsModule,
     PricingModule,
+    PartiesModule,
   ],
 })
 export class AppModule {}

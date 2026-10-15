@@ -82,6 +82,35 @@ describe("AppMenu", () => {
     expect(screen.getByRole("link", { name: "Items" })).toBeTruthy();
   });
 
+  it("shows the Parties entries only with the matching rights", () => {
+    render(<AppMenu user={user({ permissions: ["customers.view"] })} pathname="/" />);
+    expect(screen.getByText("Parties")).toBeTruthy();
+    for (const label of ["Customers", "Customer groups", "Payment terms"]) {
+      expect(screen.getByRole("link", { name: label })).toBeTruthy();
+    }
+    for (const label of ["Suppliers", "Supplier groups", "Party settings"]) {
+      expect(screen.queryByRole("link", { name: label })).toBeNull();
+    }
+    cleanup();
+
+    render(<AppMenu user={user({ permissions: ["suppliers.view"] })} pathname="/suppliers/abc" />);
+    expect(screen.getByRole("link", { name: "Suppliers" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Supplier groups" })).toBeTruthy();
+    for (const label of ["Customers", "Customer groups", "Payment terms", "Party settings"]) {
+      expect(screen.queryByRole("link", { name: label })).toBeNull();
+    }
+    cleanup();
+
+    render(<AppMenu user={user({ isOwnerAdmin: true })} pathname="/" />);
+    for (const label of ["Customers", "Suppliers", "Customer groups", "Supplier groups", "Payment terms", "Party settings"]) {
+      expect(screen.getByRole("link", { name: label })).toBeTruthy();
+    }
+    cleanup();
+
+    render(<AppMenu user={user({ permissions: ["catalogue.view"] })} pathname="/" />);
+    expect(screen.queryByText("Parties")).toBeNull();
+  });
+
   it("renders nothing when nobody is logged in", () => {
     render(<AppMenu user={null} pathname="/" />);
     expect(screen.queryAllByRole("link")).toHaveLength(0);

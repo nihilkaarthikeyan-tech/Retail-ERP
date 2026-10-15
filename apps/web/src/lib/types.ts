@@ -340,3 +340,185 @@ export interface PriceLookupResult {
   rate: string | null;
   source: "list" | "default_list" | null;
 }
+
+// ---- Module 3: customers, suppliers, groups, payment terms ----
+
+export type PartyStatus = "active" | "blocked" | "off";
+export type HoldType = "none" | "bills" | "payments" | "all";
+export type DueBasis = "days_after_date" | "days_after_month_end" | "months_then_month_end";
+export type PartyType = "customer" | "supplier";
+
+/** A party, group, list or terms referred to from another record. */
+export interface PartyRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface AddressDto {
+  id: string;
+  partyType: PartyType;
+  partyId: string;
+  label: string | null;
+  addressLine1: string;
+  addressLine2: string | null;
+  city: string;
+  stateCode: string;
+  pincode: string | null;
+  phone: string | null;
+  email: string | null;
+  gstin: string | null;
+  isBilling: boolean;
+  isDelivery: boolean;
+  isMain: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContactDto {
+  id: string;
+  partyType: PartyType;
+  partyId: string;
+  name: string;
+  jobTitle: string | null;
+  email: string | null;
+  mobile: string | null;
+  isMain: boolean;
+  noPromotions: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerDto {
+  id: string;
+  code: string;
+  name: string;
+  isBusiness: boolean;
+  mobile: string | null;
+  email: string | null;
+  notes: string | null;
+  customerGroup: PartyRef;
+  gstin: string | null;
+  stateCode: string | null;
+  priceList: PartyRef | null;
+  paymentTerms: PartyRef | null;
+  creditLimit: string;
+  overdueLimit: string;
+  creditCheckAtDelivery: boolean;
+  status: PartyStatus;
+  isWalkIn: boolean;
+  linkedSupplier: PartyRef | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /customers/:id also carries the addresses and contact people. */
+export interface CustomerDetailDto extends CustomerDto {
+  addresses: AddressDto[];
+  contacts: ContactDto[];
+}
+
+export interface CustomerPage {
+  rows: CustomerDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** Body of the 409 DUPLICATE_MOBILE answer (decision 20). */
+export interface DuplicateMobileBody {
+  message: string;
+  code: "DUPLICATE_MOBILE";
+  matches: { id: string; code: string; name: string; mobile: string | null }[];
+}
+
+export interface SupplierDto {
+  id: string;
+  code: string;
+  name: string;
+  isBusiness: boolean;
+  mobile: string | null;
+  email: string | null;
+  notes: string | null;
+  supplierGroup: PartyRef;
+  isTransporter: boolean;
+  gstin: string | null;
+  pan: string | null;
+  stateCode: string | null;
+  priceList: PartyRef | null;
+  paymentTerms: PartyRef | null;
+  bankAccountNote: string | null;
+  status: PartyStatus;
+  holdType: HoldType;
+  holdUntil: string | null;
+  holdReason: string | null;
+  allowBillWithoutOrder: boolean;
+  allowBillWithoutReceipt: boolean;
+  linkedCustomers: PartyRef[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupplierDetailDto extends SupplierDto {
+  addresses: AddressDto[];
+  contacts: ContactDto[];
+}
+
+export interface SupplierPage {
+  rows: SupplierDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** One node of a customer or supplier group tree (GET /customer-groups, /supplier-groups). */
+export interface PartyGroupNode {
+  id: string;
+  code: string;
+  name: string;
+  parentId: string | null;
+  active: boolean;
+  isLeaf: boolean;
+  priceListId: string | null;
+  paymentTermsId: string | null;
+  /** Customer groups only. */
+  creditLimit?: string;
+  overdueLimit?: string;
+  skipCreditCheck?: boolean;
+  children: PartyGroupNode[];
+}
+
+export interface PaymentTermsPartDto {
+  share: string;
+  dueBasis: DueBasis;
+  days: number;
+  months: number;
+  earlyDiscountPercent: string | null;
+  earlyDiscountDays: number | null;
+}
+
+export interface PaymentTermsDto {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  parts: PaymentTermsPartDto[];
+}
+
+export interface DueDateResult {
+  parts: { share: string; dueDate: string }[];
+  dueDate: string;
+}
+
+export interface PartySettingsDto {
+  companyId: string;
+  defaultCustomerGroupId: string | null;
+  defaultSupplierGroupId: string | null;
+  defaultPaymentTermsId: string | null;
+  defaultCreditLimit: string;
+  walkInCustomerId: string | null;
+  gstTreatmentFrom: "billing" | "delivery";
+  updatedAt: string;
+}
