@@ -1103,6 +1103,7 @@ model StockLedgerEntry {
   @@index([documentId])
   @@index([costSourceId])
   @@index([postingDate])
+  @@index([documentLineId])
 }
 
 /// Current stock per item × location. Always equals the sum of the ledger.
@@ -2437,4 +2438,39 @@ model YearEndClosing {
   updatedById String?  @db.Uuid
 
   @@index([companyId, periodEnd])
+}
+
+// ---------------------------------------------------------------------------
+// Module 9: reports and dashboards (docs/plans/09-reports.md). Reports only
+// read; these tables hold the owner's daily summary email (decision 67).
+// ---------------------------------------------------------------------------
+
+model SummaryEmailSettings {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @unique @db.Uuid
+  enabled      Boolean  @default(false)
+  /// Indian time, HH:MM.
+  sendAt       String   @default("21:00")
+  recipientIds String[] @db.Uuid
+  figures      String[]
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+/// One row per company per business date, so the email is never sent twice.
+model SummaryEmailRun {
+  id           String    @id @default(uuid()) @db.Uuid
+  companyId    String    @db.Uuid
+  businessDate DateTime  @db.Date
+  /// scheduled or test.
+  kind         String    @default("scheduled")
+  startedAt    DateTime  @default(now())
+  sentAt       DateTime?
+  recipients   String[]
+  error        String?
+
+  @@index([companyId, startedAt])
 }

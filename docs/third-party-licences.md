@@ -38,6 +38,7 @@ Development only: typescript, vitest, oxlint, oxlint-tsgolint, @types/node (alre
 | @nestjs/cli, @nestjs/schematics, @nestjs/testing | NestJS tooling | MIT |
 | eslint, eslint-config-next, oxlint, oxlint-tsgolint, prettier | Code checks and formatting | MIT |
 | source-map-support, @types/* | Debugging and type definitions | MIT |
+| nodemailer | Sends the owner's daily summary email (module 9, plan 09 answer 1); no dependencies of its own | MIT-0 (MIT without the attribution clause; approved by the project owner on 16 Oct 2026) |
 
 ## Deliberately excluded
 

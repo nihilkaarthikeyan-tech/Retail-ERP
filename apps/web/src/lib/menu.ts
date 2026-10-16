@@ -27,6 +27,7 @@ const SECTION_AREA: Record<string, MenuArea> = {
   "Billing counter": "sales",
   Inventory: "stock",
   Accounts: "accounts",
+  Reports: "sales",
   Administration: "admin",
 };
 
@@ -91,6 +92,9 @@ export const MENU: MenuEntry[] = [
   { href: "/accounts/reports", label: "Accounts reports", permissions: ["accounts.view", "payments.post"], section: "Accounts", icon: "list" },
   { href: "/accounts/closing", label: "Closing the books", permissions: ["accounts.view", "books.lock"], section: "Accounts", icon: "lock" },
   { href: "/accounts/defaults", label: "Default accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "settings" },
+  // Module 9
+  { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view"], section: "Reports", icon: "chart" },
+  { href: "/reports/summary-email", label: "Daily summary email", permissions: ["reports.summary_email"], section: "Reports", icon: "mail" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },
@@ -115,5 +119,8 @@ export function visibleMenu(user: CurrentUser | null): MenuEntry[] {
 export function isActive(entry: MenuEntry, pathname: string): boolean {
   if (entry.href === "/") return pathname === "/";
   if (entry.href === "/history" || entry.exact) return pathname === entry.href;
-  return pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  if (!under(entry.href)) return false;
+  // A more specific entry wins (e.g. /reports/summary-email over /reports).
+  return !MENU.some((other) => other.href.startsWith(`${entry.href}/`) && under(other.href));
 }

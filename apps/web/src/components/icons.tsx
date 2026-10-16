@@ -93,6 +93,14 @@ const PATHS = {
       <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2.5" />
     </>
   ),
+  // Module 9: a bar chart and an envelope.
+  chart: <path d="M3.5 20.5h17M6.5 17v-5M11 17V7M15.5 17v-7.5M20 17V4.5" />,
+  mail: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3.5 6.5 8.5 6.5 8.5-6.5" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

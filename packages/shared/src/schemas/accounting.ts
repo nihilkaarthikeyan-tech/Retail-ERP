@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 import { decimalString, positiveDecimalString } from './catalogue.js';
+import { queryBoolean } from './reports.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
@@ -252,7 +253,7 @@ export const ledgerQuerySchema = z.object({
   partyId: uuid.optional(),
   documentType: z.string().max(40).optional(),
   documentId: uuid.optional(),
-  includeCancelled: z.coerce.boolean().optional(),
+  includeCancelled: queryBoolean.optional(),
 });
 export type LedgerQuery = z.infer<typeof ledgerQuerySchema>;
 
@@ -260,7 +261,7 @@ export const periodQuerySchema = z.object({
   from: isoDate,
   to: isoDate,
   storeId: uuid.optional(),
-  showZero: z.coerce.boolean().optional(),
+  showZero: queryBoolean.optional(),
   groupBy: z.enum(['month', 'year']).optional(),
 });
 export type PeriodQuery = z.infer<typeof periodQuerySchema>;

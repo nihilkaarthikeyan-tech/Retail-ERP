@@ -69,6 +69,8 @@ export const PERMISSIONS = {
   'payments.post': 'Create, post and cancel receipts, payments and transfers; link payments to bills',
   'cash.deposit': 'Move cash between the till, cash in hand and the bank for own stores; petty-cash journals',
   'books.lock': 'Lock the books up to a date, post before it, and close or reopen a financial year',
+  // Module 9
+  'reports.summary_email': 'Set up the owner’s daily summary email',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

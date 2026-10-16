@@ -24,4 +24,7 @@ export function testDatabaseUrl(): string {
 export function useTestDatabase(): void {
   process.env.DATABASE_URL = testDatabaseUrl();
   process.env.WEB_ORIGIN ??= 'http://localhost:3000';
+  // Emails are kept in memory, never sent (plan 09).
+  process.env.MAIL_TRANSPORT = 'memory';
+  process.env.SUMMARY_EMAIL_SCHEDULE = 'off';
 }

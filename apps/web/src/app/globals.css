@@ -1820,3 +1820,502 @@ form > .till-big {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Reports ---- */
+/*
+ * Module 9: dashboards, charts and report pages. Chart colours are a fixed
+ * categorical order drawn from the Bazaar hues and checked for colour-blind
+ * separation and contrast in both themes (rust, indigo, teal, violet, amber,
+ * pink, sky, green; "Other" is a neutral). A single series uses the area colour.
+ */
+:root {
+  --chart-1: #c2410c;
+  --chart-2: #4f46e5;
+  --chart-3: #0d9488;
+  --chart-4: #9333ea;
+  --chart-5: #d97706;
+  --chart-6: #db2777;
+  --chart-7: #0284c7;
+  --chart-8: #16a34a;
+  --chart-other: #8a7d6e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --chart-1: #ea580c;
+    --chart-2: #6366f1;
+    --chart-4: #a855f7;
+  }
+}
+
+:root[data-theme="dark"] {
+  --chart-1: #ea580c;
+  --chart-2: #6366f1;
+  --chart-4: #a855f7;
+}
+
+/* Dashboards */
+
+.dash-panel {
+  transition: opacity 0.15s;
+}
+
+.is-refreshing {
+  opacity: 0.6;
+}
+
+.dash-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.dash-bar p {
+  margin: 0;
+  padding-bottom: 6px;
+}
+
+.dash-bar .spacer {
+  flex: 1;
+}
+
+.dash-bar .field {
+  margin: 0;
+  min-width: 200px;
+}
+
+.dash-more {
+  margin-top: 4px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tile {
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--area, var(--primary));
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+
+.tile p {
+  margin: 0;
+}
+
+.tile-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tile-value {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 2px 0 4px;
+  overflow-wrap: anywhere;
+}
+
+.tile-change,
+.tile-hint {
+  font-size: 12px;
+}
+
+.tile-hint {
+  color: var(--muted);
+}
+
+.tile-change-good strong,
+.tile-change-good > span[aria-hidden] {
+  color: var(--ok);
+}
+
+.tile-change-bad strong,
+.tile-change-bad > span[aria-hidden] {
+  color: var(--danger);
+}
+
+.tile-new {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-weight: 600;
+}
+
+.dash-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+/* Charts */
+
+.chart {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+
+.chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.chart-head h3 {
+  margin: 0;
+}
+
+.chart-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chart-switch {
+  flex: none;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.chart-plot {
+  position: relative;
+}
+
+.chart-plot svg {
+  display: block;
+  overflow: visible;
+}
+
+.chart-label,
+.chart-value {
+  font-size: 12px;
+  fill: var(--fg);
+}
+
+.chart-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tick {
+  font-size: 11px;
+  fill: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-gridline {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart-axis {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart-cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-wash {
+  opacity: 0.1;
+}
+
+.chart-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.chart-hit {
+  fill: transparent;
+}
+
+.chart-mark:hover path {
+  opacity: 0.78;
+}
+
+.chart-tip {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, calc(-100% - 6px));
+  pointer-events: none;
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.chart-tip-head {
+  color: var(--muted);
+}
+
+.chart-tip-line strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tip-key {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.chart-empty {
+  color: var(--muted);
+  padding: 28px 0;
+  text-align: center;
+  margin: 0;
+}
+
+.chart-table {
+  margin-bottom: 0;
+}
+
+@media (forced-colors: active) {
+  .chart-line {
+    stroke: CanvasText !important;
+  }
+
+  .chart-mark path {
+    fill: CanvasText !important;
+  }
+}
+
+/* Report pages */
+
+.report-crumbs {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.report-question {
+  margin-top: -6px;
+}
+
+.report-note {
+  font-size: 13px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--area, var(--primary));
+  background: var(--surface-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  max-width: 900px;
+}
+
+.report-table .num,
+.report-table .nowrap,
+.report-table .mono {
+  white-space: nowrap;
+}
+
+.report-table .wide {
+  min-width: 14em;
+}
+
+.report-totals td {
+  font-weight: 600;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line-strong);
+  border-bottom: none;
+}
+
+.report-sums {
+  margin-bottom: 16px;
+}
+
+.report-sums dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.report-indent {
+  padding-left: 16px;
+}
+
+.report-flow-heading td {
+  background: var(--surface-2);
+}
+
+.report-flow-subtotal td,
+.report-flow-net td {
+  border-top: 1px solid var(--line-strong);
+}
+
+.report-flow-opening td,
+.report-flow-closing td {
+  background: var(--area-soft, var(--surface-2));
+}
+
+.report-print-only {
+  display: none;
+}
+
+/* Report centre */
+
+.report-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.report-list li {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--area, var(--primary));
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.report-list p {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.report-link {
+  font-weight: 600;
+}
+
+.report-where {
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/*
+ * Printing a report: the whole page (not the till receipt area), without the
+ * menu and filters, in black on white, with the company name at the top. The
+ * report page itself switches the paper back from the till's 80 mm roll.
+ */
+@media print {
+  body:has(.report-print) {
+    --bg: #fff;
+    --surface: #fff;
+    --surface-2: #f2f2f2;
+    --fg: #000;
+    --muted: #444;
+    --line: #bbb;
+    --line-strong: #777;
+    background: #fff;
+    color: #000;
+  }
+
+  body:has(.report-print) * {
+    visibility: visible;
+  }
+
+  body:has(.report-print) .shell-head,
+  body:has(.report-print) .shell-side,
+  .report-print .report-no-print,
+  .report-print .alert {
+    display: none !important;
+  }
+
+  body:has(.report-print) .shell {
+    display: block;
+    min-height: 0;
+  }
+
+  body:has(.report-print) .shell-content {
+    padding: 0;
+    max-width: none;
+  }
+
+  .report-print .report-print-only {
+    display: block;
+  }
+
+  .report-company {
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #777;
+    font-size: 11pt;
+  }
+
+  .report-print h1 {
+    border-left: none;
+    padding-left: 0;
+    margin-bottom: 4px;
+  }
+
+  .report-print .table-wrap {
+    overflow: visible;
+    border: none;
+  }
+
+  .report-print .table {
+    font-size: 9pt;
+  }
+
+  .report-print .table th,
+  .report-print .table td {
+    padding: 3px 6px;
+  }
+
+  .report-print .table thead {
+    display: table-header-group;
+  }
+
+  .report-print .table tr {
+    break-inside: avoid;
+  }
+
+  .report-print a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .report-print .is-refreshing {
+    opacity: 1;
+  }
+}

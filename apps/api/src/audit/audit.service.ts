@@ -18,7 +18,9 @@ export type AuditAction =
   | 'password_reset'
   | 'sessions_ended'
   | 'counter_change'
-  | 'setup';
+  | 'setup'
+  /** A report downloaded for Excel (blueprint 14: every export is logged). */
+  | 'export';
 
 export const LOGIN_ACTIONS: AuditAction[] = ['login', 'login_failed', 'login_locked', 'logout'];
 

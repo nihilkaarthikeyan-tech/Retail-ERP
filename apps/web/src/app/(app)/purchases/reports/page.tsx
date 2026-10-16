@@ -1,8 +1,11 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-"use client";
-
+import { Suspense } from "react";
 import { PurchaseReports } from "@/components/purchasing/reports-tabs";
 
 export default function PurchaseReportsPage() {
-  return <PurchaseReports />;
+  return (
+    <Suspense fallback={<p className="muted">Loading…</p>}>
+      <PurchaseReports />
+    </Suspense>
+  );
 }

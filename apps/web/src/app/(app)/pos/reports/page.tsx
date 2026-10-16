@@ -1,8 +1,11 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-"use client";
-
+import { Suspense } from "react";
 import { PosReports } from "@/components/pos/pos-reports";
 
 export default function PosReportsPage() {
-  return <PosReports />;
+  return (
+    <Suspense fallback={<p className="muted">Loading…</p>}>
+      <PosReports />
+    </Suspense>
+  );
 }

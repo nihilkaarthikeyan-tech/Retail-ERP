@@ -11,6 +11,7 @@ import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { PosModule } from './pos/pos.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { PurchasingModule } from './purchasing/purchasing.module.js';
 import { ItemsModule } from './items/items.module.js';
 import { NumberingModule } from './numbering/numbering.module.js';
@@ -45,6 +46,7 @@ import { UsersModule } from './users/users.module.js';
     PurchasingModule,
     PosModule,
     AccountingModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

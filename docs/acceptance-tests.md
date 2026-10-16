@@ -406,3 +406,57 @@ Every scenario ends with the same check: total debits equal total credits, and e
 
 ### 7.13 Book health
 - **Then** after all of the above, every party's ledger balance equals their unpaid bills minus advances, and the opening check shows zero.
+
+## Module 9 — Reports and dashboards
+
+Reports only read. Each scenario checks that a report agrees with the documents and the books.
+
+### 9.1 Daily sales by store
+- **Given** MAIN sells 3 bills worth ₹1,000 net and ANNA 1 bill worth ₹500
+- **Then** MAIN shows 3 bills with an average bill of ₹333.33, and ANNA 1 bill.
+- **When** a ₹200 return is made the next day
+- **Then** that day shows −₹200 net sales and 0 bills.
+
+### 9.2 Best sellers and gross profit
+- **Then** items rank by quantity and by sales, and margin uses the cost at the time of sale.
+- **When** freight is added to a receipt after some of its goods were sold
+- **Then** the item's margin falls by that share, and the report's cost of goods sold equals the cost of goods sold in the accounts.
+- A cashier gets no cost or margin.
+
+### 9.3 Discounts given
+- **Then** a manual 5% line discount, a manager-approved 12% discount, an offer and a coupon each appear with who gave or approved them.
+
+### 9.4 Stock cover and sell-through
+- **Given** 60 in stock and 90 sold over 30 days
+- **Then** 20 days of stock are left.
+- **Given** 100 opening and 50 received with 90 sold
+- **Then** sell-through is 60%.
+
+### 9.5 Stock age
+- **Given** 40 units received 100 days ago and 20 received 10 days ago, with 30 on hand
+- **Then** 20 are in 0–30 days and 10 in 91–180 days.
+
+### 9.6 Stock variance and loss
+- **Given** ₹180 damage and a ₹270 count shortfall against ₹9,000 net sales
+- **Then** the loss is ₹450, which is 5.00% of sales.
+
+### 9.7 Cash position and cash flow
+- **Then** balances match the ledger.
+- For the period, opening cash + trading + investing + financing = closing cash.
+- Cash taken to the bank appears in none of them.
+
+### 9.8 Store limits
+- **Then** a store manager of MAIN sees only MAIN on every report and dashboard, and the totals equal MAIN's own.
+
+### 9.9 Dashboards agree with reports
+- **Then** today's sales tile equals the daily sales report for today, and month-to-date margin equals the gross profit report for the month.
+
+### 9.10 Daily summary email (decision 67)
+- **Then:**
+  - the email contains the agreed figures;
+  - it is sent once per day even if triggered twice;
+  - a switched-off user gets nothing;
+  - a mail failure is recorded and shown.
+
+### 9.11 Downloads are recorded
+- **Then** each CSV download appears in the history with the report name and filters.

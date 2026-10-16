@@ -3,6 +3,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { Alert, Badge, Button, CheckInput, DataTable, Dialog, SelectInput, TextareaInput, TextInput, type Column } from "@/components/ui";
@@ -179,7 +180,9 @@ const OFFLINE: ReportColumn<OfflineRow>[] = [
 /** The seven till reports. */
 export function PosReports() {
   const tills = useTills();
-  const [tab, setTab] = useState<Tab>("register");
+  const params = useSearchParams();
+  // The report centre links straight to a tab (?tab=hourly).
+  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === params.get("tab"))?.id ?? "register");
   const [filters, setFilters] = useState({ from: "", to: "", tillId: "" });
 
   return (
