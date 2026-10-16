@@ -4,6 +4,7 @@
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { hasPermission } from "shared";
+import { ExportButton } from "@/components/documents/export-button";
 import { PriceDialog } from "@/components/prices/price-dialog";
 import { PriceTable } from "@/components/prices/price-table";
 import { Alert, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
@@ -35,6 +36,7 @@ export function PricesView() {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Prices</h1>
         <span className="spacer" />
+        <ExportButton kind="prices" />
         {canManage && list ? (
           <Button variant="primary" onClick={() => setAdding(true)}>
             Add price

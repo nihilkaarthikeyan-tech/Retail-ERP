@@ -3,7 +3,9 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { CHECK_RESULTS, Decimal, receiptCheckSchema } from "shared";
+import { CHECK_RESULTS, Decimal, hasPermission, receiptCheckSchema } from "shared";
+import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
+import { PrintButton } from "@/components/documents/print-button";
 import { BackDatedBadge } from "@/components/stock/stock-doc-parts";
 import { Alert, Button, DataTable, RadioInput, TextareaInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -211,6 +213,14 @@ export function ReceiptView({ receipt: r, locations, onChanged }: ReceiptViewPro
         </h1>
         <ReceiptStatusBadge receipt={r} />
         <BackDatedBadge show={r.isBackDated} />
+        <span className="spacer" />
+        <PrintButton kind="goods_receipt" id={r.id} />
+        {hasPermission(user, "labels.print") && !r.isReturn && r.status !== "draft" && r.status !== "cancelled" ? (
+          <Link href={`/labels?receiptId=${r.id}`} className="btn btn-small">
+            Print labels
+          </Link>
+        ) : null}
+        {r.status !== "draft" ? <LedgerEntryButton documentType="goods_receipt" documentId={r.id} /> : null}
       </div>
 
       {r.warnings && r.warnings.length > 0 ? (

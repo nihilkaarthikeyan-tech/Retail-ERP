@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { createPurchaseOrderSchema, updatePurchaseOrderSchema } from "shared";
+import { PrintButton } from "@/components/documents/print-button";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { Alert, Badge, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -291,6 +292,8 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
         <h1 style={{ margin: 0 }}>{title}</h1>
         {order ? <OrderStatusBadge status={order.status} /> : null}
         {order?.overdue ? <Badge kind="off">Overdue</Badge> : null}
+        <span className="spacer" />
+        {order ? <PrintButton kind="purchase_order" id={order.id} /> : null}
       </div>
       {!rights.order && isDraft ? <Alert kind="info">You can look at this order but not change it.</Alert> : null}
       {changing ? <Alert kind="info">You are changing a finalised order. Every figure is worked out again and the change is logged with your reason.</Alert> : null}

@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { COUNT_TYPES, createCountSchema, Decimal, hasPermission, quantityProblem, updateCountSchema } from "shared";
+import { PrintButton } from "@/components/documents/print-button";
 import { Alert, Button, CheckInput, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -316,6 +317,8 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>{doc ? `Stock count ${doc.number}` : "New stock count"}</h1>
         {doc ? <StockStatusBadge status={doc.status} /> : null}
+        <span className="spacer" />
+        {doc ? <PrintButton kind="count_sheet" id={doc.id} label="Print count sheet" /> : null}
       </div>
       {!canDraft ? <Alert kind="info">You can look at this count but not change it.</Alert> : null}
 

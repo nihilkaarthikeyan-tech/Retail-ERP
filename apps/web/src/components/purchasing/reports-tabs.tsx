@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { useStockLocations } from "@/components/stock/use-stock-refs";
@@ -194,7 +195,9 @@ interface Filters {
 export function PurchaseReports() {
   const { user } = useAuth();
   const rights = purchaseRights(user);
-  const [tab, setTab] = useState<ReportTab>("order-follow-up");
+  const params = useSearchParams();
+  // The report centre links straight to a tab (?tab=register).
+  const [tab, setTab] = useState<ReportTab>(() => REPORT_TABS.find((t) => t.id === params.get("tab"))?.id ?? "order-follow-up");
   const [filters, setFilters] = useState<Filters>({ from: "", to: "", supplier: null, storeId: "", item: null });
   const def = REPORT_TABS.find((t) => t.id === tab)!;
 

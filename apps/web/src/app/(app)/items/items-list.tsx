@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { hasPermission } from "shared";
+import { ExportButton } from "@/components/documents/export-button";
 import { ItemSearchBox } from "@/components/items/item-search-box";
 import { ActiveBadge, Alert, Button, DataTable, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
@@ -71,6 +72,7 @@ export function ItemsList() {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Items</h1>
         <span className="spacer" />
+        <ExportButton kind="items" />
         {canManage ? (
           <Link href="/items/new" className="btn btn-primary">
             Add item

@@ -24,7 +24,11 @@ const SECTION_AREA: Record<string, MenuArea> = {
   Catalogue: "sales",
   Parties: "accounts",
   Purchases: "purchase",
+  "Billing counter": "sales",
   Inventory: "stock",
+  Accounts: "accounts",
+  Reports: "sales",
+  "Printing and data": "admin",
   Administration: "admin",
 };
 
@@ -70,6 +74,33 @@ export const MENU: MenuEntry[] = [
   { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
   { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
   { href: "/purchases/settings", label: "Purchase settings", permissions: ["purchase.settings"], section: "Purchases", icon: "settings" },
+  // Module 6
+  { href: "/till", label: "Open the till", permissions: ["pos.sell"], section: "Billing counter", icon: "receipt" },
+  { href: "/pos/bills", label: "Till bills", permissions: ["pos.sell", "pos.reports"], section: "Billing counter", icon: "list" },
+  { href: "/pos/reports", label: "Till reports", permissions: ["pos.reports"], section: "Billing counter", icon: "history" },
+  { href: "/pos/offers", label: "Offers and coupons", permissions: ["offers.manage"], section: "Billing counter", icon: "tag" },
+  { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
+  { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
+  { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
+  { href: "/pos/settings", label: "Till settings", permissions: ["pos.setup"], section: "Billing counter", icon: "settings" },
+  { href: "/pos/my-pin", label: "My till PIN", permissions: ["pos.sell", "pos.approve"], section: "Billing counter", icon: "key" },
+  // Module 7
+  { href: "/accounts", label: "Chart of accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", exact: true, icon: "book" },
+  { href: "/accounts/journals", label: "Journals", permissions: ["accounts.view", "journals.post", "cash.deposit"], section: "Accounts", icon: "file" },
+  { href: "/accounts/payments", label: "Receipts and payments", permissions: ["accounts.view", "payments.post", "cash.deposit"], section: "Accounts", icon: "rupee" },
+  { href: "/accounts/banks", label: "Bank accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "bank" },
+  { href: "/accounts/opening", label: "Opening balances", permissions: ["accounts.view", "journals.post"], section: "Accounts", icon: "calendar" },
+  { href: "/accounts/reports", label: "Accounts reports", permissions: ["accounts.view", "payments.post"], section: "Accounts", icon: "list" },
+  { href: "/accounts/closing", label: "Closing the books", permissions: ["accounts.view", "books.lock"], section: "Accounts", icon: "lock" },
+  { href: "/accounts/defaults", label: "Default accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "settings" },
+  // Module 9
+  { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view"], section: "Reports", icon: "chart" },
+  { href: "/reports/summary-email", label: "Daily summary email", permissions: ["reports.summary_email"], section: "Reports", icon: "mail" },
+  // Module 10
+  { href: "/labels", label: "Labels", permissions: ["labels.print"], section: "Printing and data", icon: "barcode" },
+  { href: "/imports", label: "Import from Excel", permissions: ["import.masters", "import.opening"], section: "Printing and data", icon: "upload" },
+  { href: "/printing", label: "Printing settings", permissions: ["print.settings"], section: "Printing and data", icon: "printer" },
+  { href: "/labels/templates", label: "Label templates", permissions: ["print.settings"], section: "Printing and data", icon: "tag" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },
@@ -79,6 +110,7 @@ export const MENU: MenuEntry[] = [
   { href: "/roles", label: "Roles", permissions: ["roles.manage"], section: "Administration", icon: "shield" },
   { href: "/history", label: "Change history", permissions: ["audit.view"], section: "Administration", icon: "history" },
   { href: "/history/logins", label: "Login history", permissions: ["audit.view"], section: "Administration", icon: "login" },
+  { href: "/go-live", label: "Going live", ownerAdminOnly: true, section: "Administration", icon: "flag" },
   { href: "/sessions", label: "My sessions", section: "Administration", icon: "devices" },
 ];
 
@@ -94,5 +126,8 @@ export function visibleMenu(user: CurrentUser | null): MenuEntry[] {
 export function isActive(entry: MenuEntry, pathname: string): boolean {
   if (entry.href === "/") return pathname === "/";
   if (entry.href === "/history" || entry.exact) return pathname === entry.href;
-  return pathname === entry.href || pathname.startsWith(`${entry.href}/`);
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  if (!under(entry.href)) return false;
+  // A more specific entry wins (e.g. /reports/summary-email over /reports).
+  return !MENU.some((other) => other.href.startsWith(`${entry.href}/`) && under(other.href));
 }

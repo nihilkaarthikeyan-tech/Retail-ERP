@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { hasPermission } from "shared";
 import { ItemSearchBox } from "@/components/items/item-search-box";
+import { Dashboards } from "@/components/reports/dashboards";
 import { SystemStatus } from "@/components/system-status";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -48,6 +49,8 @@ export default function DashboardPage() {
               : (company.error ?? "")}
         </p>
       ) : null}
+
+      <Dashboards />
 
       {hasPermission(user, "catalogue.view") ? (
         <>

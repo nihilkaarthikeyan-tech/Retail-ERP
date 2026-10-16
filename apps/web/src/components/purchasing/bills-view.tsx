@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { ACCOUNT_ROLE_LABELS, BILL_KIND_LABELS, BILL_STATUS_LABELS, purchaseRights, rupees, statusTone, type SupplierBillDto, type SupplierBillLineDto } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
+import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { BillCancelDialog, BillDebitNoteDialog, BillHoldDialog, heldText, PriceDifferenceDialog } from "./bills-dialogs";
 import { useUnitCodes } from "./bills-line-grid";
 
@@ -176,6 +177,8 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
           {isNote ? "Debit note" : "Supplier bill"} <span className="mono">{bill.number}</span>
         </h1>
         <BillBadges bill={bill} />
+        <span className="spacer" />
+        {!draft ? <LedgerEntryButton documentType="supplier_bill" documentId={bill.id} /> : null}
       </div>
       {bill.status === "cancelled" ? <Alert kind="info">{`Cancelled${bill.cancelReason ? `: ${bill.cancelReason}` : ""}.`}</Alert> : null}
       {bill.held ? <Alert kind="info">{heldText(bill)}</Alert> : null}
@@ -291,7 +294,7 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
           </Button>
         ) : null}
       </div>
-      <p className="muted">Payments to the supplier and supplier balances come with the accounts module.</p>
+      <p className="muted">Payments to the supplier are recorded under Accounts, Receipts and payments.</p>
 
       <PriceDifferenceDialog message={priceMessage ?? ""} open={priceMessage !== null} busy={busy === "finalise"} onConfirm={() => finalise(true)} onClose={() => setPriceMessage(null)} />
       {dialog === "cancel" ? <BillCancelDialog bill={bill} open onClose={() => setDialog(null)} onDone={onChanged} /> : null}

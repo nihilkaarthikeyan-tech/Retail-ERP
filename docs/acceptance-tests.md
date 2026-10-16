@@ -288,3 +288,224 @@ Sample data: supplier Sri Murugan Traders (Net 30), item Basmati Rice 1 kg (PCS,
 ### 5.13 Reorder suggestions
 - **Given** reorder level 50 and reorder quantity 100 at MAIN, on hand 30, nothing on order
 - **Then** the suggestion is 100 from the item's usual supplier; "Create orders" makes one draft order per supplier and marks the suggestion ordered; nothing is suggested while on hand + on order ≥ 50.
+
+## Module 6 — Point of sale
+
+Sample data: store MAIN, till T1, opening cash ₹2,000. Basmati Rice 1 kg sold at ₹120 including 5% GST (stock 100 at cost ₹90); Surf Excel 1 kg at ₹132 including 18% GST (stock 50 at cost ₹95); Ariel 1 kg at ₹150 including 18%. GST figures use the HSN rate list and stay **provisional until the CA approves the rates** (plan 06 answer 1). Accounts are posted from module 7; each scenario names the values stored. Scenarios marked ★ are the CLAUDE.md §6.6 minimums.
+
+### 6.1 A sale ★
+- **When** 2 Basmati and 1 Surf are billed and paid with ₹500 cash
+- **Then** total ₹372.00. Basmati: taxable ₹228.57, CGST ₹5.72, SGST ₹5.71. Surf: taxable ₹111.86, CGST ₹10.07, SGST ₹10.07. Change ₹128.00. Stock Basmati 98, Surf 49. Cost of goods sold stored: ₹180.00 and ₹95.00.
+
+### 6.2 A return ★
+- **When** 1 Basmati from 6.1 comes back
+- **Then** the refund is ₹120.00 in cash (taxable ₹114.29, CGST ₹2.86, SGST ₹2.85), and stock is 99 at the original cost of ₹90.00. Returning 2 more is refused: only 1 is left to return.
+
+### 6.3 An exchange ★
+- **When** the Surf comes back and the customer takes Ariel at ₹150 on the same screen
+- **Then** a return bill and a sale bill are linked and the customer pays ₹18.00. Stock: Surf +1, Ariel −1.
+
+### 6.4 Selling beyond stock at the till ★ (decision 32)
+- **When** 3 are sold with 1 in stock
+- **Then** the sale succeeds, stock is −2 and flagged, and the item appears on the negative-stock report. The same write-off in the back office is still refused.
+
+### 6.5 Shift close with cash count ★
+- **Then** expected cash = ₹2,000 + ₹372 − ₹120 + ₹18 − ₹200 cash out = ₹2,070.00. Counted ₹2,068.00 in notes and coins gives a difference of −₹2.00. The closing and the day-end summary are stored. Billing on that till is refused until a new shift is opened.
+
+### 6.6 Card and UPI payments recorded ★
+- **When** a ₹899 bill is paid ₹500 by card (approval 482913) and ₹399 by UPI (with its reference)
+- **Then** the payments report shows card ₹500 and UPI ₹399, and neither is in the expected cash. A card payment without its approval code is refused.
+
+### 6.7 Never saved twice
+- **Then** the same bill sent 5 times makes 1 bill, reduces stock once and records 1 set of payments. Two tills billing offline never produce the same number.
+
+### 6.8 Discount limits (decisions 19, 40, 76)
+- **Then** a cashier may give 5%. 12% is refused without a manager PIN and allowed with one, and the manager is recorded. A discount above the item's maximum is refused even with a PIN. A price above MRP is always refused.
+
+### 6.9 Offers (decision 17)
+- **When** "buy 2 get 1 free" on Parle-G and "10% off Biscuits" both apply
+- **Then** the bigger saving is applied automatically and the sale is never blocked. A coupon can be used once; cancelling the bill gives the use back.
+
+### 6.10 Expired batch (decision 13)
+- **Then** the earliest batch that has not expired is picked. A batch that expired yesterday is refused, even for a manager.
+
+### 6.11 Offline bill at an old price
+- **When** a bill is made offline at ₹120 after the price changed to ₹125
+- **Then** it is accepted as sold and appears on "Offline bills to check".
+
+## Module 7 — Accounting
+
+Every scenario ends with the same check: total debits equal total credits, and every ledger entry balances.
+
+### 7.1 Till shift posted at closing ★ (decision 39)
+- **Given** a shift with a ₹186 cash sale (3 kg rice), a ₹62 return of 1 kg and a ₹5 carry bag (₹200 paid, ₹14 change, ₹57 refunded), counted ₹9 short
+- **Then** closing the shift writes one ledger entry for the store:
+  - debits: cash in till ₹129.00, cost of goods sold ₹104.00, cash short ₹9.00;
+  - credits: sales ₹122.85, output CGST ₹3.07, output SGST ₹3.08, stock ₹104.00, cash in till ₹9.00.
+- The same entry moves the ₹2,000 starting float from the store's cash in hand into cash in till, and the ₹2,120 counted back to cash in hand, so cash in till is zero after every shift.
+- Nothing is posted to the accounts until the shift closes.
+
+### 7.2 Card and UPI ★
+- **When** a ₹899 bill is paid ₹500 by card and ₹399 by UPI and the shift closes
+- **Then** card settlement is debited ₹500 and UPI settlement ₹399; cash in till is not touched.
+- **When** a card payout of ₹500 arrives as ₹491 in the bank
+- **Then** the transfer credits card settlement ₹500 and debits the bank ₹491 and card commission ₹9.
+
+### 7.3 Purchase receipt and bill ★
+- **When** goods worth ₹1,000 are received with ₹100 freight added to stock
+- **Then** stock is debited ₹1,100, goods received not billed credited ₹1,000 and freight inward credited ₹100.
+- **When** the supplier's bill for ₹1,020 + ₹51 GST arrives against it
+- **Then** goods received not billed is debited ₹1,000 (back to zero), the price difference ₹20, input GST ₹51, and the supplier is credited ₹1,071.
+
+### 7.4 Paying a supplier
+- **When** one payment of ₹2,000 settles two bills of ₹1,071 and ₹800, oldest first
+- **Then** both bills owe ₹0 and ₹129 stays as an advance that the next bill uses. A supplier on hold for payments cannot be paid.
+
+### 7.5 Stock movements and transfers ★
+- **Then:**
+  - a transfer between shops credits the sending store's stock and debits goods in transit, and receiving debits the receiving store's stock;
+  - damage is debited to stock write-off;
+  - a count difference goes to stock adjustment.
+- "Stock against accounts" shows no difference for any store.
+
+### 7.6 Re-costing after a sale
+- **When** freight is added to a receipt after some of the goods were sold
+- **Then** only the difference is posted (to stock and cost of goods sold). Earlier ledger entries are unchanged and stock against accounts still shows no difference.
+
+### 7.7 Cancelling ★
+- **When** a posted supplier bill is cancelled
+- **Then** equal and opposite lines are written with the bill's date. The trial balance is as if it never happened, both entries stay in the ledger, and the database refuses any edit or delete of a ledger line.
+
+### 7.8 Locked books
+- **When** the books are locked up to 30 September
+- **Then** a store manager's posting dated 30 September is refused and the Accountant's is accepted.
+
+### 7.9 Journals
+- **Then:**
+  - an unbalanced journal is refused;
+  - a supplier-balance line without a supplier is refused;
+  - an income line without a store is refused;
+  - a line against a bill for more than it owes is refused.
+- A difference of a few paise is not "rounded away" on a journal above 5 paise.
+
+### 7.10 Opening balances
+- **When** an opening journal, two opening customer bills and opening stock are posted
+- **Then** the temporary opening account is at zero, and the customers' ageing shows the bills at their original dates.
+
+### 7.11 Year-end closing
+- **When** the year is closed to retained earnings
+- **Then** every income and expense account is zero in the new year and retained earnings moved by the year's profit, per store. Posting into the closed year is refused; cancelling the closing (with no later closing) allows it again.
+
+### 7.12 Credit sale at the till ★ (decision 22)
+- **Given** a customer approved for credit with a ₹5,000 limit who owes ₹4,500
+- **Then:**
+  - a ₹400 bill on account is accepted;
+  - a further ₹200 is refused unless a store manager approves, and the override is logged;
+  - a walk-in customer, or any offline bill, cannot use On account.
+- At shift close the customer's balance is debited. A receipt of ₹4,900 settles the bills oldest first, and the statement and ageing match the ledger.
+
+### 7.13 Book health
+- **Then** after all of the above, every party's ledger balance equals their unpaid bills minus advances, and the opening check shows zero.
+
+## Module 9 — Reports and dashboards
+
+Reports only read. Each scenario checks that a report agrees with the documents and the books.
+
+### 9.1 Daily sales by store
+- **Given** MAIN sells 3 bills worth ₹1,000 net and ANNA 1 bill worth ₹500
+- **Then** MAIN shows 3 bills with an average bill of ₹333.33, and ANNA 1 bill.
+- **When** a ₹200 return is made the next day
+- **Then** that day shows −₹200 net sales and 0 bills.
+
+### 9.2 Best sellers and gross profit
+- **Then** items rank by quantity and by sales, and margin uses the cost at the time of sale.
+- **When** freight is added to a receipt after some of its goods were sold
+- **Then** the item's margin falls by that share, and the report's cost of goods sold equals the cost of goods sold in the accounts.
+- A cashier gets no cost or margin.
+
+### 9.3 Discounts given
+- **Then** a manual 5% line discount, a manager-approved 12% discount, an offer and a coupon each appear with who gave or approved them.
+
+### 9.4 Stock cover and sell-through
+- **Given** 60 in stock and 90 sold over 30 days
+- **Then** 20 days of stock are left.
+- **Given** 100 opening and 50 received with 90 sold
+- **Then** sell-through is 60%.
+
+### 9.5 Stock age
+- **Given** 40 units received 100 days ago and 20 received 10 days ago, with 30 on hand
+- **Then** 20 are in 0–30 days and 10 in 91–180 days.
+
+### 9.6 Stock variance and loss
+- **Given** ₹180 damage and a ₹270 count shortfall against ₹9,000 net sales
+- **Then** the loss is ₹450, which is 5.00% of sales.
+
+### 9.7 Cash position and cash flow
+- **Then** balances match the ledger.
+- For the period, opening cash + trading + investing + financing = closing cash.
+- Cash taken to the bank appears in none of them.
+
+### 9.8 Store limits
+- **Then** a store manager of MAIN sees only MAIN on every report and dashboard, and the totals equal MAIN's own.
+
+### 9.9 Dashboards agree with reports
+- **Then** today's sales tile equals the daily sales report for today, and month-to-date margin equals the gross profit report for the month.
+
+### 9.10 Daily summary email (decision 67)
+- **Then:**
+  - the email contains the agreed figures;
+  - it is sent once per day even if triggered twice;
+  - a switched-off user gets nothing;
+  - a mail failure is recorded and shown.
+
+### 9.11 Downloads are recorded
+- **Then** each CSV download appears in the history with the report name and filters.
+
+## Module 10 — Printing, labels, import and export
+
+### 10.1 Amount in words
+- **Then** ₹1,23,450.25 reads "Rupees One Lakh Twenty-Three Thousand Four Hundred Fifty and Twenty-Five Paise Only", and ₹0.50 reads "Fifty Paise Only".
+
+### 10.2 Purchase order print
+- **Then** the purchase order prints with the store's own address and GSTIN, the supplier, the lines and the totals.
+- A draft prints marked DRAFT, and every print is in the history.
+
+### 10.3 Payment receipt print
+- **Then** the payment receipt prints with the bills it settled and the amount in words.
+
+### 10.4 Labels
+- **Then:**
+  - 3 copies of an item with an EAN-13 barcode give 3 labels, and their bars decode back to the same barcode;
+  - a receipt of 12 units gives 12 labels with batch and expiry;
+  - "price changed since" lists only items whose price changed after that date.
+
+### 10.5 Importing items
+- **Given** a file of 3 new items, one with a second barcode and a box unit
+- **Then** all three are added.
+- **When** one row has an unknown item group
+- **Then** that row fails with its row number, and the other rows are saved.
+- Running the fixed failed-rows file adds the last item; running the whole file again adds nothing twice.
+
+### 10.6 Leading zeros and Indian numbers
+- **Then** barcode "0012345678905" and HSN "0902" are kept as typed, and a price of "1,05,000.50" reads as 105000.50.
+
+### 10.7 Change mode
+- **Then:**
+  - importing prices with new start dates adds new price rows and keeps the old ones;
+  - changing a customer's mobile keeps everything else.
+
+### 10.8 Opening stock and opening bills
+- **Then** imported opening quantities and costs for two locations become draft opening counts, and nothing moves until they are finalised.
+- Imported opening bills post against the temporary opening account, and the opening check reflects them.
+
+### 10.9 Export and import back
+- **Then** an exported item list imported back in change mode reports "nothing to change" for every row.
+
+### 10.10 Clearing trial data (decision 72)
+- **Given** a trial sale, receipt and payment
+- **Then** clearing keeps items, customers, suppliers, prices and users, and removes bills, stock, the ledger and the counters. Stock is zero.
+- **Then** it is refused without the typed company name.
+- **Then** after the go-live date is recorded, it is refused for good, even for the Owner.
+
+### 10.11 Store limits and rights
+- **Then** a store manager prints only their own stores' documents, and a cashier can neither import nor export.

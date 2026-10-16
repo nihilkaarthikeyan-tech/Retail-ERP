@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { businessDate, hasPermission, PARTY_STATUSES } from "shared";
+import { ExportButton } from "@/components/documents/export-button";
 import { HoldBadge, PartyStatusBadge } from "@/components/parties/status-badge";
 import { Alert, Badge, Button, CheckInput, DataTable, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
@@ -91,6 +92,7 @@ export function SuppliersList() {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Suppliers</h1>
         <span className="spacer" />
+        <ExportButton kind="suppliers" />
         {canManage ? (
           <Link href="/suppliers/new" className="btn btn-primary">
             Add supplier

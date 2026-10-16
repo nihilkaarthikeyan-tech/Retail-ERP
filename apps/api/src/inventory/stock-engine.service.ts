@@ -1,11 +1,13 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // The only code that writes stock ledger entries and positions (rules 5–7).
 // Every caller passes its own transaction, so the document, its stock lines
-// and (from module 7) its ledger entries succeed or fail together.
+// and its ledger entries succeed or fail together. Every change of stock value
+// (new movements and re-costing of later ones) is posted to the ledger here.
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { apply, Decimal, EMPTY_STATE, QUANTITY_TOLERANCE, type StockIntent, type StockState } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import type { Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
+import { LedgerService } from '../ledger/ledger.service.js';
 
 export type EntryKind = 'in' | 'out' | 'set' | 'reverse';
 
@@ -31,6 +33,8 @@ export interface Movement {
   reversesId?: bigint;
   accountRole: string;
   isCancellation?: boolean;
+  /** held: the document posts this value itself (goods receipts) or later (till sales at shift close). */
+  ledger?: 'auto' | 'held';
 }
 
 export interface PostOptions {
@@ -39,6 +43,9 @@ export interface PostOptions {
   actorId: string | null;
   /** Item names for messages. */
   describe?: (itemId: string, locationId: string) => string;
+  /** Directly revalued entries post against this role (freight added later), not their own. */
+  counterRole?: string;
+  ledgerRemark?: string;
 }
 
 type DbDecimal = Prisma.Decimal;
@@ -48,6 +55,8 @@ const ORDER = [{ postingAt: 'asc' as const }, { id: 'asc' as const }];
 
 @Injectable()
 export class StockEngine {
+  constructor(private readonly ledger: LedgerService) {}
+
   /**
    * Writes the movements in order and returns the created entries in the same
    * order. Positions of every item × location touched are locked first.
@@ -58,6 +67,7 @@ export class StockEngine {
     await tx.$executeRaw`SELECT set_config('app.stock_recost', 'on', true)`;
 
     const created: StockLedgerEntry[] = [];
+    const touched = new Set<bigint>();
     for (const [index, m] of movements.entries()) {
       const costSourceId = m.costSourceIndex !== undefined ? created[m.costSourceIndex].id : (m.costSourceId ?? null);
       if (m.costSourceIndex !== undefined && m.costSourceIndex >= index) throw new Error('costSourceIndex must point at an earlier movement');
@@ -87,18 +97,21 @@ export class StockEngine {
           valueAfter: placeholder,
           accountRole: m.accountRole,
           isCancellation: m.isCancellation ?? false,
+          ledgerHeld: m.ledger === 'held',
           createdById: opts.actorId,
         },
       });
-      await this.recompute(tx, entry, opts, true);
+      await this.recompute(tx, entry, opts, true, touched);
       created.push(await tx.stockLedgerEntry.findUniqueOrThrow({ where: { id: entry.id } }));
     }
     await this.refreshBatchPositions(tx, movements, opts);
+    const newIds = new Set(created.map((e) => e.id));
+    await this.ledger.syncStock(tx, [...new Set([...newIds, ...touched])], { actorId: opts.actorId, newIds, remark: opts.ledgerRemark });
     return created;
   }
 
   /** Cancels a document: one reversing entry per original entry, at the original's time. */
-  async reverseDocument(tx: Db, documentId: string, cancelDocumentLine: (e: StockLedgerEntry) => string, opts: PostOptions): Promise<StockLedgerEntry[]> {
+  async reverseDocument(tx: Db, documentId: string, cancelDocumentLine: (e: StockLedgerEntry) => string, opts: PostOptions & { ledger?: 'auto' | 'held' }): Promise<StockLedgerEntry[]> {
     const originals = await tx.stockLedgerEntry.findMany({ where: { documentId, isCancellation: false }, orderBy: ORDER });
     const movements: Movement[] = originals.map((e) => ({
       companyId: e.companyId,
@@ -114,6 +127,8 @@ export class StockEngine {
       reversesId: e.id,
       accountRole: e.accountRole,
       isCancellation: true,
+      // A till sale still waiting for its shift close is undone the same way; otherwise the caller decides.
+      ledger: opts.ledger ?? (e.ledgerHeld ? 'held' : 'auto'),
     }));
     // Undo in reverse order so a later leg (e.g. into transit) is undone before the leg it took its cost from.
     return this.post(tx, movements.reverse(), opts);
@@ -133,10 +148,14 @@ export class StockEngine {
     }
     await this.lockPositions(tx, entries.map((e) => ({ itemId: e.itemId, locationId: e.locationId, companyId: e.companyId, batchId: e.batchId }) as Movement));
     await tx.$executeRaw`SELECT set_config('app.stock_recost', 'on', true)`;
+    const touched = new Set<bigint>();
     for (const c of changes) {
       const updated = await tx.stockLedgerEntry.update({ where: { id: c.entryId }, data: { incomingCost: c.incomingCost } });
-      await this.recompute(tx, updated, opts, false);
+      await this.recompute(tx, updated, opts, false, touched);
+      touched.add(c.entryId);
     }
+    const counterRole = opts.counterRole ? new Map(changes.map((c) => [c.entryId, opts.counterRole!])) : undefined;
+    await this.ledger.syncStock(tx, [...touched], { actorId: opts.actorId, counterRole, remark: opts.ledgerRemark });
   }
 
   // ---- internals ----
@@ -170,12 +189,12 @@ export class StockEngine {
    * derived figures, updating the position, and cascading to entries that
    * take their cost from a changed entry (transfers and moves).
    */
-  private async recompute(tx: Db, from: StockLedgerEntry, opts: PostOptions, isNewEntry: boolean): Promise<void> {
+  private async recompute(tx: Db, from: StockLedgerEntry, opts: PostOptions, isNewEntry: boolean, touched: Set<bigint>): Promise<void> {
     const queue: StockLedgerEntry[] = [from];
     let first = true;
     while (queue.length) {
       const start = queue.shift()!;
-      const changedCostIds = await this.replayFrom(tx, start, opts, first && isNewEntry);
+      const changedCostIds = await this.replayFrom(tx, start, opts, first && isNewEntry, touched);
       first = false;
       if (changedCostIds.length) {
         const dependents = await tx.stockLedgerEntry.findMany({ where: { costSourceId: { in: changedCostIds } }, orderBy: ORDER });
@@ -187,7 +206,7 @@ export class StockEngine {
     }
   }
 
-  private async replayFrom(tx: Db, start: StockLedgerEntry, opts: PostOptions, checkNegative: boolean): Promise<bigint[]> {
+  private async replayFrom(tx: Db, start: StockLedgerEntry, opts: PostOptions, checkNegative: boolean, touched: Set<bigint>): Promise<bigint[]> {
     const { itemId, locationId } = start;
     const previous = await tx.stockLedgerEntry.findFirst({
       where: { itemId, locationId, OR: [{ postingAt: { lt: start.postingAt } }, { postingAt: start.postingAt, id: { lt: start.id } }] },
@@ -239,6 +258,7 @@ export class StockEngine {
         !D(e.valueAfter).eq(applied.after.value);
       if (changed) {
         if (!D(e.unitCost).eq(applied.unitCost) || !D(e.valueChange).eq(applied.valueChange)) changedCostIds.push(e.id);
+        if (!D(e.valueChange).eq(applied.valueChange)) touched.add(e.id);
         await tx.stockLedgerEntry.update({
           where: { id: e.id },
           data: {

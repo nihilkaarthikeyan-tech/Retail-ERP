@@ -4,8 +4,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Decimal } from "shared";
+import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
+import { PrintButton } from "@/components/documents/print-button";
 import { Alert, Button, DataTable, type Column } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
+import { stockPrintKind } from "@/lib/documents";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { canDraftKind, canFinaliseKind, indianTime, KIND_LABELS, locationLabel, reasonLabel, showQuantity } from "@/lib/stock";
 import type { StockDocLineDto, StockDocumentDto, StockLocationDto, StoreRef } from "@/lib/types";
@@ -129,6 +132,9 @@ export function StockDocumentView({ doc, locations, stores, onChanged }: StockDo
         </h1>
         <StockStatusBadge status={doc.status} />
         <BackDatedBadge show={doc.isBackDated} />
+        <span className="spacer" />
+        {stockPrintKind(doc.kind) ? <PrintButton kind={stockPrintKind(doc.kind)!} id={doc.id} /> : null}
+        {doc.status !== "draft" ? <LedgerEntryButton documentType="stock_document" documentId={doc.id} /> : null}
       </div>
       {doc.status === "cancelled" ? (
         <Alert kind="info">

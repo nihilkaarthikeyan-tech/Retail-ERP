@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { createGoodsReceiptSchema, Decimal, updateGoodsReceiptSchema } from "shared";
+import { PrintButton } from "@/components/documents/print-button";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { StockItemAdder } from "@/components/stock/stock-item-adder";
 import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
@@ -249,6 +250,8 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>{receipt ? `Goods receipt ${receipt.number}` : "Receive goods"}</h1>
         {receipt ? <ReceiptStatusBadge receipt={receipt} /> : null}
+        <span className="spacer" />
+        {receipt ? <PrintButton kind="goods_receipt" id={receipt.id} /> : null}
       </div>
       {!rights.receive ? <Alert kind="info">You can look at this draft but not change it.</Alert> : null}
 

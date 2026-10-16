@@ -14,6 +14,6 @@ import { StockReportsService } from './stock-reports.service.js';
   imports: [CompanyModule, NumberingModule, FinancialYearsModule, ItemsModule],
   controllers: [InventoryController],
   providers: [StockEngine, StockDocumentsService, InventoryMastersService, StockReportsService],
-  exports: [StockEngine, StockDocumentsService, StockReportsService],
+  exports: [StockEngine, StockDocumentsService, StockReportsService, InventoryMastersService],
 })
 export class InventoryModule {}
