@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { hasPermission, PARTY_STATUSES } from "shared";
+import { ExportButton } from "@/components/documents/export-button";
 import { QuickAddDialog } from "@/components/parties/quick-add-dialog";
 import { PartyStatusBadge } from "@/components/parties/status-badge";
 import { Alert, Badge, Button, DataTable, SelectInput, type Column } from "@/components/ui";
@@ -83,6 +84,7 @@ export function CustomersList() {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Customers</h1>
         <span className="spacer" />
+        <ExportButton kind="customers" />
         {canQuickAdd ? <Button onClick={() => setQuickAdd(true)}>Quick add</Button> : null}
         {canManage ? (
           <Link href="/customers/new" className="btn btn-primary">

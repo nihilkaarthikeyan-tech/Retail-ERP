@@ -3,6 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { hasPermission, reorderLevelSchema } from "shared";
+import { ExportButton } from "@/components/documents/export-button";
 import { ItemPicker } from "@/components/prices/item-picker";
 import { useStockLocations } from "@/components/stock/use-stock-refs";
 import { ActiveBadge, Alert, Button, CheckInput, DataTable, Dialog, SelectInput, TextInput, type Column } from "@/components/ui";
@@ -115,6 +116,7 @@ export default function ReorderLevelsPage() {
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>Reorder levels</h1>
         <span className="spacer" />
+        <ExportButton kind="reorder_levels" />
         {canManage && storeId ? (
           <Button variant="primary" onClick={() => open(null)}>
             Add reorder level

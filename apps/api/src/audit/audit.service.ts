@@ -20,7 +20,9 @@ export type AuditAction =
   | 'counter_change'
   | 'setup'
   /** A report downloaded for Excel (blueprint 14: every export is logged). */
-  | 'export';
+  | 'export'
+  /** A document printed (blueprint 16: every print is logged). */
+  | 'print';
 
 export const LOGIN_ACTIONS: AuditAction[] = ['login', 'login_failed', 'login_locked', 'logout'];
 

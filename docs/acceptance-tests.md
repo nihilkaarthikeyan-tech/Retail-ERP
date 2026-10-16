@@ -460,3 +460,52 @@ Reports only read. Each scenario checks that a report agrees with the documents 
 
 ### 9.11 Downloads are recorded
 - **Then** each CSV download appears in the history with the report name and filters.
+
+## Module 10 — Printing, labels, import and export
+
+### 10.1 Amount in words
+- **Then** ₹1,23,450.25 reads "Rupees One Lakh Twenty-Three Thousand Four Hundred Fifty and Twenty-Five Paise Only", and ₹0.50 reads "Fifty Paise Only".
+
+### 10.2 Purchase order print
+- **Then** the purchase order prints with the store's own address and GSTIN, the supplier, the lines and the totals.
+- A draft prints marked DRAFT, and every print is in the history.
+
+### 10.3 Payment receipt print
+- **Then** the payment receipt prints with the bills it settled and the amount in words.
+
+### 10.4 Labels
+- **Then:**
+  - 3 copies of an item with an EAN-13 barcode give 3 labels, and their bars decode back to the same barcode;
+  - a receipt of 12 units gives 12 labels with batch and expiry;
+  - "price changed since" lists only items whose price changed after that date.
+
+### 10.5 Importing items
+- **Given** a file of 3 new items, one with a second barcode and a box unit
+- **Then** all three are added.
+- **When** one row has an unknown item group
+- **Then** that row fails with its row number, and the other rows are saved.
+- Running the fixed failed-rows file adds the last item; running the whole file again adds nothing twice.
+
+### 10.6 Leading zeros and Indian numbers
+- **Then** barcode "0012345678905" and HSN "0902" are kept as typed, and a price of "1,05,000.50" reads as 105000.50.
+
+### 10.7 Change mode
+- **Then:**
+  - importing prices with new start dates adds new price rows and keeps the old ones;
+  - changing a customer's mobile keeps everything else.
+
+### 10.8 Opening stock and opening bills
+- **Then** imported opening quantities and costs for two locations become draft opening counts, and nothing moves until they are finalised.
+- Imported opening bills post against the temporary opening account, and the opening check reflects them.
+
+### 10.9 Export and import back
+- **Then** an exported item list imported back in change mode reports "nothing to change" for every row.
+
+### 10.10 Clearing trial data (decision 72)
+- **Given** a trial sale, receipt and payment
+- **Then** clearing keeps items, customers, suppliers, prices and users, and removes bills, stock, the ledger and the counters. Stock is zero.
+- **Then** it is refused without the typed company name.
+- **Then** after the go-live date is recorded, it is refused for good, even for the Owner.
+
+### 10.11 Store limits and rights
+- **Then** a store manager prints only their own stores' documents, and a cashier can neither import nor export.

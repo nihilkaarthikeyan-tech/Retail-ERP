@@ -3,9 +3,11 @@
 
 import { useState } from "react";
 import { createStockDocumentSchema, STOCK_IN_REASONS, STOCK_OUT_REASONS, updateStockDocumentSchema } from "shared";
+import { PrintButton } from "@/components/documents/print-button";
 import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { stockPrintKind } from "@/lib/documents";
 import { blankToNull } from "@/lib/format";
 import { canDraftKind, canFinaliseKind, defaultStoreId, indianTime, KIND_LABELS, REASON_LABELS, stockLocationsOf, storesFromLocations, useBusinessToday } from "@/lib/stock";
 import type { ItemDto, StockDocumentDto, StockLocationDto, StoreRef } from "@/lib/types";
@@ -188,6 +190,12 @@ function EditorForm({ kind, doc, locations, receivingStores, onSaved, initialLin
     <div>
       <div className="toolbar">
         <h1 style={{ margin: 0 }}>{doc ? `${KIND_LABELS[kind]} ${doc.number}` : `New ${KIND_LABELS[kind].toLowerCase()}`}</h1>
+        {doc && stockPrintKind(doc.kind) ? (
+          <>
+            <span className="spacer" />
+            <PrintButton kind={stockPrintKind(doc.kind)!} id={doc.id} />
+          </>
+        ) : null}
         {doc ? <StockStatusBadge status={doc.status} /> : null}
       </div>
       {!canDraft ? <Alert kind="info">You can look at this draft but not change it.</Alert> : null}

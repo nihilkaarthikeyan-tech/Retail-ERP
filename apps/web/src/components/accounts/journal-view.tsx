@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { PrintButton } from "@/components/documents/print-button";
 import { OrdersReasonDialog, useOrderStores } from "@/components/purchasing/orders-shared";
 import { Alert, Button } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -48,6 +49,7 @@ export function JournalView({ journal, onChanged, onEdit }: { journal: JournalDt
         </h1>
         <DocStatusBadge status={j.status} />
         <span className="spacer" />
+        <PrintButton kind="journal" id={j.id} />
         {j.status !== "draft" ? <LedgerEntryButton documentType="journal" documentId={j.id} /> : null}
       </div>
       {j.status === "cancelled" ? <Alert kind="info">{`Cancelled${j.cancelReason ? `: ${j.cancelReason}` : ""}.${j.postedAt ? " Equal and opposite entries were posted on the same date." : ""}`}</Alert> : null}

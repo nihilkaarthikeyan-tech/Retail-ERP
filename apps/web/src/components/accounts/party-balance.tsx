@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { PrintButton } from "@/components/documents/print-button";
 import { api } from "@/lib/api";
 import { accountRights, dec, type PartyKind } from "@/lib/accounts";
 import { useAuth } from "@/lib/auth-context";
@@ -26,6 +27,7 @@ export function PartyBalance({ partyType, partyId }: { partyType: PartyKind; par
         {closing !== null ? <span className="muted"> ({words})</span> : null}
       </span>
       <Link href={`/accounts/reports?tab=statement&partyType=${partyType}&partyId=${partyId}`}>Statement</Link>
+      <PrintButton kind="statement" id={`${partyType}:${partyId}`} label="Print statement" />
     </span>
   );
 }

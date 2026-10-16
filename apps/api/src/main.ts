@@ -19,6 +19,8 @@ async function bootstrap() {
   app.enableCors({
     origin: (process.env.WEB_ORIGIN ?? 'http://localhost:3000').split(',').map((o) => o.trim()),
     credentials: true,
+    // Lets the browser read the file name of downloads (templates, exports, failed rows).
+    exposedHeaders: ['Content-Disposition'],
   });
   app.enableShutdownHooks();
   const port = Number(process.env.API_PORT ?? 4000);

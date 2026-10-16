@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, useState } from "react";
+import { PrintButton } from "@/components/documents/print-button";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { reportCsv, type ReportColumn } from "@/components/purchasing/reports-tabs";
 import { useOrderStores } from "@/components/purchasing/orders-shared";
@@ -430,6 +431,10 @@ function Statement({ f }: { f: Filters }) {
             <p>
               Before {formatDate(f.from)}: <strong>{rupees(d.opening)}</strong> ({owedWord}). Now: <strong className={neg(d.closing)}>{rupees(d.closing)}</strong> ({owedWord}; a minus means the other way round).
             </p>
+            <div className="toolbar">
+              <PrintButton kind="statement" id={`${f.partyType}:${party.id}`} label="Print statement" />
+              <span className="muted">The printed statement lists every entry to date, with the bills still unpaid.</span>
+            </div>
             <ReportTable name={`statement-${party.code}`} columns={ledgerColumns(false, false)} rows={d.rows} rowKey={(r) => r.id} empty="Nothing in this period." />
             <h3>Unpaid bills and unused payments today</h3>
             <div className="table-wrap">

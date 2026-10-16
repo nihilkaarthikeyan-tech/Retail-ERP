@@ -17,6 +17,6 @@ import { PaymentsService } from './payments.service.js';
   imports: [CompanyModule, NumberingModule, PurchasingModule, PosModule],
   controllers: [AccountingController],
   providers: [AccountingCommon, CatchUpService, ChartService, JournalsService, PaymentsService, ClosingService, LedgerReportsService],
-  exports: [AccountingCommon, LedgerReportsService],
+  exports: [AccountingCommon, LedgerReportsService, ClosingService],
 })
 export class AccountingModule {}

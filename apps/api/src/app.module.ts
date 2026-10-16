@@ -9,6 +9,7 @@ import { FinancialYearsModule } from './financial-years/financial-years.module.j
 import { HealthModule } from './health/health.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { PosModule } from './pos/pos.module.js';
 import { ReportsModule } from './reports/reports.module.js';
@@ -47,6 +48,7 @@ import { UsersModule } from './users/users.module.js';
     PosModule,
     AccountingModule,
     ReportsModule,
+    DocumentsModule,
   ],
 })
 export class AppModule {}

@@ -45,6 +45,7 @@ export function Changes({ changes }: { changes: unknown }) {
 /** Plain words for actions that are not simple record changes. */
 const ACTION_LABELS: Record<string, string> = {
   export: "Downloaded a report",
+  print: "Printed",
 };
 
 export function actionLabel(action: string): string {
@@ -55,7 +56,7 @@ const FILTER_LABELS: Record<string, string> = { from: "From", to: "To", asOn: "A
 
 /** A report download (POST /reports/export-log): the report's name, its filters and how many rows. */
 export function ExportDetails({ changes }: { changes: unknown }) {
-  const c = (changes && typeof changes === "object" ? changes : {}) as { report?: unknown; filters?: unknown; rows?: unknown };
+  const c = (changes && typeof changes === "object" ? changes : {}) as { report?: unknown; filters?: unknown; rows?: unknown; format?: unknown };
   const filters = c.filters && typeof c.filters === "object" ? Object.entries(c.filters as Record<string, unknown>).filter(([, v]) => v !== null && v !== "") : [];
   const show = (key: string, v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && /^(from|to|asOn|asOf)$/.test(key) ? formatDate(v) : String(v));
   return (
@@ -71,6 +72,43 @@ export function ExportDetails({ changes }: { changes: unknown }) {
       {typeof c.rows === "number" ? (
         <li>
           <strong>Rows</strong>: {c.rows}
+        </li>
+      ) : null}
+      {c.format === "xlsx" || c.format === "csv" ? (
+        <li>
+          <strong>File</strong>: {c.format === "xlsx" ? "Excel" : "CSV"}
+        </li>
+      ) : null}
+    </ul>
+  );
+}
+
+/** A print (module 10): the document's title and number, how it was marked, or the labels printed. */
+export function PrintDetails({ changes }: { changes: unknown }) {
+  const c = (changes && typeof changes === "object" ? changes : {}) as { title?: unknown; number?: unknown; mark?: unknown; template?: unknown; labels?: unknown };
+  if (typeof c.labels === "number") {
+    return (
+      <ul className="changes">
+        <li>
+          <strong>Labels</strong>: {c.labels}
+        </li>
+        {typeof c.template === "string" ? (
+          <li>
+            <strong>Template</strong>: {c.template}
+          </li>
+        ) : null}
+      </ul>
+    );
+  }
+  const title = [typeof c.title === "string" ? c.title : null, typeof c.number === "string" ? c.number : null].filter(Boolean).join(" ");
+  return (
+    <ul className="changes">
+      <li>
+        <strong>Document</strong>: {title || "—"}
+      </li>
+      {c.mark === "DRAFT" || c.mark === "CANCELLED" ? (
+        <li>
+          <strong>Marked</strong>: {c.mark}
         </li>
       ) : null}
     </ul>
@@ -179,7 +217,7 @@ export function AuditTable({ path, withEntity, record }: AuditTableProps) {
           } satisfies Column<AuditRow>,
         ]
       : []),
-    { key: "changes", header: withEntity ? "Changes" : "Details", render: (r) => (r.action === "export" ? <ExportDetails changes={r.changes} /> : <Changes changes={r.changes} />) },
+    { key: "changes", header: withEntity ? "Changes" : "Details", render: (r) => (r.action === "export" ? <ExportDetails changes={r.changes} /> : r.action === "print" ? <PrintDetails changes={r.changes} /> : <Changes changes={r.changes} />) },
     { key: "reason", header: "Reason", render: (r) => r.reason ?? <span className="muted">—</span> },
     { key: "ip", header: "Address", render: (r) => r.ipAddress ?? "—" },
   ];

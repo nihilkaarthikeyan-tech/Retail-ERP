@@ -28,6 +28,7 @@ const SECTION_AREA: Record<string, MenuArea> = {
   Inventory: "stock",
   Accounts: "accounts",
   Reports: "sales",
+  "Printing and data": "admin",
   Administration: "admin",
 };
 
@@ -95,6 +96,11 @@ export const MENU: MenuEntry[] = [
   // Module 9
   { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view"], section: "Reports", icon: "chart" },
   { href: "/reports/summary-email", label: "Daily summary email", permissions: ["reports.summary_email"], section: "Reports", icon: "mail" },
+  // Module 10
+  { href: "/labels", label: "Labels", permissions: ["labels.print"], section: "Printing and data", icon: "barcode" },
+  { href: "/imports", label: "Import from Excel", permissions: ["import.masters", "import.opening"], section: "Printing and data", icon: "upload" },
+  { href: "/printing", label: "Printing settings", permissions: ["print.settings"], section: "Printing and data", icon: "printer" },
+  { href: "/labels/templates", label: "Label templates", permissions: ["print.settings"], section: "Printing and data", icon: "tag" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },
@@ -104,6 +110,7 @@ export const MENU: MenuEntry[] = [
   { href: "/roles", label: "Roles", permissions: ["roles.manage"], section: "Administration", icon: "shield" },
   { href: "/history", label: "Change history", permissions: ["audit.view"], section: "Administration", icon: "history" },
   { href: "/history/logins", label: "Login history", permissions: ["audit.view"], section: "Administration", icon: "login" },
+  { href: "/go-live", label: "Going live", ownerAdminOnly: true, section: "Administration", icon: "flag" },
   { href: "/sessions", label: "My sessions", section: "Administration", icon: "devices" },
 ];
 

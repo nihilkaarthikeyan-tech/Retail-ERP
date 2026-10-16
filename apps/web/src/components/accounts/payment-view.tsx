@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { settleSchema } from "shared";
+import { PrintButton } from "@/components/documents/print-button";
 import { OrdersReasonDialog, useOrderStores } from "@/components/purchasing/orders-shared";
 import { Alert, Button, DataTable, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -173,6 +174,7 @@ export function PaymentView({ payment, onChanged, onReload, onEdit }: { payment:
         </h1>
         <DocStatusBadge status={p.status} />
         <span className="spacer" />
+        <PrintButton kind="payment" id={p.id} />
         {p.status !== "draft" ? <LedgerEntryButton documentType="payment" documentId={p.id} /> : null}
       </div>
       {p.status === "cancelled" ? <Alert kind="info">{`Cancelled${p.cancelReason ? `: ${p.cancelReason}` : ""}.${p.postedAt ? " Equal and opposite entries were posted on the same date and the bills it settled owe again." : ""}`}</Alert> : null}

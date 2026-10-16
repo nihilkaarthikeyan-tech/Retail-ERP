@@ -152,6 +152,54 @@ async function request<T>(
   return data as T;
 }
 
+/** Sends a request with the session cookie; a failed answer becomes an ApiError (as for JSON requests). */
+async function send(method: "GET" | "POST", path: string, body: FormData | undefined, accept: string, options: RequestOptions): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      credentials: "include",
+      // No Content-Type for a form: the browser adds it with the multipart boundary.
+      headers: { Accept: accept, ...options.headers },
+      body,
+      cache: "no-store",
+    });
+  } catch (err) {
+    throw new ApiError(0, `Cannot reach the server (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (!res.ok) {
+    if (res.status === 401 && options.redirectOnUnauthorized !== false) onUnauthorized();
+    throw errorFromBody(res.status, parseBody(await res.text()));
+  }
+  return res;
+}
+
+/** A file sent by the API (a spreadsheet, an image), with its name when the server gives one. */
+export interface ApiFile {
+  blob: Blob;
+  fileName: string | null;
+}
+
+/** The file name in a Content-Disposition header, if the browser may read it. */
+function fileNameOf(res: Response): string | null {
+  const header = res.headers.get("Content-Disposition");
+  const m = header ? /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header) : null;
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Uploads a form with a file (multipart) and returns the parsed JSON answer. */
+async function upload<T>(path: string, form: FormData, options: RequestOptions = {}): Promise<T> {
+  const res = await send("POST", path, form, "application/json", options);
+  if (res.status === 204) return undefined as T;
+  return parseBody(await res.text()) as T;
+}
+
+/** Fetches a file (spreadsheet or image) with the session cookie. */
+async function file(path: string, options: RequestOptions = {}): Promise<ApiFile> {
+  const res = await send("GET", path, undefined, "*/*", options);
+  return { blob: await res.blob(), fileName: fileNameOf(res) };
+}
+
 /** Typed JSON client for our API. Always sends the session cookie. */
 export const api = {
   get: <T>(path: string, options?: RequestOptions) => request<T>("GET", path, undefined, options),
@@ -159,7 +207,28 @@ export const api = {
   patch: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("PATCH", path, body ?? {}, options),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("PUT", path, body ?? {}, options),
   delete: <T>(path: string, options?: RequestOptions) => request<T>("DELETE", path, undefined, options),
+  /** Multipart upload (a spreadsheet to import, a logo). */
+  upload,
+  /** A file download as a Blob (templates, exports, failed rows, the logo). */
+  file,
 };
+
+/**
+ * Downloads a file from the API and hands it to the browser to save. The
+ * server's file name is used when the browser can read it; otherwise `fallbackName`.
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const { blob, fileName } = await file(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName ?? fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Give the browser a moment to start the download before the address is released.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 /** Builds a query string from defined, non-empty values. */
 export function query(params: Record<string, string | number | undefined | null>): string {

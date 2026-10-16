@@ -71,6 +71,13 @@ export const PERMISSIONS = {
   'books.lock': 'Lock the books up to a date, post before it, and close or reopen a financial year',
   // Module 9
   'reports.summary_email': 'Set up the owner’s daily summary email',
+  // Module 10
+  'print.settings': 'Change the letterhead, standard terms and label templates',
+  'labels.print': 'Print price and barcode labels',
+  'import.masters': 'Import item groups, brands, items, prices, customers, suppliers and reorder levels',
+  'import.opening': 'Import opening stock and unpaid bills from before going live',
+  'export.masters': 'Export items, prices, customers, suppliers and reorder levels for Excel',
+  'golive.manage': 'Clear trial data and record the go-live date (Owner)',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -130,6 +137,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'payments.post',
     'cash.deposit',
     'books.lock',
+    'import.opening',
+    'export.masters',
   ],
   store_manager: [
     'company.view',
@@ -162,10 +171,12 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'offers.manage',
     'accounts.view',
     'cash.deposit',
+    'labels.print',
+    'export.masters',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
   cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close'],
-  stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count', 'purchase.view', 'purchase.receive'],
+  stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count', 'purchase.view', 'purchase.receive', 'labels.print'],
   viewer_auditor: [
     'company.view',
     'stores.view',
@@ -182,6 +193,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'purchase.view',
     'pos.reports',
     'accounts.view',
+    'export.masters',
   ],
 };
 

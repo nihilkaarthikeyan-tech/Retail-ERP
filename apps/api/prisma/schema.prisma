@@ -36,6 +36,9 @@ model Company {
   fiscalYearStartMonth Int       @default(4)
   /// Set by the accounting module; nothing is dated on or before it.
   lockDate             DateTime? @db.Date
+  /// Module 10: the day the shop went live; once set, trial data can never be cleared (decision 72).
+  goLiveDate           DateTime? @db.Date
+  goLiveById           String?   @db.Uuid
   active               Boolean   @default(true)
 
   createdAt   DateTime @default(now())
@@ -2473,4 +2476,114 @@ model SummaryEmailRun {
   error        String?
 
   @@index([companyId, startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Module 10: printing, labels, import and export, going live
+// (docs/plans/10-printing-import-export.md).
+// ---------------------------------------------------------------------------
+
+model PrintSettings {
+  id              String  @id @default(uuid()) @db.Uuid
+  companyId       String  @unique @db.Uuid
+  paperSize       String  @default("A4")
+  showLogo        Boolean @default(true)
+  storeLetterhead Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+/// Reusable footer text for documents (blueprint 16 "Standard terms").
+model StandardTerms {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @db.Uuid
+  title      String
+  text       String
+  /// selling, buying or both.
+  usedFor    String
+  defaultFor String[]
+  active     Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+model LabelTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  name      String
+  sizeKey   String
+  width     Decimal  @db.Decimal(6, 1)
+  height    Decimal  @db.Decimal(6, 1)
+  media     String
+  fields    String[]
+  fontSize  Int      @default(8)
+  isDefault Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+model ImportJob {
+  id         String    @id @default(uuid()) @db.Uuid
+  companyId  String    @db.Uuid
+  kind       String
+  /// add, change, add_or_change.
+  mode       String
+  fileName   String
+  /// previewed, running, done, partly_done, failed.
+  status     String
+  /// File column → field.
+  mapping    Json
+  totalRows  Int       @default(0)
+  added      Int       @default(0)
+  changed    Int       @default(0)
+  unchanged  Int       @default(0)
+  failed     Int       @default(0)
+  message    String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  rows ImportRow[]
+
+  @@index([companyId, createdAt])
+}
+
+model ImportRow {
+  id        BigInt  @id @default(autoincrement())
+  jobId     String  @db.Uuid
+  rowNumber Int
+  /// pending, added, changed, unchanged, failed.
+  outcome   String  @default("pending")
+  /// A key that identifies the record, so a rerun skips rows already done.
+  recordKey String?
+  recordId  String?
+  message   String?
+  /// The row as read from the file (for the failed-rows file).
+  data      Json
+
+  job ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, rowNumber])
+}
+
+/// Each clearing of trial data, step by step (decision 72; blueprint 15 process 7).
+model TrialClearing {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @db.Uuid
+  reason        String
+  steps         Json
+  requestedAt   DateTime  @default(now())
+  requestedById String?   @db.Uuid
+  finishedAt    DateTime?
 }
