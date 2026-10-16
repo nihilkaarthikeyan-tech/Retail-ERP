@@ -35,6 +35,8 @@ export class PurchaseSettingsService {
 function toDto(s: PurchaseSettings) {
   return {
     requireOrderForReceipt: s.requireOrderForReceipt,
+    billNeedsOrder: s.billNeedsOrder,
+    billNeedsReceipt: s.billNeedsReceipt,
     overOrderPercent: s.overOrderPercent.toString(),
     overReceiptPercent: s.overReceiptPercent.toString(),
     overBillingPercent: s.overBillingPercent.toString(),

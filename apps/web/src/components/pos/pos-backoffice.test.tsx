@@ -287,4 +287,29 @@ describe("OfferForm", () => {
     expect(w.path).toBe("/pos/offers");
     expect(w.body).toMatchObject({ code: "PARLE21", kind: "free_goods", appliesTo: "groups", targetIds: [GROUP_ID], buyQuantity: "2", freeQuantity: "1", value: null, startDate: "2026-10-15" });
   });
+
+  it("mix and match (plan 11 B3): any 3 for ₹999 sends the set, not a value", async () => {
+    const { fetchMock, onSaved } = setup();
+    fireEvent.change(screen.getByLabelText("Kind of offer"), { target: { value: "mix_match" } });
+    fireEvent.click(await screen.findByLabelText("Biscuits"));
+    fireEvent.change(screen.getByLabelText("Items in a set"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save offer" }));
+    expect(await screen.findByText('Give a set price, or choose "cheapest one free"')).toBeTruthy();
+    expect(writes(fetchMock)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Price of a set (₹)"), { target: { value: "999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save offer" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(writes(fetchMock)[0].body).toMatchObject({ kind: "mix_match", setQuantity: 3, setPrice: "999", cheapestFree: false, value: null, buyQuantity: null });
+  });
+
+  it("mix and match with the cheapest free needs no set price", async () => {
+    const { fetchMock, onSaved } = setup();
+    fireEvent.change(screen.getByLabelText("Kind of offer"), { target: { value: "mix_match" } });
+    fireEvent.click(await screen.findByLabelText("Biscuits"));
+    fireEvent.change(screen.getByLabelText("Items in a set"), { target: { value: "2" } });
+    fireEvent.click(screen.getByLabelText(/Cheapest one of each set free/));
+    fireEvent.click(screen.getByRole("button", { name: "Save offer" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(writes(fetchMock)[0].body).toMatchObject({ kind: "mix_match", setQuantity: 2, setPrice: null, cheapestFree: true });
+  });
 });

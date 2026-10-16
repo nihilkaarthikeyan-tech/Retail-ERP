@@ -10,6 +10,8 @@ const optionalText = (max: number) => z.string().trim().max(max).optional().null
 const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
 const uuid = z.string().uuid();
 const instant = z.string().datetime({ offset: true });
+/** "MM-DD" (plan 11 C10); whether it is a real day is checked by the API. */
+const dayMonthShape = z.string().regex(/^\d{2}-\d{2}$/);
 const percent = nonNegativeDecimalString.refine((v) => Number(v) <= 100, 'Must be 100 or less');
 const signedDecimal = z
   .string()
@@ -21,7 +23,7 @@ export const PAYMENT_KINDS = ['cash', 'card', 'upi', 'other', 'on_account'] as c
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];
 export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit'] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
-export const OFFER_KINDS = ['percent', 'amount', 'special_price', 'free_goods'] as const;
+export const OFFER_KINDS = ['percent', 'amount', 'special_price', 'free_goods', 'buy_get', 'mix_match'] as const;
 export const OFFER_TARGETS = ['items', 'groups', 'brands', 'bill'] as const;
 
 /** Account role each payment kind posts to (module 7). */
@@ -95,9 +97,18 @@ export const posSettingsSchema = z
     printReceiptCopies: z.number().int().min(0).max(3),
     /** Owner only, after the CA approves the GST rates (plan 06 answer 1). */
     liveAllowed: z.boolean(),
+    /** Plan 11 B4: the service item a home-delivery charge is billed as. */
+    deliveryItemId: uuid.nullable(),
   })
   .partial();
 export type PosSettingsInput = z.infer<typeof posSettingsSchema>;
+
+/** Plan 11 B4 (decision 47): a store's delivery charge, none at or above "free above". */
+export const storeDeliveryChargesSchema = z.object({
+  deliveryCharge: nonNegativeDecimalString,
+  deliveryFreeAbove: positiveDecimalString.optional().nullable(),
+});
+export type StoreDeliveryChargesInput = z.infer<typeof storeDeliveryChargesSchema>;
 
 // ---- PINs, approvals and cashier switching (decisions 40, 68) ----
 
@@ -179,9 +190,31 @@ export const posLineSchema = z.object({
   freeOfLineNo: z.number().int().min(1).optional(),
   /** Returns: the original line. */
   returnOfLineId: uuid.optional().nullable(),
+  /** Plan 11 C1: who sold this line, when not the bill's salesperson. */
+  salesStaffId: uuid.optional().nullable(),
   charged: chargedFields.optional(),
 });
 export type PosLineInput = z.infer<typeof posLineSchema>;
+
+export const DELIVERY_STATUSES = ['pending', 'delivered', 'cancelled'] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
+/** Plan 11 B4 (decision 46): simple home-delivery details on a till bill. */
+export const deliveryDetailsSchema = z.object({
+  name: optionalText(120),
+  address: trimmed(500),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{10}$/, 'Phone number must be 10 digits')
+    .optional()
+    .nullable(),
+  deliverOn: isoDate.optional().nullable(),
+  remarks: optionalText(300),
+  /** Offline bills: the delivery charge the till added (kept as charged, pos-offline §5). */
+  charge: nonNegativeDecimalString.optional(),
+});
+export type DeliveryDetailsInput = z.infer<typeof deliveryDetailsSchema>;
 
 const billPart = z.object({
   number: trimmed(40),
@@ -198,8 +231,22 @@ export const posTransactionSchema = z
     offline: z.boolean().default(false),
     cashierToken: z.string().optional(),
     customerId: uuid.optional().nullable(),
-    /** A customer added on the till (offline too): name + mobile (module 3 quick add). */
-    newCustomer: z.object({ clientId: uuid, name: trimmed(120), mobile: z.string().regex(/^[0-9]{10}$/) }).optional(),
+    /**
+     * A customer added on the till (offline too): name + mobile (module 3 quick add), and an optional
+     * birthday and anniversary (plan 11 C10). The dates are only shape-checked here: a bill made
+     * offline is never refused for them; the API leaves out a date that is not real.
+     */
+    newCustomer: z
+      .object({
+        clientId: uuid,
+        name: trimmed(120),
+        mobile: z.string().regex(/^[0-9]{10}$/),
+        birthday: dayMonthShape.optional().nullable(),
+        birthYear: z.number().int().optional().nullable(),
+        anniversary: dayMonthShape.optional().nullable(),
+        anniversaryYear: z.number().int().optional().nullable(),
+      })
+      .optional(),
     couponCode: optionalText(40),
     billDiscount: z.object({ percent: percent.optional(), amount: nonNegativeDecimalString.optional(), approvalToken: z.string().optional() }).optional(),
     /** Return part: against a bill, or without one (manager approval). */
@@ -211,8 +258,13 @@ export const posTransactionSchema = z
     expectedTotal: signedDecimal.optional(),
     /** A manager's approval to sell on account above the credit limit or with overdue bills (decision 22). */
     creditApprovalToken: z.string().optional(),
+    /** Plan 11 C1: the salesperson of the bill (lines may name their own). */
+    salesStaffId: uuid.optional().nullable(),
+    /** Plan 11 B4: deliver the sale to the customer's home. */
+    delivery: deliveryDetailsSchema.optional().nullable(),
   })
-  .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return');
+  .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return')
+  .refine((t) => !t.delivery || t.sale, { message: 'Home delivery is for a sale', path: ['delivery'] });
 export type PosTransactionInput = z.infer<typeof posTransactionSchema>;
 
 export const cancelBillSchema = z.object({ reason: trimmed(300), approvalToken: z.string() });
@@ -241,6 +293,44 @@ export const posReportQuerySchema = z.object({
 });
 export type PosReportQuery = z.infer<typeof posReportQuerySchema>;
 
+/** Plan 11 C1: sales by salesperson, by day or by month. */
+export const salespersonReportQuerySchema = posReportQuerySchema.extend({
+  groupBy: z.enum(['day', 'month']).optional(),
+  salesStaffId: uuid.optional(),
+});
+export type SalespersonReportQuery = z.infer<typeof salespersonReportQuerySchema>;
+
+// ---- Sales staff (plan 11 C1: no login; code unique per store) ----
+
+export const salesStaffSchema = z.object({
+  storeId: uuid,
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{1,10}$/, 'Code must be 1–10 letters or digits'),
+  name: trimmed(80),
+  active: z.boolean().optional(),
+});
+export type SalesStaffInput = z.infer<typeof salesStaffSchema>;
+export const updateSalesStaffSchema = salesStaffSchema.omit({ storeId: true }).partial();
+export type UpdateSalesStaffInput = z.infer<typeof updateSalesStaffSchema>;
+
+// ---- Home deliveries (plan 11 B4) ----
+
+export const deliveryQuerySchema = z.object({
+  storeId: uuid.optional(),
+  status: z.enum(DELIVERY_STATUSES).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
+});
+export type DeliveryQuery = z.infer<typeof deliveryQuerySchema>;
+
+export const deliveryUpdateSchema = z.object({ remarks: optionalText(300) });
+export type DeliveryUpdateInput = z.infer<typeof deliveryUpdateSchema>;
+
 // ---- Offers and coupons (plan 06 answer 2: simple offers + coupons) ----
 
 export const offerSchema = z
@@ -257,6 +347,14 @@ export const offerSchema = z
     value: nonNegativeDecimalString.optional().nullable(),
     buyQuantity: positiveDecimalString.optional().nullable(),
     freeQuantity: positiveDecimalString.optional().nullable(),
+    /** buy_get: the other item given free (plan 11 B3). */
+    freeItemId: uuid.optional().nullable(),
+    /** mix_match: any N of the listed items … */
+    setQuantity: z.number().int().min(2, 'A set is at least 2 items').max(50).optional().nullable(),
+    /** … for a set price … */
+    setPrice: positiveDecimalString.optional().nullable(),
+    /** … or the cheapest of each set free. */
+    cheapestFree: z.boolean().optional(),
     minQuantity: nonNegativeDecimalString.optional().nullable(),
     minAmount: nonNegativeDecimalString.optional().nullable(),
     storeIds: z.array(uuid).default([]),
@@ -269,8 +367,11 @@ export const offerSchema = z
   })
   .refine((o) => !o.endDate || o.endDate >= o.startDate, { message: 'The end date cannot be before the start date', path: ['endDate'] })
   .refine((o) => o.appliesTo === 'bill' || o.targetIds.length > 0, { message: 'Choose the items, groups or brands', path: ['targetIds'] })
-  .refine((o) => o.kind !== 'free_goods' || (o.buyQuantity && o.freeQuantity), { message: 'Give "buy" and "free" quantities', path: ['buyQuantity'] })
-  .refine((o) => o.kind === 'free_goods' || o.value != null, { message: 'Give the value', path: ['value'] })
+  .refine((o) => !['free_goods', 'buy_get'].includes(o.kind) || (o.buyQuantity && o.freeQuantity), { message: 'Give "buy" and "free" quantities', path: ['buyQuantity'] })
+  .refine((o) => o.kind !== 'buy_get' || !!o.freeItemId, { message: 'Choose the item given free', path: ['freeItemId'] })
+  .refine((o) => o.kind !== 'mix_match' || !!o.setQuantity, { message: 'Give how many items make a set', path: ['setQuantity'] })
+  .refine((o) => o.kind !== 'mix_match' || !!o.setPrice !== !!o.cheapestFree, { message: 'Give a set price, or choose "cheapest one free"', path: ['setPrice'] })
+  .refine((o) => !['percent', 'amount', 'special_price'].includes(o.kind) || o.value != null, { message: 'Give the value', path: ['value'] })
   .refine((o) => o.kind !== 'percent' || Number(o.value ?? 0) <= 100, { message: 'A percentage cannot be above 100', path: ['value'] })
   .refine((o) => o.appliesTo !== 'bill' || ['percent', 'amount'].includes(o.kind), { message: 'A whole-bill offer is a percentage or an amount', path: ['kind'] });
 export type OfferInput = z.infer<typeof offerSchema>;

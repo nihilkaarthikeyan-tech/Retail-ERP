@@ -1,9 +1,11 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  businessDate,
   type CreateCustomerInput,
   type CurrentUser,
   type CustomerCreditInput,
+  dayMonthYearProblem,
   type CustomerQuery,
   Decimal,
   gstinStateCode,
@@ -79,7 +81,19 @@ export class CustomersService {
   // ---- Creating ----
 
   async quickAdd(input: QuickAddCustomerInput, actor: Actor) {
-    return this.create({ name: input.name, mobile: input.mobile, email: input.email ?? null, confirmDuplicate: input.confirmDuplicate }, actor);
+    return this.create(
+      {
+        name: input.name,
+        mobile: input.mobile,
+        email: input.email ?? null,
+        birthday: input.birthday ?? null,
+        birthYear: input.birthYear ?? null,
+        anniversary: input.anniversary ?? null,
+        anniversaryYear: input.anniversaryYear ?? null,
+        confirmDuplicate: input.confirmDuplicate,
+      },
+      actor,
+    );
   }
 
   async create(input: CreateCustomerInput, actor: Actor) {
@@ -104,6 +118,7 @@ export class CustomersService {
           mobile: input.mobile ?? null,
           email: input.email ?? null,
           notes: input.notes ?? null,
+          ...this.checkDates(input, null),
           customerGroupId: group.id,
           gstin: input.gstin ?? null,
           stateCode,
@@ -142,8 +157,9 @@ export class CustomersService {
     await this.checkRefs(input);
     if (input.mobile && input.mobile !== before.mobile) await this.checkDuplicateMobile(before.companyId, input.mobile, id, input.confirmDuplicate ?? false);
     const { confirmDuplicate: _c, ...data } = input;
+    const dates = this.checkDates(input, before);
     const updated = await this.prisma.$transaction(async (tx) => {
-      const after = await tx.customer.update({ where: { id }, data: { ...data, stateCode, updatedById: actor.userId }, include: customerInclude });
+      const after = await tx.customer.update({ where: { id }, data: { ...data, ...dates, stateCode, updatedById: actor.userId }, include: customerInclude });
       await this.audit.recordUpdate(tx, actor, 'customer', id, summarise(before), summarise(after));
       return after;
     });
@@ -186,6 +202,18 @@ export class CustomersService {
     return customer;
   }
 
+  /**
+   * Credit limits in force (plan 11 A7): none when the group skips credit checks; else the
+   * customer's own when set, else the group's, else the company default.
+   */
+  async creditTermsFor(db: Db, customer: Customer): Promise<{ skip: boolean; creditLimit: Decimal; overdueLimit: Decimal }> {
+    const group = await db.customerGroup.findUnique({ where: { id: customer.customerGroupId } });
+    if (group?.skipCreditCheck) return { skip: true, creditLimit: new Decimal(0), overdueLimit: new Decimal(0) };
+    if (customer.creditLimit.gt(0)) return { skip: false, creditLimit: customer.creditLimit, overdueLimit: customer.overdueLimit };
+    if (group && group.creditLimit.gt(0)) return { skip: false, creditLimit: group.creditLimit, overdueLimit: group.overdueLimit };
+    return { skip: false, creditLimit: (await this.settings.get(db)).defaultCreditLimit, overdueLimit: customer.overdueLimit };
+  }
+
   /** Credit limit in force: the customer's → the group's (unless it skips checks) → the company default. 0 = no limit. */
   async creditLimitFor(db: Db, customer: Customer): Promise<Decimal> {
     if (customer.creditLimit.gt(0)) return customer.creditLimit;
@@ -206,6 +234,23 @@ export class CustomersService {
   }
 
   // ---- Checks ----
+
+  /** Plan 11 C10: a birthday or anniversary is a real day and month; the year (optional) must fit it. */
+  private checkDates(input: Pick<CreateCustomerInput, 'birthday' | 'birthYear' | 'anniversary' | 'anniversaryYear'>, before: Customer | null) {
+    const pick = <K extends 'birthday' | 'birthYear' | 'anniversary' | 'anniversaryYear'>(k: K) => (input[k] !== undefined ? input[k] : (before?.[k] ?? null));
+    const out = { birthday: pick('birthday'), birthYear: pick('birthYear'), anniversary: pick('anniversary'), anniversaryYear: pick('anniversaryYear') };
+    // A cleared day and month clears its year too.
+    if (input.birthday === null && input.birthYear === undefined) out.birthYear = null;
+    if (input.anniversary === null && input.anniversaryYear === undefined) out.anniversaryYear = null;
+    for (const [what, dm, yr] of [
+      ['Birthday', out.birthday, out.birthYear],
+      ['Anniversary', out.anniversary, out.anniversaryYear],
+    ] as const) {
+      const problem = dayMonthYearProblem(dm, yr, businessDate());
+      if (problem) throw new BadRequestException(`${what}: ${problem}`);
+    }
+    return out;
+  }
 
   private checkGstin(gstin: string | null, stateCode: string | null): string | null {
     if (!gstin) return stateCode;
@@ -250,6 +295,8 @@ function summarise(c: CustomerRow): Record<string, unknown> {
     mobile: c.mobile,
     email: c.email,
     notes: c.notes,
+    birthday: c.birthday ? `${c.birthday}${c.birthYear ? `-${c.birthYear}` : ''}` : null,
+    anniversary: c.anniversary ? `${c.anniversary}${c.anniversaryYear ? `-${c.anniversaryYear}` : ''}` : null,
     group: c.customerGroup.code,
     gstin: c.gstin,
     stateCode: c.stateCode,
@@ -272,6 +319,10 @@ export function toCustomerDto(c: CustomerRow) {
     mobile: c.mobile,
     email: c.email,
     notes: c.notes,
+    birthday: c.birthday,
+    birthYear: c.birthYear,
+    anniversary: c.anniversary,
+    anniversaryYear: c.anniversaryYear,
     customerGroup: c.customerGroup,
     gstin: c.gstin,
     stateCode: c.stateCode,

@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { DashboardsService } from './dashboards.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
 import { SalesReportsService } from './sales-reports.service.js';
+import { type SeasonSellThroughQuery, seasonSellThroughQuerySchema, SeasonReportsService } from './season-reports.service.js';
 import { StockAnalysisService } from './stock-analysis.service.js';
 import { SummaryEmailService } from './summary-email.service.js';
 
@@ -28,6 +29,7 @@ export class ReportsController {
     private readonly money: MoneyReportsService,
     private readonly dashboards: DashboardsService,
     private readonly summary: SummaryEmailService,
+    private readonly seasons: SeasonReportsService,
   ) {}
 
   // ---- Dashboards ----
@@ -68,6 +70,11 @@ export class ReportsController {
   }
   @Get('reports/gross-profit') @RequireAnyPermission('cost_price.view', 'stock.cost.view') grossProfit(@Query(zod(reportQuerySchema)) q: ReportQuery, @ReqUser() user: AuthUser) {
     return this.sales.grossProfit(q, user);
+  }
+
+  /** Plan 11 C4: bought, sold, in stock and share sold per season, or per style, group or item of one season. */
+  @Get('reports/season-sell-through') @RequirePermission('pos.reports') seasonSellThrough(@Query(zod(seasonSellThroughQuerySchema)) q: SeasonSellThroughQuery, @ReqUser() user: AuthUser) {
+    return this.seasons.sellThrough(q, user);
   }
 
   // ---- Stock ----

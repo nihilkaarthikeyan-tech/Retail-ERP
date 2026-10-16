@@ -29,6 +29,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         <div>Till: {r.till}</div>
         {r.cashier ? <div>Cashier: {r.cashier}</div> : null}
         {r.customer ? <div>Customer: {r.customer}</div> : null}
+        {r.salesStaff ? <div>Salesperson: {r.salesStaff}</div> : null}
       </div>
       <table className="till-receipt-lines">
         <thead>
@@ -45,7 +46,9 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
               <td>
                 {l.name}
                 {l.free ? " (free)" : ""}
+                {l.offer ? <div className="till-receipt-small">{l.offer}</div> : null}
                 {nonZero(l.discount) && !l.free ? <div className="till-receipt-small">Discount {rupees(l.discount)}</div> : null}
+                {l.salesStaff ? <div className="till-receipt-small">Sold by {l.salesStaff}</div> : null}
                 {l.serials.length ? <div className="till-receipt-small">S/N {l.serials.join(", ")}</div> : null}
               </td>
               <td className="num">{qty(l.quantity)}</td>
@@ -56,6 +59,9 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         </tbody>
       </table>
       <dl className="till-receipt-totals">
+        {(r.offers ?? []).map((o) => (
+          <OfferRow key={o.name} name={o.name} saving={o.saving} />
+        ))}
         {nonZero(r.totals.discount) ? (
           <>
             <dt>You saved</dt>
@@ -110,9 +116,30 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
           </tbody>
         </table>
       ) : null}
+      {r.delivery ? (
+        <div className="till-receipt-meta">
+          <div>
+            <strong>Home delivery</strong>
+            {r.delivery.deliverOn ? ` on ${r.delivery.deliverOn}` : ""}
+          </div>
+          {r.delivery.name ? <div>{r.delivery.name}</div> : null}
+          <div>{r.delivery.address}</div>
+          {r.delivery.phone ? <div>Phone: {r.delivery.phone}</div> : null}
+        </div>
+      ) : null}
       {r.provisional ? <p className="till-receipt-small">GST rates not yet approved (provisional)</p> : null}
       {r.footer ? <p className="till-receipt-foot">{r.footer}</p> : null}
     </article>
+  );
+}
+
+/** Plan 11 B3: each offer on the bill and what it saved. */
+function OfferRow({ name, saving }: { name: string; saving: string }) {
+  return (
+    <>
+      <dt className="till-receipt-small">Offer: {name}</dt>
+      <dd className="till-receipt-small">−{rupees(saving)}</dd>
+    </>
   );
 }
 

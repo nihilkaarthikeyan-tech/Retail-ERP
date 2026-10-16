@@ -154,6 +154,22 @@ function SettingsForm({ settings, canEdit, onSaved }: { settings: PurchaseSettin
           disabled={!canEdit}
           onChange={(e) => set("checkSupplierBillNo", e.target.checked)}
         />
+        <CheckInput
+          id="ps-bill-needs-order"
+          label="A bill for goods needs a purchase order"
+          description="Every goods line must come from an order. A supplier can be allowed to skip this on its own page."
+          checked={form.billNeedsOrder}
+          disabled={!canEdit}
+          onChange={(e) => set("billNeedsOrder", e.target.checked)}
+        />
+        <CheckInput
+          id="ps-bill-needs-receipt"
+          label="A bill for goods needs a goods receipt"
+          description="Goods must be received first; a bill that receives goods by itself is refused. A supplier can be allowed to skip this on its own page."
+          checked={form.billNeedsReceipt}
+          disabled={!canEdit}
+          onChange={(e) => set("billNeedsReceipt", e.target.checked)}
+        />
       </div>
 
       {canEdit ? (

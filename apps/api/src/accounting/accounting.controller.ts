@@ -8,11 +8,17 @@ import {
   approveChartSchema,
   type BankAccountInput,
   bankAccountSchema,
+  type CashBookQuery,
+  cashBookQuerySchema,
   cancelSchema,
   type CreateAccountInput,
   createAccountSchema,
   type DocListQuery,
   docListQuerySchema,
+  type ExpenseInput,
+  type ExpenseListQuery,
+  expenseListQuerySchema,
+  expenseSchema,
   type JournalInput,
   journalSchema,
   type LedgerQuery,
@@ -39,8 +45,10 @@ import { z } from 'zod';
 import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
+import { CashBookService } from './cash-book.service.js';
 import { ChartService } from './chart.service.js';
 import { ClosingService } from './closing.service.js';
+import { ExpensesService } from './expenses.service.js';
 import { JournalsService } from './journals.service.js';
 import { LedgerReportsService } from './ledger-reports.service.js';
 import { PaymentsService } from './payments.service.js';
@@ -58,6 +66,8 @@ export class AccountingController {
     private readonly payments: PaymentsService,
     private readonly closing: ClosingService,
     private readonly reports: LedgerReportsService,
+    private readonly expenses: ExpensesService,
+    private readonly cashBooks: CashBookService,
   ) {}
 
   // ---- Chart of accounts ----
@@ -147,6 +157,23 @@ export class AccountingController {
     return this.payments.undoSettlement(settlementId, actor, user);
   }
 
+  // ---- Simple expenses (plan 11 C8): the store is checked inside the service ----
+  @Get('expenses/options') @RequireAnyPermission('expenses.post', 'accounts.view') expenseOptions(@ReqUser() user: AuthUser) {
+    return this.expenses.options(user);
+  }
+  @Get('expenses') @RequireAnyPermission('expenses.post', 'accounts.view') listExpenses(@Query(zod(expenseListQuerySchema)) q: ExpenseListQuery, @ReqUser() user: AuthUser) {
+    return this.expenses.list(q, user);
+  }
+  @Get('expenses/:id') @RequireAnyPermission('expenses.post', 'accounts.view') expense(@Param('id', id()) expenseId: string, @ReqUser() user: AuthUser) {
+    return this.expenses.get(expenseId, user);
+  }
+  @Post('expenses') @RequirePermission('expenses.post') createExpense(@Body(zod(expenseSchema)) input: ExpenseInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.expenses.create(input, actor, user);
+  }
+  @Post('expenses/:id/cancel') @HttpCode(200) @RequirePermission('expenses.post') cancelExpense(@Param('id', id()) expenseId: string, @Body(zod(cancelSchema)) input: { reason: string }, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.expenses.cancel(expenseId, input.reason, actor, user);
+  }
+
   // ---- Opening balances and protecting the books ----
   @Get('opening-bills') @RequireAnyPermission('accounts.view', 'journals.post') openingBills() {
     return this.closing.openingBills();
@@ -179,6 +206,9 @@ export class AccountingController {
   }
   @Get('reports/general-ledger') @RequirePermission('accounts.view') generalLedger(@Query(zod(ledgerQuerySchema)) q: LedgerQuery, @ReqUser() user: AuthUser) {
     return this.reports.generalLedger(q, user);
+  }
+  @Get('reports/cash-book') @RequireAnyPermission('accounts.view', 'expenses.post') cashBook(@Query(zod(cashBookQuerySchema)) q: CashBookQuery, @ReqUser() user: AuthUser) {
+    return this.cashBooks.cashBook(q, user);
   }
   @Get('reports/day-book') @RequirePermission('accounts.view') dayBook(@Query(zod(periodQuerySchema)) q: PeriodQuery, @ReqUser() user: AuthUser) {
     this.reports.assertPeriod(q);

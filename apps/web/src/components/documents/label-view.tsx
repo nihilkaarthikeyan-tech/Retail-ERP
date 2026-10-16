@@ -28,7 +28,12 @@ export function LabelView({ label, template }: { label: LabelDto; template: Temp
       {has("name") ? <div className="label-name">{label.name}</div> : null}
       {price || mrp ? (
         <div className="label-prices">
-          {price ? <span className="label-price">{rupees(price)}</span> : null}
+          {price && label.wasPrice ? (
+            <span className="label-small">
+              Was <s>{rupees(label.wasPrice)}</s>
+            </span>
+          ) : null}
+          {price ? <span className="label-price">{price && label.wasPrice ? `Now ${rupees(price)}` : rupees(price)}</span> : null}
           {mrp ? <span className="label-small">MRP {rupees(mrp)}</span> : null}
         </div>
       ) : null}

@@ -1,7 +1,9 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // The billing screen (plan 06 §6 "Till"): scan or search, the bill lines with
-// a number pad for quantity, price and discount, the customer, totals with the
-// GST table, park / recall, return / exchange, cash in/out, pay and print.
+// a number pad for quantity, price and discount, the customer, the salesperson
+// of the bill and of each line (plan 11 C1), home delivery (plan 11 B4), totals
+// with the offers used and the GST table, park / recall, return / exchange,
+// cash in/out, pay and print.
 // Every change is saved on the till at once (crash recovery, pos-offline §6).
 // Figures come from the shared calculations, the same as the server's.
 "use client";
@@ -10,7 +12,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Decimal, hasPermission } from "shared";
 import { Alert, Button } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
-import { CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
+import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
 import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
@@ -21,15 +23,17 @@ import { PayDialog } from "./pay-dialog";
 import { type ApprovalRequest, ManagerApprovalDialog } from "./pin-dialogs";
 import { PrintArea, ReceiptPaper } from "./receipt-paper";
 import { ReturnDialog } from "./return-dialog";
+import { DeliveryDialog, SalespersonDialog } from "./extras-dialogs";
 import { CashDialog, CloseShiftDialog } from "./shift-dialogs";
 
-type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper";
+type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery";
 type PadMode = "qty" | "price" | "disc";
 
 const PAD_LABEL: Record<PadMode, string> = { qty: "Quantity", price: "Price", disc: "Discount %" };
 
 export const SHORTCUTS: [string, string][] = [
   ["F2", "Search"],
+  ["F3", "Salesperson"],
   ["F4", "Pay"],
   ["F6", "Customer"],
   ["F7", "Return"],
@@ -66,6 +70,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const [approval, setApproval] = useState<{ request: ApprovalRequest; need: NeededApproval } | null>(null);
   /** An on-account bill over the credit limit waiting for a manager's PIN (plan 07 §1a). */
   const [creditApproval, setCreditApproval] = useState<ApprovalRequest | null>(null);
+  /** A sale line the server found below cost, waiting for a manager's PIN (plan 11 A2). */
+  const [belowCost, setBelowCost] = useState<{ request: ApprovalRequest; lineKey: string } | null>(null);
   const [payBusy, setPayBusy] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [priceChanged, setPriceChanged] = useState<{ serverTotal: string; tillTotal: string } | null>(null);
@@ -73,6 +79,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const [print, setPrint] = useState<{ receipts: PrintableReceipt[]; job: number }>({ receipts: [], job: 0 });
   const [notice, setNotice] = useState<string | null>(null);
   const [clearArmed, setClearArmed] = useState(false);
+  /** Plan 11 C1: choosing the salesperson for one line (its key), or for the bill (null). */
+  const [staffLine, setStaffLine] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -92,6 +100,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const results = useMemo(() => (search.trim().length >= 2 && !scan(snapshot, search) ? searchItems(snapshot, search, 12) : []), [snapshot, search]);
   const stock = useMemo(() => new Map(snapshot.stock.map((s) => [s.itemId, s.quantity])), [snapshot.stock]);
   const methods = till.paymentMethods.filter((m) => m.active);
+  const staff = snapshot.salesStaff ?? [];
+  const staffOf = (id: string | null | undefined) => (id ? staff.find((s) => s.id === id) : undefined);
   const canReturn = hasPermission(state.user, "pos.return");
   const shiftOld = !!state.shift && state.shift.businessDate !== today;
   const empty = !draft || isDraftEmpty(draft);
@@ -117,7 +127,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (!draft) return;
     setScanError(null);
     setNotice(null);
-    const same = item.trackSerials ? undefined : draft.lines.find((l) => l.itemId === item.id && l.unitId === unitId && !l.priceOverride && (l.discountPercent || "0") === "0");
+    const same = item.trackSerials ? undefined : draft.lines.find((l) => l.itemId === item.id && l.unitId === unitId && !l.priceOverride && (l.discountPercent || "0") === "0" && !l.salesStaffId);
     if (same) {
       const next = new Decimal(same.quantity || "0").add(1).toString();
       patchLine(same.key, { quantity: next });
@@ -212,13 +222,14 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     return receipts.map((r) => withHeader(r, till, { cashier: cashierName, customer: draft?.customer?.name ?? null }));
   }
 
-  async function finish(creditApprovalToken?: string) {
+  /** `again` is the saved bill with a manager's line approval added, sent again as it is. */
+  async function finish(creditApprovalToken?: string, again?: DraftBill) {
     if (!draft || !bill) return;
     setPayBusy(true);
     setPayError(null);
     try {
       // After a manager's approval the saved bill is sent again: same identity and numbers.
-      const input = creditApprovalToken ? (await engine.loadDraft()).draft : draft;
+      const input = again ?? (creditApprovalToken ? (await engine.loadDraft()).draft : draft);
       const res = await engine.finish(input, { creditApprovalToken });
       const receipts = printable(res.receipts);
       setDialog(null);
@@ -238,6 +249,15 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         const customer = draft.customer?.name ?? snapshot.customers.find((c) => c.id === draft.ret?.customerId)?.name ?? "customer";
         setDialog(null);
         setCreditApproval({ action: "credit_over_limit", details: `${customer} on account ${rupees(bill.net)}`, reason: err.reason });
+      } else if (err instanceof BelowCostError) {
+        // Below cost (plan 11 A2): a manager approves the price, then the same bill is sent again.
+        const line = bill.sale?.lines.find((l) => l.draftKey === err.lineKey);
+        setDialog(null);
+        setBelowCost({ lineKey: err.lineKey, request: { action: "price_change", details: `${err.itemCode} below cost at ${rupees(line?.price ?? null)}`, reason: err.reason } });
+      } else if (err instanceof Error && err.message === APPROVAL_SPENT) {
+        // The approvals were taken off the bill; the "Needs a manager" list asks for them again.
+        setDialog(null);
+        setNotice(APPROVAL_SPENT);
       } else {
         setPayError(errorMessage(err));
         setDialog("pay");
@@ -268,19 +288,41 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     await printReceipts(copies.map((r) => withHeader(r, till, { cashier: cashierName })));
   }
 
+  /** What the manager sees for a return without a bill: the items and the refund. */
+  function noBillRequest(d: DraftBill): ApprovalRequest {
+    const back = priceBill(d, { snapshot, date: today }).ret?.total.abs() ?? new Decimal(0);
+    const items = (d.ret?.lines ?? []).map((l) => `${l.code} x ${l.quantity}`).join(", ");
+    return { action: "return_without_bill", details: `No bill, ${rupees(back)} back: ${items}`, reason: `Return without a bill: ${rupees(back)} back to the customer. A manager must approve it.` };
+  }
+
   function askApproval(need: NeededApproval) {
-    const line = need.lineKey ? draft?.lines.find((l) => l.key === need.lineKey) : null;
+    if (!draft) return;
+    if (need.kind === "return_without_bill") return setApproval({ need, request: noBillRequest(draft) });
+    const line = need.lineKey ? draft.lines.find((l) => l.key === need.lineKey) : null;
     const item = line ? snapshot.items.find((i) => i.id === line.itemId) : null;
-    const details = need.kind === "bill_discount" ? `bill discount ${draft?.billDiscount?.amount ?? `${draft?.billDiscount?.percent}%`}` : `${item?.code ?? ""} ${need.kind === "price_change" ? `price ${line?.priceOverride}` : `${line?.discountPercent}%`}`;
+    const details = need.kind === "bill_discount" ? `bill discount ${draft.billDiscount?.amount ?? `${draft.billDiscount?.percent}%`}` : `${item?.code ?? ""} ${need.kind === "price_change" ? `price ${line?.priceOverride}` : `${line?.discountPercent}%`}`;
     setApproval({ need, request: { action: need.kind, details, reason: need.reason } });
   }
 
   function approved(token: string, manager: { name: string }) {
     if (!approval || !draft) return;
     const need = approval.need;
-    if (need.lineKey) patchLine(need.lineKey, { approvalToken: token, approvedBy: manager.name });
+    if (need.kind === "return_without_bill") {
+      if (draft.ret) change({ ...draft, ret: { ...draft.ret, approvalToken: token, approvedBy: manager.name } });
+    } else if (need.lineKey) patchLine(need.lineKey, { approvalToken: token, approvedBy: manager.name });
     else if (draft.billDiscount) change({ ...draft, billDiscount: { ...draft.billDiscount, approvalToken: token, approvedBy: manager.name } });
     setApproval(null);
+  }
+
+  /** The manager approved a below-cost price: the saved bill gets the approval on that line and is sent again. */
+  async function belowCostApproved(token: string, manager: { name: string }) {
+    if (!belowCost) return;
+    const { lineKey } = belowCost;
+    setBelowCost(null);
+    const saved = (await engine.loadDraft()).draft;
+    const again = { ...saved, lines: saved.lines.map((l) => (l.key === lineKey ? { ...l, approvalToken: token, approvedBy: manager.name } : l)) };
+    change(again);
+    await finish(undefined, again);
   }
 
   // ---- Keyboard (listed on screen) ----
@@ -293,12 +335,17 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         searchRef.current?.focus();
         return;
       }
-      if (dialog || approval || creditApproval) return;
+      if (dialog || approval || creditApproval || belowCost) return;
       const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       switch (e.key) {
         case "F2":
           e.preventDefault();
           searchRef.current?.focus();
+          break;
+        case "F3":
+          e.preventDefault();
+          setStaffLine(null);
+          setDialog("salesperson");
           break;
         case "F4":
           e.preventDefault();
@@ -484,6 +531,13 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
                     onSelect={() => l.draftKey && setSelected(l.draftKey)}
                     onRemove={() => l.draftKey && removeLine(l.draftKey)}
                     onSerials={(v) => l.draftKey && patchLine(l.draftKey, { serials: v })}
+                    staffCode={staff.length && !l.isDelivery ? (staffOf(l.salesStaffId)?.code ?? "none") : null}
+                    ownStaff={!!(l.draftKey && draft.lines.find((x) => x.key === l.draftKey)?.salesStaffId)}
+                    onStaff={() => {
+                      if (!l.draftKey) return;
+                      setStaffLine(l.draftKey);
+                      setDialog("salesperson");
+                    }}
                   />
                 ))}
                 {!saleLines.length && !retLines.length ? (
@@ -496,9 +550,24 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               </tbody>
             </table>
           </div>
-          {draft.ret ? (
+          {draft.delivery ? (
+            <p className="muted" data-testid="delivery-note">
+              Home delivery to {draft.delivery.name ? `${draft.delivery.name}, ` : ""}
+              {draft.delivery.address}
+              {draft.delivery.deliverOn ? ` on ${draft.delivery.deliverOn}` : ""}
+              {bill.delivery ? (bill.delivery.charge.gt(0) ? `, charge ${rupees(bill.delivery.charge)}` : ", no delivery charge") : ""}.{" "}
+              <Button size="small" variant="link" onClick={() => setDialog("delivery")}>
+                Change
+              </Button>
+            </p>
+          ) : null}
+          {draft.ret?.originalBillId ? (
             <p className="muted">
               Returning against bill <span className="mono">{draft.ret.originalNumber}</span>. Scan new items now for an exchange.
+            </p>
+          ) : draft.ret ? (
+            <p className="muted">
+              Return without a bill{draft.ret.approvedBy ? `, approved by ${draft.ret.approvedBy}` : ""}. It needs the connection. Scan new items now for an exchange.
             </p>
           ) : null}
           {bill.approvals.length ? (
@@ -528,6 +597,19 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <strong>{draft.customer ? draft.customer.name : "Walk-in customer"}</strong>
             {draft.customer?.mobile ? <span className="muted">{draft.customer.mobile}</span> : null}
           </button>
+          {staff.length ? (
+            <button
+              type="button"
+              className="till-customer"
+              onClick={() => {
+                setStaffLine(null);
+                setDialog("salesperson");
+              }}
+            >
+              <span className="muted">Salesperson (F3)</span>
+              <strong data-testid="bill-salesperson">{staffOf(draft.salesStaffId)?.name ?? "None"}</strong>
+            </button>
+          ) : null}
 
           <div className="till-pad-box">
             <div className="till-row" role="radiogroup" aria-label="Number pad changes">
@@ -549,6 +631,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
                 <>
                   <dt>Items</dt>
                   <dd>{rupees(bill.sale.gross)}</dd>
+                  {bill.offers.map((o) => (
+                    <OfferSaving key={o.offer.id} name={o.offer.name} saving={o.saving} />
+                  ))}
                   {bill.sale.discount.gt(0) ? (
                     <>
                       <dt>Discount{bill.billOffer ? ` (${bill.billOffer.name})` : ""}</dt>
@@ -622,6 +707,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             </button>
             <button type="button" className="till-action" onClick={() => setDialog("options")} disabled={!draft.lines.length}>
               Coupon / bill discount
+            </button>
+            <button type="button" className="till-action" onClick={() => setDialog("delivery")} disabled={!draft.lines.length}>
+              {draft.delivery ? "Delivery details" : "Home delivery"}
             </button>
             <button type="button" className="till-action" onClick={() => setDialog("cash")}>
               Cash in / out
@@ -731,16 +819,57 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           onClose={() => setDialog(null)}
         />
       ) : null}
+      {dialog === "salesperson" ? (
+        <SalespersonDialog
+          open
+          staff={staff}
+          current={staffLine ? (draft.lines.find((l) => l.key === staffLine)?.salesStaffId ?? null) : (draft.salesStaffId ?? null)}
+          forLine={staffLine ? (snapshot.items.find((i) => i.id === draft.lines.find((l) => l.key === staffLine)?.itemId)?.name ?? "this line") : null}
+          onPick={(id) => {
+            if (staffLine) patchLine(staffLine, { salesStaffId: id });
+            else change({ ...draft, salesStaffId: id });
+            setStaffLine(null);
+            setDialog(null);
+          }}
+          onClose={() => {
+            setStaffLine(null);
+            setDialog(null);
+          }}
+        />
+      ) : null}
+      {dialog === "delivery" ? (
+        <DeliveryDialog
+          open
+          current={draft.delivery ?? null}
+          defaults={{ name: draft.customer?.name ?? "", phone: draft.customer?.mobile ?? "" }}
+          today={today}
+          charge={till.delivery ? { charge: till.delivery.charge, freeAbove: till.delivery.freeAbove } : null}
+          onSave={(d) => {
+            change({ ...draft, delivery: d, payments: [] });
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
       <ParkedDialog open={dialog === "parked"} engine={engine} onRecall={(id) => void recall(id)} onClose={() => setDialog(null)} />
       <ReturnDialog
         open={dialog === "return"}
         engine={engine}
+        snapshot={snapshot}
+        online={state.online && !state.signedOut}
         onClose={() => setDialog(null)}
-        onChosen={(ret) => {
+        onChosen={(ret, original) => {
+          setDialog(null);
+          if (!original) {
+            // Without a bill: the bill's own customer stays, and the manager's PIN is asked for at once.
+            const next = { ...draft, ret, payments: [] };
+            change(next);
+            setApproval({ need: { kind: "return_without_bill", lineKey: null, reason: "A return without the original bill needs a manager" }, request: noBillRequest(next) });
+            return;
+          }
           const known = snapshot.customers.find((c) => c.id === ret.customerId);
           const customer = known && known.id !== till.walkInCustomerId ? { id: known.id, name: known.name, mobile: known.mobile, gstin: known.gstin, stateCode: known.stateCode, customerGroupId: known.customerGroupId } : null;
           change({ ...draft, ret, customer, payments: [] });
-          setDialog(null);
         }}
       />
       <CashDialog open={dialog === "cash"} engine={engine} onClose={() => setDialog(null)} />
@@ -769,22 +898,85 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           setDialog("pay");
         }}
       />
+      <ManagerApprovalDialog
+        api={engine.api}
+        online={state.online}
+        request={belowCost?.request ?? null}
+        onApproved={(token, manager) => void belowCostApproved(token, manager)}
+        onClose={() => {
+          setPayError(belowCost ? `${belowCost.request.reason}. Not approved: change the price on the bill, or ask a manager.` : null);
+          setBelowCost(null);
+          setDialog("pay");
+        }}
+      />
       <PrintArea receipts={print.receipts} job={print.job} />
     </>
   );
 }
 
-function LineRow({ line, draftLine, selected, onSelect, onRemove, onSerials }: { line: ComputedLine; draftLine?: DraftLine; selected: boolean; onSelect: () => void; onRemove: () => void; onSerials: (v: string) => void }) {
+/** Plan 11 B3: an offer used on the bill and what it saves the customer. */
+function OfferSaving({ name, saving }: { name: string; saving: Decimal }) {
+  return (
+    <>
+      <dt className="muted">{name}</dt>
+      <dd className="muted">saves {rupees(saving)}</dd>
+    </>
+  );
+}
+
+function LineRow({
+  line,
+  draftLine,
+  selected,
+  onSelect,
+  onRemove,
+  onSerials,
+  staffCode,
+  ownStaff,
+  onStaff,
+}: {
+  line: ComputedLine;
+  draftLine?: DraftLine;
+  selected: boolean;
+  onSelect: () => void;
+  onRemove: () => void;
+  onSerials: (v: string) => void;
+  /** Plan 11 C1: the line's salesperson code ("none"), or null when the store has no salespeople. */
+  staffCode: string | null;
+  /** The line has its own salesperson, not the bill's. */
+  ownStaff: boolean;
+  onStaff: () => void;
+}) {
   const overridden = !line.isFree && !line.price.eq(line.listPrice);
   return (
     <tr className={`${selected ? "till-line-selected" : ""}${line.problem ? " row-alert" : ""}`} onClick={onSelect} aria-selected={selected}>
       <td>
-        {line.isFree ? <span className="badge badge-ok">Free</span> : null} {line.item.name}
+        {line.isFree ? <span className="badge badge-ok">Free</span> : null}
+        {line.isDelivery ? <span className="badge badge-neutral">Delivery</span> : null} {line.item.name}
         <div className="muted till-line-sub">
           {line.item.code}
           {line.unitCode ? ` · ${line.unitCode}` : ""}
-          {line.offer && !line.isFree ? ` · ${line.offer.name}` : ""}
+          {line.offer ? ` · ${line.offer.name}` : ""}
           {draftLine?.approvedBy ? ` · approved by ${draftLine.approvedBy}` : ""}
+          {staffCode !== null && line.draftKey ? (
+            <>
+              {" · "}
+              <Button
+                size="small"
+                variant="link"
+                aria-label={`Salesperson of ${line.item.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStaff();
+                }}
+              >
+                {staffCode === "none" ? "salesperson" : `by ${staffCode}`}
+                {ownStaff ? " (this line)" : ""}
+              </Button>
+            </>
+          ) : staffCode && staffCode !== "none" ? (
+            ` · by ${staffCode}`
+          ) : null}
         </div>
         {line.item.trackSerials && !line.isFree ? (
           <input
@@ -805,7 +997,7 @@ function LineRow({ line, draftLine, selected, onSelect, onRemove, onSerials }: {
       <td className="num">{line.discountAmount.gt(0) ? `−${rupees(line.discountAmount)}` : ""}</td>
       <td className="num">{rupees(line.amount)}</td>
       <td>
-        {!line.isFree ? (
+        {!line.isFree && line.draftKey ? (
           <Button
             variant="link"
             aria-label={`Remove ${line.item.name}`}

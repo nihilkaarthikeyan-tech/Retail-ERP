@@ -3,6 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { createCustomerSchema, updateCustomerSchema } from "shared";
+import { blankDate, type DayMonthYear, DayMonthYearFields, joinDayMonth, splitDayMonth } from "@/components/parties/customer-dates-fields";
 import { DuplicateMatches } from "@/components/parties/duplicate-matches";
 import { GstinStateFields } from "@/components/parties/gstin-state-fields";
 import { PartyPicker } from "@/components/parties/party-picker";
@@ -27,6 +28,8 @@ interface CustomerFormValues {
   paymentTermsId: string;
   creditCheckAtDelivery: boolean;
   linkedSupplier: PartyRef | null;
+  birthday: DayMonthYear;
+  anniversary: DayMonthYear;
 }
 
 function fromCustomer(c: CustomerDto | null, settings: PartySettingsDto | null): CustomerFormValues {
@@ -44,6 +47,8 @@ function fromCustomer(c: CustomerDto | null, settings: PartySettingsDto | null):
       paymentTermsId: settings?.defaultPaymentTermsId ?? "",
       creditCheckAtDelivery: false,
       linkedSupplier: null,
+      birthday: blankDate,
+      anniversary: blankDate,
     };
   }
   return {
@@ -59,6 +64,8 @@ function fromCustomer(c: CustomerDto | null, settings: PartySettingsDto | null):
     paymentTermsId: c.paymentTerms?.id ?? "",
     creditCheckAtDelivery: c.creditCheckAtDelivery,
     linkedSupplier: c.linkedSupplier,
+    birthday: splitDayMonth(c.birthday, c.birthYear),
+    anniversary: splitDayMonth(c.anniversary, c.anniversaryYear),
   };
 }
 
@@ -89,6 +96,8 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
 
   async function send(confirmDuplicate: boolean) {
     setError(null);
+    const birthday = joinDayMonth(form.birthday);
+    const anniversary = joinDayMonth(form.anniversary);
     const body = {
       name: form.name,
       isBusiness: form.isBusiness,
@@ -102,11 +111,22 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
       priceListId: form.priceListId || null,
       paymentTermsId: form.paymentTermsId || null,
       creditCheckAtDelivery: form.creditCheckAtDelivery,
+      birthday: birthday.dayMonth,
+      birthYear: birthday.year,
+      anniversary: anniversary.dayMonth,
+      anniversaryYear: anniversary.year,
       ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
     };
     const parsed = customer ? updateCustomerSchema.safeParse(body) : createCustomerSchema.safeParse(body);
     const issues = issuesToFieldErrors(parsed);
     if (!customer && !form.customerGroupId) issues.customerGroupId = "Choose a group";
+    for (const [key, v] of [
+      ["birthday", form.birthday],
+      ["anniversary", form.anniversary],
+    ] as const) {
+      if ((v.day === "") !== (v.month === "")) issues[key] = "Choose both the day and the month";
+      if (v.year.trim() && !/^\d{4}$/.test(v.year.trim())) issues[key === "birthday" ? "birthYear" : "anniversaryYear"] = "The year as four digits, e.g. 1990";
+    }
     setErrors(issues);
     if (!parsed.success || Object.keys(issues).length > 0) return;
     setBusy(true);
@@ -160,6 +180,15 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
             <CheckInput id="cus-isBusiness" label="Business (B2B)" description="Off = a person. A customer with a GSTIN is a business." checked={form.isBusiness} onChange={setFlag("isBusiness")} />
             <CheckInput id="cus-creditCheckAtDelivery" label="Credit check at delivery" description="Check the credit limit when goods leave, not only when the order is taken." checked={form.creditCheckAtDelivery} onChange={setFlag("creditCheckAtDelivery")} />
           </div>
+        </div>
+      </fieldset>
+
+      <fieldset disabled={readOnly}>
+        <legend>Birthday and anniversary</legend>
+        <p className="muted">Optional. Shown in &ldquo;Birthdays this week&rdquo; under Customers; the year is not needed.</p>
+        <div className="form-grid">
+          <DayMonthYearFields idPrefix="cus-birthday" label="Birthday" value={form.birthday} onChange={(v) => setForm((f) => ({ ...f, birthday: v }))} error={errors.birthday} yearError={errors.birthYear} disabled={readOnly} />
+          <DayMonthYearFields idPrefix="cus-anniversary" label="Anniversary" value={form.anniversary} onChange={(v) => setForm((f) => ({ ...f, anniversary: v }))} error={errors.anniversary} yearError={errors.anniversaryYear} disabled={readOnly} />
         </div>
       </fieldset>
 

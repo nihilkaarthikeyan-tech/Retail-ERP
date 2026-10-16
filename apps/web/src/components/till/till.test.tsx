@@ -4,7 +4,7 @@
 // while bills wait to be sent. Runs on the in-memory till store.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { Decimal } from "shared";
+import { Decimal, type PosTransactionInput } from "shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import { TillEngine } from "@/lib/till/engine";
@@ -234,5 +234,155 @@ describe("on account at the till (plan 07 §1a)", () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toMatchObject({ clientId: bodies[0].clientId, creditApprovalToken: "approval-1" });
     expect(await engine.queue.items()).toEqual([]);
+  });
+});
+
+function receiptFor(kind: "sale" | "return", total: string, method: string): Receipt {
+  return {
+    billId: "b9",
+    number: "MAIN-T1-2026-27-000042",
+    kind,
+    duplicate: false,
+    provisional: true,
+    soldAt: at.toISOString(),
+    till: "T1",
+    footer: null,
+    lines: [],
+    gstTable: [],
+    totals: { gross: total, discount: "0.00", taxable: "0.00", rounding: "0.00", total },
+    payments: [{ method, amount: total, reference: null }],
+    change: "0.00",
+  };
+}
+
+async function onlineTill(postBill: (b: PosTransactionInput) => Promise<TransactionResult>, draft?: unknown) {
+  const store = new MemoryStore();
+  await store.set("snapshot", sampleSnapshot());
+  if (draft) await store.set("draft", draft);
+  const approve = vi.fn(async (b: { action: string }) => ({ token: `approval-${b.action}`, manager: { id: "m1", name: "Meena" } }));
+  const api = fakeApi({
+    me: async () => sampleUser,
+    snapshot: async () => sampleSnapshot(),
+    currentShift: async () => ({ id: "s1", clientId: "sc", businessDate: "2026-10-15", openedById: "u", openedAt: at.toISOString(), status: "open", openingCash: [], cashMovements: [] }),
+    people: async () => ({ managers: [{ id: "m1", name: "Meena" }], cashiers: [] }),
+    approve,
+    postBill,
+  });
+  const engine = new TillEngine({ store, api, device, now: () => at, uuid });
+  render(<TillApp device={device} engine={engine} />);
+  await screen.findByRole("search");
+  await waitFor(() => expect(engine.getState().online).toBe(true));
+  return { engine, approve };
+}
+
+async function managerPin() {
+  const box = await screen.findByRole("dialog", { name: "Manager approval" });
+  fireEvent.change(await within(box).findByLabelText("PIN"), { target: { value: "4321" } });
+  await act(async () => {
+    fireEvent.click(within(box).getByRole("button", { name: "Approve" }));
+  });
+  return box;
+}
+
+describe("return without the original bill (plan 11 A9, scenario 11.8)", () => {
+  it("scan what comes back, manager PIN, then refund by a refund method; sent with no original bill", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const { engine, approve } = await onlineTill(async (b) => {
+      bodies.push(b);
+      return { repeated: false, sale: null, return: null, net: "-120.00", change: "0.00", receipts: [receiptFor("return", "-120.00", "Cash")] } satisfies TransactionResult;
+    });
+
+    fireEvent.keyDown(window, { key: "F7" });
+    fireEvent.click(await screen.findByRole("button", { name: "Return without a bill" }));
+    const dialog = await screen.findByRole("dialog", { name: "Return without a bill" });
+    const box = within(dialog).getByLabelText("Scan or search the item coming back");
+    fireEvent.change(box, { target: { value: "8900001" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(within(dialog).getByText("₹120.00")).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Reason (optional)"), { target: { value: "Lost the receipt" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /Return these/ }));
+
+    const pin = await managerPin();
+    expect(within(pin).getByText(/Return without a bill: ₹120.00 back/)).toBeTruthy();
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ action: "return_without_bill" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Manager approval" })).toBeNull());
+    expect(screen.getByText(/Return without a bill, approved by Meena/)).toBeTruthy();
+    expect(screen.getByTestId("bill-total").textContent).toContain("₹120.00");
+
+    fireEvent.keyDown(window, { key: "F4" });
+    const pay = await screen.findByRole("dialog", { name: "Refund" });
+    // UPI does not allow refunds, so it is not offered.
+    expect(within(pay).queryByRole("button", { name: "UPI" })).toBeNull();
+    fireEvent.click(within(pay).getByRole("button", { name: "Cash" }));
+    await act(async () => {
+      fireEvent.click(within(pay).getByRole("button", { name: /Finish and print/ }));
+    });
+
+    await screen.findByRole("dialog", { name: "Bill finished" });
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].ret).toMatchObject({ approvalToken: "approval-return_without_bill", reason: "Lost the receipt", lines: [{ lineNo: 1, quantity: "1" }] });
+    expect(bodies[0].ret).not.toHaveProperty("returnOfId");
+    expect(bodies[0].payments).toEqual([{ paymentMethodId: sampleSnapshot().till.paymentMethods[0].id, amount: "-120.00", reference: null }]);
+    expect(await engine.queue.items()).toEqual([]);
+  });
+
+  it("is clearly unavailable while the till is offline", async () => {
+    const store = new MemoryStore();
+    await store.set("snapshot", sampleSnapshot());
+    await store.set("shift", { clientId: "sc", id: "s1", businessDate: "2026-10-15", openedAt: at.toISOString(), openedByName: "Ravi", openingCash: [] } satisfies LocalShift);
+    await store.set("meta:user", sampleUser);
+    const engine = new TillEngine({ store, api: fakeApi(), device, now: () => at, uuid });
+    render(<TillApp device={device} engine={engine} />);
+    await screen.findByRole("search");
+    fireEvent.keyDown(window, { key: "F7" });
+    const button = (await screen.findByRole("button", { name: "Return without a bill" })) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText(/Returns without a bill need the connection/)).toBeTruthy();
+  });
+});
+
+describe("selling below cost (plan 11 A2, scenario 11.2)", () => {
+  it("the server's refusal asks for a manager's PIN, then the same bill is sent again with that line's approval", async () => {
+    const basmati = sampleSnapshot().items[0];
+    const bodies: PosTransactionInput[] = [];
+    const draft = { ...emptyDraft("d1", at), lines: [{ key: "k1", itemId: basmati.id, unitId: basmati.baseUnitId, quantity: "1", barcode: null, priceOverride: null, discountPercent: "5" }] };
+    const { approve } = await onlineTill(async (b) => {
+      bodies.push(b);
+      if (!b.sale!.lines[0].approvalToken) throw new ApiError(400, "ITM-000001: this price is below cost; a manager must approve it");
+      return { repeated: false, sale: null, return: null, net: "114.00", change: "0.00", receipts: [receiptFor("sale", "114.00", "Cash")] } satisfies TransactionResult;
+    }, draft);
+
+    fireEvent.keyDown(window, { key: "F4" });
+    fireEvent.click(await screen.findByRole("button", { name: "Exact cash" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Finish and print/ }));
+    });
+
+    const box = await screen.findByRole("dialog", { name: "Manager approval" });
+    expect(within(box).getByText("ITM-000001: this price is below cost; a manager must approve it")).toBeTruthy();
+    await managerPin();
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ action: "price_change" }));
+
+    await screen.findByRole("dialog", { name: "Bill finished" });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ clientId: bodies[0].clientId, sale: { number: bodies[0].sale!.number } });
+    expect(bodies[1].sale!.lines[0]).toMatchObject({ approvalToken: "approval-price_change", discountPercent: "5" });
+  });
+
+  it("not approved: the cashier is told a manager must approve the price, and the bill stays open", async () => {
+    const basmati = sampleSnapshot().items[0];
+    const draft = { ...emptyDraft("d1", at), lines: [{ key: "k1", itemId: basmati.id, unitId: basmati.baseUnitId, quantity: "1", barcode: null, priceOverride: null, discountPercent: "0" }] };
+    await onlineTill(async () => {
+      throw new ApiError(400, "ITM-000001: this price is below cost; a manager must approve it");
+    }, draft);
+    fireEvent.keyDown(window, { key: "F4" });
+    fireEvent.click(await screen.findByRole("button", { name: "Exact cash" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Finish and print/ }));
+    });
+    const box = await screen.findByRole("dialog", { name: "Manager approval" });
+    fireEvent(box, new Event("cancel"));
+    const pay = await screen.findByRole("dialog", { name: "Payment" });
+    expect(within(pay).getByText(/below cost; a manager must approve it\. Not approved: change the price on the bill, or ask a manager/)).toBeTruthy();
   });
 });

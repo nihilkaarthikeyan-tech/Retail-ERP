@@ -54,9 +54,11 @@ export interface PosSettingsDto {
   cashDifferenceApprovalAmount: string;
   printReceiptCopies: number;
   liveAllowed: boolean;
+  /** Plan 11 B4: the service item the delivery charge is billed as. */
+  deliveryItemId?: string | null;
 }
 
-export type OfferKind = "percent" | "amount" | "special_price" | "free_goods";
+export type OfferKind = "percent" | "amount" | "special_price" | "free_goods" | "buy_get" | "mix_match";
 export type OfferTarget = "items" | "groups" | "brands" | "bill";
 
 export interface OfferDto {
@@ -69,6 +71,11 @@ export interface OfferDto {
   value: string | null;
   buyQuantity: string | null;
   freeQuantity: string | null;
+  /** Plan 11 B3: buy_get gives this item free; mix_match sets of setQuantity for setPrice, or the cheapest free. */
+  freeItemId?: string | null;
+  setQuantity?: number | null;
+  setPrice?: string | null;
+  cheapestFree?: boolean;
   minQuantity: string | null;
   minAmount: string | null;
   storeIds: string[];
@@ -105,6 +112,9 @@ export interface PosBillLineDto {
   discountAmount: string;
   offerDiscount: string;
   offerId: string | null;
+  /** Plan 11 B3, C1: the offer's name and the line's salesperson. */
+  offerName?: string | null;
+  salesStaff?: { code: string; name: string } | null;
   isFree: boolean;
   gstRate: string;
   taxableAmount: string;
@@ -145,6 +155,10 @@ export interface PosBillDto {
   returnReason: string | null;
   cancelReason: string | null;
   reprints: number;
+  /** Plan 11: the salesperson, the offers used and their saving, home delivery. */
+  salesStaff?: { code: string; name: string } | null;
+  offers?: { id: string; code: string | null; name: string; saving: string }[];
+  delivery?: { id: string; name: string | null; address: string; phone: string | null; deliverOn: string | null; status: string; chargeAmount: string; deliveredAt: string | null } | null;
   lines: PosBillLineDto[];
   payments: { paymentMethod: { id: string; code: string; name: string; kind: PaymentKind }; amount: string; reference: string | null }[];
 }
@@ -192,6 +206,8 @@ export const OFFER_KIND_LABELS: Record<OfferKind, string> = {
   amount: "Rupees off",
   special_price: "Special price",
   free_goods: "Buy some, get some free",
+  buy_get: "Buy some, get another item free",
+  mix_match: "Mix and match (any N)",
 };
 
 export const OFFER_TARGET_LABELS: Record<OfferTarget, string> = {
@@ -213,7 +229,10 @@ export const FLAG_LABELS: Record<string, string> = {
   serial_not_in_stock: "A serial number was not in stock at this till",
   shift_date: "Sold offline on a shift from another day",
   customer_matched_by_mobile: "New customer matched an existing one by mobile number",
+  customer_dates_left_out: "The new customer's birthday or anniversary was not a real date and was left out",
   before_lock: "Stock posted on the next open day (month was locked)",
+  sales_staff_changed: "Salesperson was switched off or moved to another store while the till was offline",
+  delivery_charge_changed: "Delivery charge changed while the till was offline; the till's charge was kept",
 };
 
 export function flagLabel(flag: string): string {

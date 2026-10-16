@@ -29,6 +29,7 @@ import type { Actor } from '../common/request-context.js';
 import type { Prisma, SupplierBill, SupplierBillKind, Supplier } from '../generated/prisma/client.js';
 import { postingInstant } from '../inventory/stock-documents.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GoodsReceiptsService, type ReceiptHeader, type ResolvedReceiptLine } from './goods-receipts.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
@@ -86,6 +87,7 @@ export class SupplierBillsService {
     private readonly orders: PurchaseOrdersService,
     private readonly receipts: GoodsReceiptsService,
     private readonly postings: PurchasePostings,
+    private readonly ledger: LedgerService,
   ) {}
 
   // ---- Reading ----
@@ -108,13 +110,15 @@ export class SupplierBillsService {
       this.prisma.supplierBill.findMany({ where, include: { supplier: billInclude.supplier }, orderBy: [{ postingDate: 'desc' }, { createdAt: 'desc' }], skip: (page - 1) * pageSize, take: pageSize }),
       this.prisma.supplierBill.count({ where }),
     ]);
-    return { rows: rows.map((b) => this.header(b, user)), total, page, pageSize };
+    const due = await this.ledger.openAmounts(this.prisma, 'supplier_bill', rows.filter((b) => b.status === 'unpaid').map((b) => b.id));
+    return { rows: rows.map((b) => this.header(b, user, due.get(b.id))), total, page, pageSize };
   }
 
   async get(id: string, user: CurrentUser) {
     const b = await this.getRow(this.prisma, id);
     if (b.storeId) assertStoreAccess(user, b.storeId);
-    return this.toDto(b, user);
+    const due = b.status === 'unpaid' ? await this.ledger.openAmount(this.prisma, 'supplier_bill', b.id) : undefined;
+    return this.toDto(b, user, due);
   }
 
   async getRow(db: Db, id: string): Promise<BillRow> {
@@ -398,6 +402,23 @@ export class SupplierBillsService {
 
   // ---- Finalising ----
 
+  /** Plan 11 A8 (blueprint 06): goods bills need an order or a receipt when the business says so, unless the supplier is excepted. */
+  private async checkBuyingSteps(b: BillRow, settings: { billNeedsOrder: boolean; billNeedsReceipt: boolean }) {
+    if (b.kind === 'services' || (!settings.billNeedsOrder && !settings.billNeedsReceipt)) return;
+    const supplier = await this.prisma.supplier.findUniqueOrThrow({ where: { id: b.supplierId } });
+    if (settings.billNeedsReceipt && !supplier.allowBillWithoutReceipt && b.kind === 'receives_goods') {
+      throw new BadRequestException(`Goods must be received with a goods receipt before ${supplier.name}'s bill is entered`);
+    }
+    if (settings.billNeedsOrder && !supplier.allowBillWithoutOrder) {
+      const receiptLines = b.lines.map((l) => l.receiptLineId).filter((x): x is string => !!x);
+      const fromOrders = new Set(
+        (await this.prisma.goodsReceiptLine.findMany({ where: { id: { in: receiptLines }, orderLineId: { not: null } }, select: { id: true } })).map((r) => r.id),
+      );
+      const without = b.lines.filter((l) => !l.orderLineId && !(l.receiptLineId && fromOrders.has(l.receiptLineId)));
+      if (without.length) throw new BadRequestException(`Every line of ${supplier.name}'s bill must come from a purchase order (${without.map((l) => l.item.code).join(', ')} does not)`);
+    }
+  }
+
   async finalise(id: string, input: FinaliseBillInput, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.bill');
     const b = await this.getRow(this.prisma, id);
@@ -415,6 +436,7 @@ export class SupplierBillsService {
 
     // Plan 05 answer 4: a price different from the receipt is refused, warned about, or allowed.
     const settings = await this.common.settings(this.prisma, b.companyId);
+    await this.checkBuyingSteps(b, settings);
     const differing = prepared.lines.filter((l) => !l.priceDifference.eq(0));
     if (differing.length && settings.priceMismatch !== 'allow') {
       const list = differing.map((l) => `${l.itemCode} ${l.priceDifference.gt(0) ? '+' : ''}${l.priceDifference.toFixed(2)}`).join(', ');
@@ -559,6 +581,7 @@ export class SupplierBillsService {
     const b = await this.getRow(this.prisma, id);
     if (b.kind === 'debit_note') throw new BadRequestException('A debit note cannot be held');
     if (b.status !== 'unpaid') throw new BadRequestException('Only a finalised bill that is still owed can be held');
+    if ((await this.ledger.openAmount(this.prisma, 'supplier_bill', b.id)).lte(0)) throw new BadRequestException('This bill is already paid, so it cannot be held');
     if (input.until <= businessDate()) throw new BadRequestException('The hold must end on a future date');
     const after = await this.prisma.$transaction(async (tx) => {
       await tx.supplierBill.update({ where: { id }, data: { holdReason: input.reason, holdUntil: fromIso(input.until), updatedById: actor.userId } });
@@ -768,9 +791,12 @@ export class SupplierBillsService {
 
   // ---- Output ----
 
-  private header(b: SupplierBill & { supplier: { id: string; code: string; name: string } }, user: CurrentUser) {
+  /** `due`: what is still owed, from the accounts (plan 11 A3); left out where it was not worked out. */
+  private header(b: SupplierBill & { supplier: { id: string; code: string; name: string } }, user: CurrentUser, due?: Decimal) {
     const prices = hasPermission(user, 'buying_prices.view');
     const today = businessDate();
+    const stillOwed = due === undefined ? b.status === 'unpaid' : due.gt(0);
+    const paymentStatus = b.status !== 'unpaid' || b.kind === 'debit_note' || due === undefined ? null : due.lte(0) ? 'paid' : due.lt(b.total) ? 'part_paid' : 'unpaid';
     return {
       id: b.id,
       number: b.number,
@@ -783,7 +809,8 @@ export class SupplierBillsService {
       storeId: b.storeId,
       paymentTermsId: b.paymentTermsId,
       dueDate: iso(b.dueDate),
-      overdue: b.status === 'unpaid' && b.kind !== 'debit_note' && iso(b.dueDate)! < today,
+      overdue: b.status === 'unpaid' && b.kind !== 'debit_note' && stillOwed && iso(b.dueDate)! < today,
+      ...(paymentStatus ? { paymentStatus, ...(prices ? { amountDue: Decimal.max(due!, 0).toFixed(2) } : {}) } : {}),
       held: !!b.holdUntil,
       holdReason: b.holdReason,
       holdUntil: iso(b.holdUntil),
@@ -799,10 +826,10 @@ export class SupplierBillsService {
     };
   }
 
-  toDto(b: BillRow, user: CurrentUser) {
+  toDto(b: BillRow, user: CurrentUser, due?: Decimal) {
     const prices = hasPermission(user, 'buying_prices.view');
     return {
-      ...this.header(b, user),
+      ...this.header(b, user, due),
       lines: b.lines.map((l) => ({
         id: l.id,
         lineNo: l.lineNo,

@@ -1,10 +1,12 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   type CreatePriceInput,
   type CreatePriceListInput,
   createPriceListSchema,
   createPriceSchema,
+  type MarkdownInput,
+  markdownSchema,
   type PriceLookupInput,
   priceLookupSchema,
   type PriceQuery,
@@ -17,11 +19,15 @@ import {
 import { RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
+import { MarkdownsService } from './markdowns.service.js';
 import { PricingService } from './pricing.service.js';
 
 @Controller()
 export class PricingController {
-  constructor(private readonly pricing: PricingService) {}
+  constructor(
+    private readonly pricing: PricingService,
+    private readonly markdowns: MarkdownsService,
+  ) {}
 
   @Get('price-lists')
   @RequirePermission('prices.view')
@@ -68,5 +74,32 @@ export class PricingController {
     @ReqUser() user: AuthUser,
   ) {
     return this.pricing.updatePrice(id, input, actor, user);
+  }
+
+  // ---- Markdowns (plan 11 C5) ----
+
+  @Get('markdowns')
+  @RequirePermission('prices.view')
+  markdownList(@ReqUser() user: AuthUser) {
+    return this.markdowns.list(user);
+  }
+
+  @Post('markdowns/preview')
+  @HttpCode(200)
+  @RequirePermission('prices.manage')
+  markdownPreview(@Body(new ZodValidationPipe(markdownSchema)) input: MarkdownInput, @ReqUser() user: AuthUser) {
+    return this.markdowns.preview(input, user);
+  }
+
+  @Post('markdowns')
+  @RequirePermission('prices.manage')
+  markdownApply(@Body(new ZodValidationPipe(markdownSchema)) input: MarkdownInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.markdowns.apply(input, actor, user);
+  }
+
+  @Get('markdowns/:id')
+  @RequirePermission('prices.view')
+  markdown(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser) {
+    return this.markdowns.get(id, user);
   }
 }

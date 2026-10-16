@@ -8,12 +8,13 @@ import { MoneyReportsService } from './money-reports.service.js';
 import { ReportsCommon } from './reports-common.service.js';
 import { ReportsController } from './reports.controller.js';
 import { SalesReportsService } from './sales-reports.service.js';
+import { SeasonReportsService } from './season-reports.service.js';
 import { StockAnalysisService } from './stock-analysis.service.js';
 import { SummaryEmailService } from './summary-email.service.js';
 
 @Module({
   imports: [CompanyModule, AccountingModule],
   controllers: [ReportsController],
-  providers: [ReportsCommon, SalesReportsService, StockAnalysisService, MoneyReportsService, DashboardsService, MailerService, SummaryEmailService],
+  providers: [ReportsCommon, SalesReportsService, SeasonReportsService, StockAnalysisService, MoneyReportsService, DashboardsService, MailerService, SummaryEmailService],
 })
 export class ReportsModule {}

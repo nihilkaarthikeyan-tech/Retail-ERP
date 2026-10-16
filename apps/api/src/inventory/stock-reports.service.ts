@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Stock balance, history, batches, negative-stock exceptions, quick lookup.
-import { Injectable } from '@nestjs/common';
-import { addDays, businessDate, type CurrentUser, Decimal, endOfBusinessDay, hasPermission, type StockBalanceQuery, type StockLedgerQuery } from 'shared';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { addDays, businessDate, type CurrentUser, Decimal, endOfBusinessDay, hasPermission, type StockBalanceQuery, type StockLedgerQuery, variantGrid } from 'shared';
 import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import { CompanyService } from '../company/company.service.js';
 import { Prisma } from '../generated/prisma/client.js';
@@ -198,6 +198,64 @@ export class StockReportsService {
       quantity: p.quantity.toString(),
       since: p.lastPostingAt,
     }));
+  }
+
+  /**
+   * Plan 11 C3: a style's stock as a size × colour grid, one grid per shop
+   * (its last attribute across, the others down). Every shop's grid and row and
+   * column totals add up to the style's total; quantities only, no values.
+   */
+  async styleGrid(itemId: string, storeId: string | undefined, user: CurrentUser) {
+    const style = await this.prisma.item.findUnique({
+      where: { id: itemId },
+      include: { variantAttributes: { include: { attribute: { include: { values: { orderBy: { sortOrder: 'asc' } } } } }, orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!style) throw new NotFoundException('Item not found');
+    if (!style.isParentStyle) throw new BadRequestException(`${style.code} is not a style with sizes and colours`);
+    const variants = await this.prisma.item.findMany({ where: { parentItemId: style.id }, include: { variantValues: true }, orderBy: { code: 'asc' } });
+    const attributeIds = style.variantAttributes.map((a) => a.attributeId);
+    const grid = variantGrid(
+      attributeIds,
+      variants.map((v) => ({ id: v.id, code: v.code, values: v.variantValues })),
+      Object.fromEntries(style.variantAttributes.map((a) => [a.attributeId, a.attribute.values.map((x) => x.value)])),
+    );
+    const locations = (await this.visibleLocations(user, { storeId })).filter((l) => l.store);
+    const positions = await this.prisma.stockPosition.findMany({ where: { itemId: { in: variants.map((v) => v.id) }, locationId: { in: locations.map((l) => l.id) } } });
+    const storeOf = new Map(locations.map((l) => [l.id, l.store!]));
+    const stores = [...new Map(locations.map((l) => [l.store!.id, l.store!])).values()].sort((a, b) => a.code.localeCompare(b.code));
+    const qtyOf = new Map<string, Decimal>();
+    for (const p of positions) {
+      const k = `${storeOf.get(p.locationId)!.id}|${p.itemId}`;
+      qtyOf.set(k, (qtyOf.get(k) ?? new Decimal(0)).add(p.quantity.toString()));
+    }
+    const name = (id: string) => style.variantAttributes.find((a) => a.attributeId === id)!.attribute.name;
+    let styleTotal = new Decimal(0);
+    const perStore = stores.map((s) => {
+      const columnTotals = grid.across.map(() => new Decimal(0));
+      let total = new Decimal(0);
+      const rows = grid.down.map((d) => {
+        let rowTotal = new Decimal(0);
+        const cells = grid.across.map((a, n) => {
+          const v = grid.cell(d, a);
+          if (!v) return null;
+          const q = qtyOf.get(`${s.id}|${v.id}`) ?? new Decimal(0);
+          rowTotal = rowTotal.add(q);
+          columnTotals[n] = columnTotals[n].add(q);
+          return { itemId: v.id, code: v.code, quantity: q.toString() };
+        });
+        total = total.add(rowTotal);
+        return { label: d, cells, total: rowTotal.toString() };
+      });
+      styleTotal = styleTotal.add(total);
+      return { store: s, rows, columnTotals: columnTotals.map((c) => c.toString()), total: total.toString() };
+    });
+    return {
+      style: { id: style.id, code: style.code, name: style.name },
+      across: { attributes: [name(grid.acrossAttributeId)], values: grid.across },
+      down: { attributes: grid.downAttributeIds.map(name), values: grid.down },
+      stores: perStore,
+      total: styleTotal.toString(),
+    };
   }
 
   /** Rule 6 check: every position equals the sum of its ledger lines (used by tests and an admin check). */

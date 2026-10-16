@@ -2,7 +2,8 @@
 // What a till keeps on its own computer to bill offline (pos-offline §2):
 // set-up, sellable items with barcodes, units and MRP, prices (with the next
 // 7 days of price changes), GST rates, offers, coupons, customers with a
-// mobile number, last known stock and the till's last bill numbers. Never
+// mobile number, last known stock, the store's salespeople and delivery charge
+// (plan 11 C1, B4) and the till's last bill numbers. Never
 // passwords, PINs or cost prices.
 import { Injectable } from '@nestjs/common';
 import { addDays, businessDate, type CurrentUser } from 'shared';
@@ -59,6 +60,7 @@ export class PosSnapshotService {
       }),
     );
     const store = await this.prisma.store.findUniqueOrThrow({ where: { id: till.storeId } });
+    const salesStaff = await this.prisma.salesStaff.findMany({ where: { storeId: till.storeId, active: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, name: true } });
     const gst = store.gstRegistrationId ? await this.prisma.gstRegistration.findUnique({ where: { id: store.gstRegistrationId } }) : null;
 
     return {
@@ -82,7 +84,10 @@ export class PosSnapshotService {
         paymentMethods: till.paymentMethods.map((m) => ({ id: m.paymentMethodId, code: m.paymentMethod.code, name: m.paymentMethod.name, kind: m.paymentMethod.kind, allowRefund: m.paymentMethod.allowRefund, needsReference: m.paymentMethod.needsReference, isDefault: m.isDefault, active: m.paymentMethod.active })),
         liveAllowed: settings.liveAllowed,
         walkInCustomerId: partySettings?.walkInCustomerId ?? null,
+        // Plan 11 B4 (decision 47): the store's home-delivery charge and the item it is billed as.
+        delivery: { charge: store.deliveryCharge.toFixed(2), freeAbove: store.deliveryFreeAbove?.toFixed(2) ?? null, itemId: settings.deliveryItemId },
       },
+      salesStaff,
       financialYears: years.map((y) => ({ name: y.name, startDate: iso(y.startDate), endDate: iso(y.endDate) })),
       lastNumbers,
       items: items.map((i) => ({

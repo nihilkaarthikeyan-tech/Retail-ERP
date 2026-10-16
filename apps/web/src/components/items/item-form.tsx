@@ -2,12 +2,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { createItemSchema, updateItemSchema } from "shared";
+import { createItemSchema, STYLE_FIELDS_FOR_VARIANTS, updateItemSchema } from "shared";
 import { HsnInput } from "@/components/items/hsn-input";
 import { Alert, Button, CheckInput, SelectInput, TextInput, TextareaInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { flattenGroups } from "@/lib/catalogue";
 import { blankToNull, blankToUndefined } from "@/lib/format";
+import type { SeasonDto } from "@/lib/styles-seasons";
 import type { AttributeDto, BrandDto, CatalogueSettingsDto, ItemDto, ItemGroupNode, UnitDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 
@@ -17,6 +18,7 @@ interface ItemFormValues {
   description: string;
   itemGroupId: string;
   brandId: string;
+  seasonId: string;
   baseUnitId: string;
   hsnCode: string;
   mrp: string;
@@ -35,6 +37,8 @@ interface ItemFormValues {
   sellingPrice: string;
   isStyle: boolean;
   variantAttributeIds: string[];
+  /** Plan 11 B2, editing a style: also change all its sizes and colours. */
+  applyToVariants: boolean;
 }
 
 function fromItem(item: ItemDto | null, settings: CatalogueSettingsDto | null): ItemFormValues {
@@ -45,6 +49,7 @@ function fromItem(item: ItemDto | null, settings: CatalogueSettingsDto | null): 
       description: "",
       itemGroupId: settings?.defaultItemGroupId ?? "",
       brandId: "",
+      seasonId: "",
       baseUnitId: settings?.defaultUnitId ?? "",
       hsnCode: "",
       mrp: "",
@@ -62,6 +67,7 @@ function fromItem(item: ItemDto | null, settings: CatalogueSettingsDto | null): 
       sellingPrice: "",
       isStyle: false,
       variantAttributeIds: [],
+      applyToVariants: true,
     };
   }
   return {
@@ -70,6 +76,7 @@ function fromItem(item: ItemDto | null, settings: CatalogueSettingsDto | null): 
     description: item.description ?? "",
     itemGroupId: item.itemGroup.id,
     brandId: item.brand?.id ?? "",
+    seasonId: item.seasonId ?? "",
     baseUnitId: item.baseUnit.id,
     hsnCode: item.hsnCode ?? "",
     mrp: item.mrp ?? "",
@@ -87,6 +94,7 @@ function fromItem(item: ItemDto | null, settings: CatalogueSettingsDto | null): 
     sellingPrice: "",
     isStyle: item.isParentStyle,
     variantAttributeIds: item.variantAttributes.map((a) => a.id),
+    applyToVariants: true,
   };
 }
 
@@ -105,20 +113,35 @@ interface ItemFormProps {
   units: UnitDto[];
   attributes: AttributeDto[];
   settings: CatalogueSettingsDto | null;
+  /** Plan 11 C4: seasons to choose from (GET /seasons). */
+  seasons?: SeasonDto[];
   readOnly?: boolean;
   onSaved: (item: ItemDto) => void;
 }
 
-export function ItemForm({ item, groups, brands, units, attributes, settings, readOnly = false, onSaved }: ItemFormProps) {
+export function ItemForm({ item, groups, brands, units, attributes, settings, seasons = [], readOnly = false, onSaved }: ItemFormProps) {
   const [form, setForm] = useState<ItemFormValues>(() => fromItem(item, settings));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  type TextKey = "code" | "name" | "description" | "itemGroupId" | "brandId" | "baseUnitId" | "mrp" | "maxDiscountPercent" | "endDate" | "shelfLifeDays" | "warrantyDays" | "sellingPrice";
+  type TextKey = "code" | "name" | "description" | "itemGroupId" | "brandId" | "seasonId" | "baseUnitId" | "mrp" | "maxDiscountPercent" | "endDate" | "shelfLifeDays" | "warrantyDays" | "sellingPrice";
   const set = (key: TextKey) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
-  const setFlag = (key: "isStockItem" | "canBuy" | "canSell" | "active" | "trackBatches" | "autoNumberBatches" | "trackSerials" | "isStyle") => (e: { target: { checked: boolean } }) =>
+  const setFlag = (key: "isStockItem" | "canBuy" | "canSell" | "active" | "trackBatches" | "autoNumberBatches" | "trackSerials" | "isStyle" | "applyToVariants") => (e: { target: { checked: boolean } }) =>
     setForm((f) => ({ ...f, [key]: e.target.checked }));
+
+  /**
+   * Editing a style with "also change all its sizes and colours" ticked: only
+   * the style fields that changed are sent (and so copied to the variants), so
+   * saving an unrelated change does not overwrite a variant's own MRP.
+   */
+  function styleChanges(common: Record<string, unknown>): Record<string, unknown> {
+    if (!item?.isParentStyle || !form.applyToVariants) return {};
+    const was = fromItem(item, settings);
+    const unchanged = STYLE_FIELDS_FOR_VARIANTS.filter((f) => was[f] === form[f]);
+    for (const f of unchanged) delete common[f];
+    return { applyToVariants: unchanged.length < STYLE_FIELDS_FOR_VARIANTS.length };
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -129,6 +152,7 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, re
       description: blankToNull(form.description),
       itemGroupId: form.itemGroupId,
       brandId: form.brandId || null,
+      seasonId: form.seasonId || null,
       baseUnitId: form.baseUnitId,
       hsnCode: blankToNull(form.hsnCode),
       mrp: blankToNull(form.mrp),
@@ -144,7 +168,7 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, re
       warrantyDays: intOrNull(form.warrantyDays),
     };
     const parsed = item
-      ? updateItemSchema.safeParse({ ...common, active: form.active })
+      ? updateItemSchema.safeParse({ ...common, active: form.active, ...styleChanges(common) })
       : createItemSchema.safeParse({
           ...common,
           code: blankToUndefined(form.code),
@@ -204,6 +228,17 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, re
               </option>
             ))}
           </SelectInput>
+          <SelectInput id="item-season" label="Season" value={form.seasonId} onChange={set("seasonId")} error={errors.seasonId} hint="The season or collection, for reports and markdowns.">
+            <option value="">No season</option>
+            {seasons
+              .filter((s) => s.active || s.id === form.seasonId)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {s.active ? "" : " (switched off)"}
+                </option>
+              ))}
+          </SelectInput>
           <SelectInput id="item-baseUnit" label="Basic unit" value={form.baseUnitId} onChange={set("baseUnitId")} error={errors.baseUnitId} required disabled={isVariant} hint={item ? "Changing it clears the other units of the item." : "The unit stock is counted in."}>
             <option value="">Choose a unit</option>
             {unitOptions.map((u) => (
@@ -220,6 +255,15 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, re
             <CheckInput id="item-isStockItem" label="Stock item" description="Off = service; no stock is kept." checked={form.isStockItem} onChange={setFlag("isStockItem")} disabled={isVariant || form.isStyle} />
             <CheckInput id="item-canBuy" label="Can be bought" checked={form.canBuy} onChange={setFlag("canBuy")} />
             <CheckInput id="item-canSell" label="Can be sold" checked={form.canSell} onChange={setFlag("canSell")} />
+            {item?.isParentStyle ? (
+              <CheckInput
+                id="item-applyToVariants"
+                label="Also change all its sizes and colours"
+                description="Copies a changed MRP, HSN, brand, group, maximum discount, description or season to every variant. Codes, barcodes and prices are never copied."
+                checked={form.applyToVariants}
+                onChange={setFlag("applyToVariants")}
+              />
+            ) : null}
             {item ? <CheckInput id="item-active" label="Active" description="Switched-off items cannot be used on new documents; history is kept." checked={form.active} onChange={setFlag("active")} /> : null}
           </div>
         </div>

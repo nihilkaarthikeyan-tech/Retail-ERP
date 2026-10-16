@@ -61,8 +61,13 @@ export const labelRequestSchema = z
     receiptId: uuid.optional(),
     /** Items whose selling price changed on or after this date. */
     priceChangedSince: isoDate.optional(),
+    /** Plan 11 C5: the items of a markdown, each label showing the old and the new price. */
+    markdownId: uuid.optional(),
   })
-  .refine((r) => [r.items?.length ? 1 : 0, r.receiptId ? 1 : 0, r.priceChangedSince ? 1 : 0].reduce((a, b) => a + b, 0) === 1, 'Choose items, a goods receipt, or a price-change date');
+  .refine(
+    (r) => [r.items?.length ? 1 : 0, r.receiptId ? 1 : 0, r.priceChangedSince ? 1 : 0, r.markdownId ? 1 : 0].reduce((a, b) => a + b, 0) === 1,
+    'Choose items, a goods receipt, a price-change date or a markdown',
+  );
 export type LabelRequest = z.infer<typeof labelRequestSchema>;
 
 // ---- Import and export (decisions 77, 78) ----
@@ -71,6 +76,7 @@ export const IMPORT_KINDS = {
   item_groups: 'Item groups',
   brands: 'Brands',
   items: 'Items',
+  styles_variants: 'Styles and variants',
   prices: 'Prices',
   customers: 'Customers',
   suppliers: 'Suppliers',

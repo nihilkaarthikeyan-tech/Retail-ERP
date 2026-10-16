@@ -5,10 +5,10 @@
 import { Decimal, type PosTransactionInput } from "shared";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
-import { CreditApprovalError, ON_ACCOUNT_NAMED, TillEngine } from "./engine";
-import { ACCOUNT, ASHA, BASMATI, CARD, CASH, fakeApi, PARLE, PREFIX, sampleOffers, sampleSnapshot, sampleUser, snapshotWithOnAccount, SURF, TILL_ID, UPI } from "./fixtures";
+import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, NO_BILL_RETURN_DROPPED, NO_BILL_RETURN_OFFLINE, ON_ACCOUNT_NAMED, TillEngine } from "./engine";
+import { ACCOUNT, ARIEL, ASHA, BASMATI, CARD, CASH, fakeApi, PARLE, PREFIX, sampleOffers, sampleSnapshot, sampleUser, snapshotWithOnAccount, SURF, TILL_ID, UPI } from "./fixtures";
 import { formatNumber, NumberCounter, prefixFor } from "./numbers";
-import { buildTransaction, checkPayments, type DraftBill, type DraftLine, emptyDraft, gstRateFor, listPriceFor, priceBill } from "./pricing";
+import { buildTransaction, checkPayments, type DraftBill, type DraftLine, type DraftNoBillReturnLine, emptyDraft, gstRateFor, listPriceFor, priceBill } from "./pricing";
 import { SendQueue } from "./queue";
 import { mergeSnapshot } from "./snapshot";
 import { MemoryStore } from "./storage";
@@ -480,5 +480,159 @@ describe("on account at the till (plan 07 §1a, scenario 7.12)", () => {
     };
     await e.finish({ ...d, ret, payments: onAccount });
     expect(bodies[0]).toMatchObject({ customerId: ASHA, payments: [{ paymentMethodId: ACCOUNT, amount: "-120.00" }] });
+  });
+});
+
+const serverShift = { id: "s1", clientId: "sc", businessDate: DATE, openedById: "u", openedAt: at.toISOString(), status: "open", openingCash: [], cashMovements: [] };
+
+function onlineEngine(postBill: (b: PosTransactionInput) => Promise<TransactionResult>) {
+  const api = fakeApi({ me: async () => sampleUser, snapshot: async () => sampleSnapshot(), currentShift: async () => serverShift, postBill: vi.fn(postBill) });
+  return new TillEngine({ store: new MemoryStore(), api, device, now: () => at, uuid });
+}
+
+describe("return without the original bill (plan 11 A9, scenario 11.8)", () => {
+  function back(itemId: string, quantity: string, priceOverride: string | null = null): DraftNoBillReturnLine {
+    const item = sampleSnapshot().items.find((i) => i.id === itemId)!;
+    return { key: `nb-${itemId}`, originalLineId: null, itemId, unitId: item.baseUnitId, code: item.code, name: item.name, quantity, priceOverride };
+  }
+  const noBill = (lines: DraftNoBillReturnLine[], token?: string): DraftBill["ret"] => ({ originalBillId: null, originalNumber: null, customerId: null, lines, reason: "No receipt", ...(token ? { approvalToken: token } : {}) });
+  const refund = [{ methodId: CASH, amount: "120", reference: "" }];
+  const ok = { repeated: false, sale: null, return: null, net: "-120.00", change: "0.00", receipts: [] } satisfies TransactionResult;
+
+  it("is priced from the till's list at today's GST and needs a manager's approval", () => {
+    const s = sampleSnapshot();
+    const bill = priceBill(draft([], { ret: noBill([back(BASMATI, "1")]) }), { snapshot: s, date: DATE });
+    expect(bill.problems).toEqual([]);
+    expect(bill.net.toFixed(2)).toBe("-120.00");
+    expect(bill.approvals).toEqual([expect.objectContaining({ kind: "return_without_bill", lineKey: null })]);
+    const l = bill.ret!.lines[0];
+    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.29", "-2.86", "-2.85"]);
+    // Once approved nothing more is asked; a typed price is what comes back.
+    const approved = priceBill(draft([], { ret: noBill([back(BASMATI, "1", "100")], "t") }), { snapshot: s, date: DATE });
+    expect(approved.approvals).toEqual([]);
+    expect(approved.net.toFixed(2)).toBe("-100.00");
+    // Refunds only by refund methods, exactly the amount.
+    expect(checkPayments(bill.net, [{ methodId: UPI, amount: "120", reference: "x" }], s.till.paymentMethods).problem).toMatch(/UPI cannot be used for refunds/);
+    expect(checkPayments(bill.net, refund, s.till.paymentMethods).problem).toBeNull();
+    // An item without a price in the till's list cannot come back this way.
+    const noPrice = priceBill(draft([], { ret: noBill([back(BASMATI, "1")], "t") }), { snapshot: sampleSnapshot({ prices: [] }), date: DATE });
+    expect(noPrice.problems[0]).toMatch(/has no price in the till's price list/);
+  });
+
+  it("is sent with no original bill, the manager's approval and the typed price; the customer is the bill's own", () => {
+    const s = sampleSnapshot();
+    const asha = { id: ASHA, name: "Asha", mobile: "9876543210", gstin: null, stateCode: null, customerGroupId: null };
+    const d = draft([line(ARIEL, "1")], { customer: asha, ret: noBill([back(BASMATI, "1"), back(SURF, "1", "125")], "approval-9"), payments: [] });
+    const bill = priceBill(d, { snapshot: s, date: DATE });
+    // An exchange: Ariel ₹150 out, Basmati ₹120 and Surf at ₹125 back.
+    expect(bill.net.toFixed(2)).toBe("-95.00");
+    const tx = buildTransaction(d, bill, s.till.paymentMethods, { clientId: uuid(), tillId: TILL_ID, shiftClientId: uuid(), soldAt: at.toISOString(), offline: false, numbers: { ret: `${PREFIX}000042`, sale: `${PREFIX}000043` } });
+    expect(tx.customerId).toBe(ASHA);
+    expect(tx.ret).toEqual({
+      number: `${PREFIX}000042`,
+      reason: "No receipt",
+      approvalToken: "approval-9",
+      lines: [
+        { lineNo: 1, itemId: BASMATI, unitId: s.items[0].baseUnitId, quantity: "1" },
+        { lineNo: 2, itemId: SURF, unitId: s.items[1].baseUnitId, quantity: "1", price: "125.00" },
+      ],
+    });
+    expect(tx.ret).not.toHaveProperty("returnOfId");
+    expect(tx.sale!.lines).toHaveLength(1);
+    expect(tx.expectedTotal).toBe("-95.00");
+  });
+
+  it("is refused offline and never queued", async () => {
+    const e = new TillEngine({ store: new MemoryStore(), api: fakeApi(), device, now: () => at, uuid });
+    await e.store.set("snapshot", sampleSnapshot());
+    await e.start();
+    await e.openShift("0", "Ravi");
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, ret: noBill([back(BASMATI, "1")], "t"), payments: refund })).rejects.toThrow(NO_BILL_RETURN_OFFLINE);
+    expect((await e.queue.items()).map((i) => i.kind)).toEqual(["shift_open"]);
+  });
+
+  it("is not queued when the connection drops while sending; the return stays on the screen", async () => {
+    const e = onlineEngine(async () => {
+      throw new ApiError(0, "Cannot reach the server");
+    });
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, ret: noBill([back(BASMATI, "1")], "t"), payments: refund })).rejects.toThrow(NO_BILL_RETURN_DROPPED);
+    expect(await e.queue.items()).toEqual([]);
+    expect((await e.loadDraft()).draft.ret?.approvalToken).toBe("t");
+  });
+
+  it("online it is saved at once with the approval", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const e = onlineEngine(async (b) => {
+      bodies.push(b);
+      return ok;
+    });
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const res = await e.finish({ ...d, ret: noBill([back(BASMATI, "1")], "approval-1"), payments: refund });
+    expect(res.offline).toBe(false);
+    expect(bodies[0]).toMatchObject({ offline: false, expectedTotal: "-120.00", payments: [{ paymentMethodId: CASH, amount: "-120.00" }], ret: { approvalToken: "approval-1" } });
+    expect(bodies[0].customerId).toBeUndefined();
+  });
+});
+
+describe("selling below cost at the till (plan 11 A2, scenario 11.2)", () => {
+  const BELOW = "ITM-000001: this price is below cost; a manager must approve it";
+  const ok = { repeated: false, sale: null, return: null, net: "92.00", change: "0.00", receipts: [] } satisfies TransactionResult;
+
+  it("when every line of that item already carries an approval, the refusal is shown as it is (no endless asking)", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const e = onlineEngine(async (b) => {
+      bodies.push(b);
+      throw new ApiError(400, BELOW);
+    });
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const rice = line(BASMATI, "1", { discountPercent: "12", approvalToken: "discount-1" });
+    const err = await e.finish({ ...d, lines: [line(SURF, "1"), rice], payments: [{ methodId: CASH, amount: "300", reference: "" }] }).catch((x: unknown) => x);
+    expect(err).not.toBeInstanceOf(BelowCostError);
+    expect((err as Error).message).toBe(BELOW);
+    expect(bodies).toHaveLength(1);
+  });
+
+  it("finds the line, keeps the bill's identity and numbers, and finishes after the approval", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const e = onlineEngine(async (b) => {
+      bodies.push(b);
+      if (!b.sale!.lines[0].approvalToken) throw new ApiError(400, BELOW);
+      return ok;
+    });
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const err = await e.finish({ ...d, lines: [line(BASMATI, "1"), line(SURF, "1")], payments: [{ methodId: CASH, amount: "300", reference: "" }] }).catch((x: unknown) => x);
+    expect(err).toBeInstanceOf(BelowCostError);
+    const below = err as BelowCostError;
+    expect(below).toMatchObject({ itemCode: "ITM-000001", reason: BELOW });
+    expect(await e.queue.items()).toEqual([]);
+
+    const kept = (await e.loadDraft()).draft;
+    expect(kept.lines.find((l) => l.key === below.lineKey)?.itemId).toBe(BASMATI);
+    const again = { ...kept, lines: kept.lines.map((l) => (l.key === below.lineKey ? { ...l, approvalToken: "approval-2" } : l)) };
+    const res = await e.finish(again);
+    expect(res.offline).toBe(false);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ clientId: bodies[0].clientId, sale: { number: bodies[0].sale!.number } });
+    expect(bodies[1].sale!.lines[0].approvalToken).toBe("approval-2");
+    expect(bodies[1].sale!.lines[1].approvalToken).toBeUndefined();
+  });
+
+  it("an approval used up by an earlier try is taken off the bill so the manager is asked again", async () => {
+    const e = onlineEngine(async () => {
+      throw new ApiError(403, "The manager approval was already used");
+    });
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, lines: [line(BASMATI, "1", { discountPercent: "12", approvalToken: "used" })], payments: [{ methodId: CASH, amount: "200", reference: "" }] })).rejects.toThrow(APPROVAL_SPENT);
+    const kept = (await e.loadDraft()).draft;
+    expect(kept.lines[0].approvalToken).toBeUndefined();
+    expect(e.price(kept)!.approvals[0]).toMatchObject({ kind: "discount" });
+    expect(kept.clientId).not.toBeNull();
   });
 });

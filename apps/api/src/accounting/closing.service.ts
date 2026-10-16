@@ -162,6 +162,7 @@ export class ClosingService {
     const later = await this.prisma.yearEndClosing.count({ where: { companyId: company.id, status: 'posted', periodEnd: { gt: fy.endDate } } });
     if (later) throw new BadRequestException('A later year is already closed');
     const periodEnd = iso(fy.endDate)!;
+    await this.checkReadyToClose(company, fy.name, fy.endDate);
 
     const sums = await this.prisma.ledgerLine.groupBy({
       by: ['accountId', 'storeId'],
@@ -192,6 +193,42 @@ export class ClosingService {
       { timeout: 60_000, maxWait: 30_000 },
     );
     return { id: closing.id, financialYear: fy.name, periodEnd };
+  }
+
+  /**
+   * Plan 11 A10 (blueprint 11 process 7): the year's books must be locked up to its last day,
+   * and the stock value on that day must equal the stock accounts, store by store.
+   */
+  private async checkReadyToClose(company: { id: string; lockDate: Date | null }, yearName: string, end: Date) {
+    if (!company.lockDate || company.lockDate < end) {
+      throw new BadRequestException(`Lock the books up to ${iso(end)} first (Accounts → Lock books), so nothing more can be posted into ${yearName}`);
+    }
+    const locations = new Map((await this.prisma.stockLocation.findMany({ where: { companyId: company.id }, select: { id: true, storeId: true, kind: true } })).map((l) => [l.id, l]));
+    const keyOf = (locationId: string) => {
+      const l = locations.get(locationId);
+      return l?.kind === 'transit' ? 'transit' : (l?.storeId ?? 'none');
+    };
+    const stock = new Map<string, Decimal>();
+    for (const r of await this.prisma.stockLedgerEntry.groupBy({ by: ['locationId'], where: { companyId: company.id, postingDate: { lte: end } }, _sum: { valueChange: true } })) {
+      const k = keyOf(r.locationId);
+      stock.set(k, (stock.get(k) ?? new Decimal(0)).add(D(r._sum.valueChange ?? 0)));
+    }
+    const roles = await this.prisma.accountDefault.findMany({ where: { companyId: company.id, role: { in: ['stock', 'goods_in_transit'] } } });
+    const transitId = roles.find((r) => r.role === 'goods_in_transit')?.accountId;
+    const books = new Map<string, Decimal>();
+    const sums = await this.prisma.ledgerLine.groupBy({ by: ['accountId', 'storeId'], where: { companyId: company.id, accountId: { in: roles.map((r) => r.accountId) }, entryDate: { lte: end } }, _sum: { debit: true, credit: true } });
+    for (const s of sums) {
+      const k = s.accountId === transitId ? 'transit' : (s.storeId ?? 'none');
+      books.set(k, (books.get(k) ?? new Decimal(0)).add(D(s._sum.debit ?? 0)).sub(D(s._sum.credit ?? 0)));
+    }
+    const stores = new Map((await this.prisma.store.findMany({ where: { companyId: company.id }, select: { id: true, code: true } })).map((s) => [s.id, s.code]));
+    const off = [...new Set([...stock.keys(), ...books.keys()])]
+      .map((k) => ({ k, diff: (books.get(k) ?? new Decimal(0)).sub(stock.get(k) ?? new Decimal(0)) }))
+      .filter((d) => d.diff.abs().gt(new Decimal('0.05')));
+    if (off.length) {
+      const list = off.map((d) => `${d.k === 'transit' ? 'goods in transit' : (stores.get(d.k) ?? 'no store')}: accounts differ from stock by ₹${d.diff.toFixed(2)}`).join('; ');
+      throw new BadRequestException(`The stock value on ${iso(end)} does not match the stock accounts (${list}). Check "Stock against accounts" and close any open till shifts of the year first`);
+    }
   }
 
   /** Allowed only while no later year is closed (blueprint 11 process 7). */

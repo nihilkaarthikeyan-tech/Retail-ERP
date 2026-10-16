@@ -25,14 +25,19 @@ export const reportQuerySchema = z
     customerId: uuid.optional(),
     cashierId: uuid.optional(),
     tillId: uuid.optional(),
-    groupBy: z.enum(['item', 'group', 'brand', 'customer', 'store', 'cashier', 'day', 'week', 'month']).optional(),
+    groupBy: z.enum(['item', 'group', 'brand', 'customer', 'store', 'cashier', 'day', 'week', 'month', 'style', 'attribute', 'season']).optional(),
+    /** Plan 11 C3: with groupBy "attribute", the attribute (size, colour…) to group by. */
+    attributeId: uuid.optional(),
+    /** Plan 11 C4: only items of this season. */
+    seasonId: uuid.optional(),
     rankBy: z.enum(['quantity', 'sales', 'margin']).optional(),
     worst: queryBoolean.optional(),
     limit: z.coerce.number().int().min(1).max(1000).optional(),
     /** Days of sales the rate of sale is taken over (stock cover). */
     days: z.coerce.number().int().min(1).max(365).optional(),
   })
-  .refine((q) => !q.from || !q.to || q.from <= q.to, 'The start date is after the end date');
+  .refine((q) => !q.from || !q.to || q.from <= q.to, 'The start date is after the end date')
+  .refine((q) => q.groupBy !== 'attribute' || !!q.attributeId, 'Choose the size, colour or other attribute to group by');
 export type ReportQuery = z.infer<typeof reportQuerySchema>;
 
 /** Figures the owner can choose for the daily summary email (plan 09 §1.5). */

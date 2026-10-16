@@ -25,6 +25,10 @@ interface OfferFormState {
   value: string;
   buyQuantity: string;
   freeQuantity: string;
+  freeItemId: string;
+  setQuantity: string;
+  setPrice: string;
+  cheapestFree: boolean;
   minQuantity: string;
   minAmount: string;
   storeIds: string[];
@@ -41,7 +45,7 @@ const fromDecimal = (v: string | null) => (v == null ? "" : showQuantity(v));
 
 function initial(offer: OfferDto | null, today: string): OfferFormState {
   if (!offer) {
-    return { code: "", name: "", kind: "percent", appliesTo: "items", targetIds: [], value: "", buyQuantity: "", freeQuantity: "", minQuantity: "", minAmount: "", storeIds: [], customerGroupId: "", startDate: today, endDate: "", priority: "0", couponOnly: false, active: true };
+    return { code: "", name: "", kind: "percent", appliesTo: "items", targetIds: [], value: "", buyQuantity: "", freeQuantity: "", freeItemId: "", setQuantity: "", setPrice: "", cheapestFree: false, minQuantity: "", minAmount: "", storeIds: [], customerGroupId: "", startDate: today, endDate: "", priority: "0", couponOnly: false, active: true };
   }
   return {
     code: offer.code,
@@ -52,6 +56,10 @@ function initial(offer: OfferDto | null, today: string): OfferFormState {
     value: fromDecimal(offer.value),
     buyQuantity: fromDecimal(offer.buyQuantity),
     freeQuantity: fromDecimal(offer.freeQuantity),
+    freeItemId: offer.freeItemId ?? "",
+    setQuantity: offer.setQuantity == null ? "" : String(offer.setQuantity),
+    setPrice: offer.setPrice ?? "",
+    cheapestFree: !!offer.cheapestFree,
     minQuantity: fromDecimal(offer.minQuantity),
     minAmount: offer.minAmount ?? "",
     storeIds: offer.storeIds,
@@ -66,16 +74,21 @@ function initial(offer: OfferDto | null, today: string): OfferFormState {
 
 /** What the API receives for a form (before validation). */
 function offerPayload(f: OfferFormState) {
-  const free = f.kind === "free_goods";
+  const free = f.kind === "free_goods" || f.kind === "buy_get";
+  const mix = f.kind === "mix_match";
   return {
     code: f.code,
     name: f.name,
     kind: f.kind,
     appliesTo: f.appliesTo,
     targetIds: f.appliesTo === "bill" ? [] : f.targetIds,
-    value: free ? null : blank(f.value),
+    value: free || mix ? null : blank(f.value),
     buyQuantity: free ? blank(f.buyQuantity) : null,
     freeQuantity: free ? blank(f.freeQuantity) : null,
+    freeItemId: f.kind === "buy_get" ? f.freeItemId || null : null,
+    setQuantity: mix && f.setQuantity.trim() !== "" ? Number(f.setQuantity) : null,
+    setPrice: mix && !f.cheapestFree ? blank(f.setPrice) : null,
+    cheapestFree: mix && f.cheapestFree,
     minQuantity: blank(f.minQuantity),
     minAmount: blank(f.minAmount),
     storeIds: f.storeIds,
@@ -104,11 +117,11 @@ export function OfferForm({ offer, today, onSaved, onCancel }: { offer: OfferDto
   const customerGroups = useLoad(() => api.get<PartyGroupNode[]>("/customer-groups"));
   const locations = useStockLocations();
   const stores = storesFromLocations(locations.data ?? []);
-  // Names of items already on a saved offer.
-  const savedItems = useLoad<ItemDto[]>(
-    () => (offer && offer.appliesTo === "items" && offer.targetIds.length ? Promise.all(offer.targetIds.map((id) => api.get<ItemDto>(`/items/${id}`))) : Promise.resolve([])),
-    [offer?.id],
-  );
+  // Names of items already on a saved offer (and its free item).
+  const savedItems = useLoad<ItemDto[]>(() => {
+    const ids = [...(offer && offer.appliesTo === "items" ? offer.targetIds : []), ...(offer?.freeItemId ? [offer.freeItemId] : [])];
+    return ids.length ? Promise.all(ids.map((id) => api.get<ItemDto>(`/items/${id}`))) : Promise.resolve([]);
+  }, [offer?.id]);
   const known: Record<string, ItemDto> = { ...Object.fromEntries((savedItems.data ?? []).map((i) => [i.id, i])), ...itemNames };
 
   function set<K extends keyof OfferFormState>(key: K, value: OfferFormState[K]) {
@@ -133,7 +146,8 @@ export function OfferForm({ offer, today, onSaved, onCancel }: { offer: OfferDto
     }
   }
 
-  const free = form.kind === "free_goods";
+  const free = form.kind === "free_goods" || form.kind === "buy_get";
+  const mix = form.kind === "mix_match";
   const valueLabel = form.kind === "percent" ? "Percentage off (%)" : form.kind === "amount" ? "Rupees off (₹)" : "Special price (₹)";
 
   return (
@@ -158,8 +172,14 @@ export function OfferForm({ offer, today, onSaved, onCancel }: { offer: OfferDto
         </SelectInput>
         {free ? (
           <>
-            <TextInput id="offer-buy" label="Buy (quantity)" inputMode="decimal" value={form.buyQuantity} error={errors.buyQuantity} hint="For buy 2 get 1 free, type 2 here." onChange={(e) => set("buyQuantity", e.target.value)} />
-            <TextInput id="offer-free" label="Get free (quantity)" inputMode="decimal" value={form.freeQuantity} error={errors.freeQuantity} hint="…and 1 here. The free goods are the same item." onChange={(e) => set("freeQuantity", e.target.value)} />
+            <TextInput id="offer-buy" label="Buy (quantity)" inputMode="decimal" value={form.buyQuantity} error={errors.buyQuantity} hint={form.kind === "buy_get" ? "Counted over all the listed items on the bill." : "For buy 2 get 1 free, type 2 here."} onChange={(e) => set("buyQuantity", e.target.value)} />
+            <TextInput id="offer-free" label="Get free (quantity)" inputMode="decimal" value={form.freeQuantity} error={errors.freeQuantity} hint={form.kind === "buy_get" ? "…of the item chosen below, added to the bill at ₹0." : "…and 1 here. The free goods are the same item."} onChange={(e) => set("freeQuantity", e.target.value)} />
+          </>
+        ) : mix ? (
+          <>
+            <TextInput id="offer-set-qty" label="Items in a set" inputMode="numeric" value={form.setQuantity} error={errors.setQuantity} hint="Any of the listed items, counted across the bill. Repeats for every full set." onChange={(e) => set("setQuantity", e.target.value)} />
+            <TextInput id="offer-set-price" label="Price of a set (₹)" inputMode="decimal" value={form.cheapestFree ? "" : form.setPrice} error={errors.setPrice} disabled={form.cheapestFree} hint="For any 3 for ₹999, type 3 and 999." onChange={(e) => set("setPrice", e.target.value)} />
+            <CheckInput id="offer-cheapest" label="Cheapest one of each set free" description="Instead of a set price: buy 2, the cheaper one is free." checked={form.cheapestFree} onChange={(e) => set("cheapestFree", e.target.checked)} />
           </>
         ) : (
           <TextInput id="offer-value" label={valueLabel} inputMode="decimal" value={form.value} error={errors.value} onChange={(e) => set("value", e.target.value)} />
@@ -178,6 +198,38 @@ export function OfferForm({ offer, today, onSaved, onCancel }: { offer: OfferDto
           ))}
         </SelectInput>
       </div>
+
+      {form.kind === "buy_get" ? (
+        <Field id="offer-free-item" label="Item given free" error={errors.freeItemId}>
+          <div id="offer-free-item">
+            {form.freeItemId ? (
+              <p>
+                {known[form.freeItemId] ? (
+                  <>
+                    <span className="mono">{known[form.freeItemId].code}</span> {known[form.freeItemId].name}
+                  </>
+                ) : (
+                  <span className="muted">Item</span>
+                )}{" "}
+                <Button size="small" variant="link" onClick={() => set("freeItemId", "")}>
+                  Change
+                </Button>
+              </p>
+            ) : (
+              <ItemPicker
+                id="offer-free-item-picker"
+                label="Choose the free item"
+                value={null}
+                onChange={(item) => {
+                  if (!item) return;
+                  setItemNames((n) => ({ ...n, [item.id]: item }));
+                  set("freeItemId", item.id);
+                }}
+              />
+            )}
+          </div>
+        </Field>
+      ) : null}
 
       {form.appliesTo === "items" ? (
         <Field id="offer-targets" label="Items" error={errors.targetIds}>

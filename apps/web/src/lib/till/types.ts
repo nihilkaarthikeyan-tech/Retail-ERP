@@ -33,6 +33,8 @@ export interface SnapTill {
   paymentMethods: SnapPaymentMethod[];
   liveAllowed: boolean;
   walkInCustomerId: string | null;
+  /** Plan 11 B4 (decision 47): the store's home-delivery charge, none at or above freeAbove, billed as itemId. */
+  delivery?: { charge: string; freeAbove: string | null; itemId: string | null };
 }
 
 export interface SnapItemUnit {
@@ -86,12 +88,18 @@ export interface SnapOffer {
   id: string;
   code: string;
   name: string;
-  kind: "percent" | "amount" | "special_price" | "free_goods";
+  kind: "percent" | "amount" | "special_price" | "free_goods" | "buy_get" | "mix_match";
   appliesTo: "items" | "groups" | "brands" | "bill";
   targetIds: string[];
   value: string | null;
   buyQuantity: string | null;
   freeQuantity: string | null;
+  /** Plan 11 B3: buy_get gives this item free … */
+  freeItemId?: string | null;
+  /** … mix_match counts sets of this many items, for setPrice or with the cheapest free. */
+  setQuantity?: number | null;
+  setPrice?: string | null;
+  cheapestFree?: boolean;
   minQuantity: string | null;
   minAmount: string | null;
   storeIds: string[];
@@ -111,6 +119,13 @@ export interface SnapCoupon {
   maxUses: number | null;
   usedCount: number;
   customerId: string | null;
+}
+
+/** A salesperson of the till's store (plan 11 C1). */
+export interface SnapSalesStaff {
+  id: string;
+  code: string;
+  name: string;
 }
 
 export interface SnapCustomer {
@@ -137,6 +152,8 @@ export interface TillSnapshot {
   coupons: SnapCoupon[];
   customers: SnapCustomer[];
   stock: { itemId: string; quantity: string }[];
+  /** Plan 11 C1: the store's salespeople in use. */
+  salesStaff?: SnapSalesStaff[];
 }
 
 /** The snapshot as kept on the till, with when it was last refreshed. */
@@ -157,6 +174,19 @@ export interface ReceiptLine {
   amount: string;
   free: boolean;
   serials: string[];
+  /** Plan 11 B3: the offer on the line. */
+  offer?: string | null;
+  /** Plan 11 C1: the line's salesperson code. */
+  salesStaff?: string | null;
+}
+
+/** Plan 11 B4: delivery details shown on the receipt. */
+export interface ReceiptDelivery {
+  name: string | null;
+  address: string;
+  phone: string | null;
+  deliverOn: string | null;
+  chargeAmount: string;
 }
 
 export interface Receipt {
@@ -173,6 +203,11 @@ export interface Receipt {
   totals: { gross: string; discount: string; taxable: string; rounding: string; total: string };
   payments: { method: string; amount: string; reference: string | null }[];
   change: string;
+  /** Plan 11 B3: each offer used and what it saved. */
+  offers?: { name: string; saving: string }[];
+  /** Plan 11 C1: the bill's salesperson. */
+  salesStaff?: string | null;
+  delivery?: ReceiptDelivery | null;
 }
 
 export interface BillLineDto {
@@ -190,6 +225,7 @@ export interface BillLineDto {
   isFree: boolean;
   gstRate: string;
   lineTotal: string;
+  salesStaffId?: string | null;
 }
 
 export interface BillDto {

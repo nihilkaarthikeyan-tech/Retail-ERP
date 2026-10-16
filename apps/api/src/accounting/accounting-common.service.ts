@@ -15,6 +15,8 @@ export const ACCOUNTING_NUMBER_SERIES: Record<string, string> = {
   receipt: 'RCT-{FY}-',
   payment: 'PAY-{FY}-',
   transfer: 'TRF-{FY}-',
+  /** Plan 11 C8: simple expenses, kept as journals of kind "expense". */
+  expense: 'EXP-{FY}-',
 };
 
 type Amount = { toString(): string };

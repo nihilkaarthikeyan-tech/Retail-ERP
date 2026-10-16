@@ -16,6 +16,7 @@ import type { ItemDto, PartyRef, PaymentTermsDto, StoreRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { OrdersItemAdder } from "./orders-item-adder";
+import { SizeColourGrid } from "./size-colour-grid";
 import { emptyOrderLine, OrderLineGrid, type OrderLineDraft, orderLineFromDto, orderLineProblem, orderLineToInput, previewOrderTotals } from "./orders-lines";
 import { OrderStatusBadge, OrdersReasonDialog, useOrderStores } from "./orders-shared";
 
@@ -363,7 +364,12 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
       {order && !isDraft ? <OrderProgress order={order} /> : null}
 
       <h2>Lines</h2>
-      {editable ? <OrdersItemAdder onAdd={(item, unitId) => setLines([...lines, emptyOrderLine(item, unitId)])} /> : null}
+      {editable ? (
+        <>
+          <OrdersItemAdder onAdd={(item, unitId) => setLines([...lines, emptyOrderLine(item, unitId)])} />
+          <SizeColourGrid onAdd={(more) => setLines([...lines, ...more.map((m) => ({ ...emptyOrderLine(m.item, null), quantity: m.quantity }))])} />
+        </>
+      ) : null}
       <OrderLineGrid lines={lines} onChange={setLines} problems={problems} withPrices={rights.prices} withProgress={withProgress} readOnly={!editable} />
       {editable && rights.prices ? <p className="muted">Rate is per the unit chosen on the line, before GST. Leave the rate blank to use the supplier&apos;s price list or the last purchase price.</p> : null}
       {editable && !rights.prices ? <p className="muted">Prices are filled in by the server from the supplier&apos;s price list or the last purchase price.</p> : null}

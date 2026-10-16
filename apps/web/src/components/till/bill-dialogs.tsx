@@ -1,10 +1,13 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Small till dialogs: the customer (walk-in, find by mobile, quick add with
-// name and mobile, module 3), bill options (coupon, bill discount), parked
+// name and mobile, module 3, and an optional birthday and anniversary, plan 11
+// C10), bill options (coupon, bill discount), parked
 // bills, and pairing the Till Helper printer program.
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
+import { businessDate, dayMonthYearProblem } from "shared";
+import { blankDate, type DayMonthYear, DayMonthYearFields, joinDayMonth } from "@/components/parties/customer-dates-fields";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import type { ParkedBill, TillEngine } from "@/lib/till/engine";
@@ -16,6 +19,9 @@ import type { TillSnapshot } from "@/lib/till/types";
 export function CustomerDialog({ open, snapshot, current, newId, onPick, onClose }: { open: boolean; snapshot: TillSnapshot; current: DraftCustomer | null; newId: () => string; onPick: (c: DraftCustomer | null) => void; onClose: () => void }) {
   const [mobile, setMobile] = useState("");
   const [name, setName] = useState("");
+  const [more, setMore] = useState(false);
+  const [birthday, setBirthday] = useState<DayMonthYear>(blankDate);
+  const [anniversary, setAnniversary] = useState<DayMonthYear>(blankDate);
   const [error, setError] = useState<string | null>(null);
   const digits = mobile.replace(/\D/g, "");
   const found = digits.length === 10 ? findCustomerByMobile(snapshot, digits) : undefined;
@@ -24,9 +30,26 @@ export function CustomerDialog({ open, snapshot, current, newId, onPick, onClose
     e.preventDefault();
     if (!/^\d{10}$/.test(digits)) return setError("Enter the 10-digit mobile number");
     if (!name.trim()) return setError("Enter the customer's name");
-    onPick({ id: null, name: name.trim(), mobile: digits, gstin: null, stateCode: null, customerGroupId: null, newClientId: newId() });
+    // Plan 11 C10: both optional; checked here so the bill never carries a date that is not real.
+    const dates: Pick<DraftCustomer, "birthday" | "birthYear" | "anniversary" | "anniversaryYear"> = {};
+    for (const [label, v, dm, yr] of [
+      ["Birthday", birthday, "birthday", "birthYear"],
+      ["Anniversary", anniversary, "anniversary", "anniversaryYear"],
+    ] as const) {
+      if (!v.day && !v.month && !v.year.trim()) continue;
+      if (!v.day || !v.month) return setError(`${label}: choose both the day and the month`);
+      if (v.year.trim() && !/^\d{4}$/.test(v.year.trim())) return setError(`${label}: the year as four digits, e.g. 1990`);
+      const { dayMonth, year } = joinDayMonth(v);
+      const problem = dayMonthYearProblem(dayMonth, year, businessDate());
+      if (problem) return setError(`${label}: ${problem}`);
+      Object.assign(dates, { [dm]: dayMonth, [yr]: year });
+    }
+    onPick({ id: null, name: name.trim(), mobile: digits, gstin: null, stateCode: null, customerGroupId: null, newClientId: newId(), ...dates });
     setMobile("");
     setName("");
+    setMore(false);
+    setBirthday(blankDate);
+    setAnniversary(blankDate);
     setError(null);
   }
 
@@ -59,6 +82,15 @@ export function CustomerDialog({ open, snapshot, current, newId, onPick, onClose
             Name
           </label>
           <input id="till-cust-name" className="input till-input-big" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+          <Button type="button" aria-expanded={more} onClick={() => setMore((m) => !m)}>
+            {more ? "Fewer details" : "More: birthday, anniversary"}
+          </Button>
+          {more ? (
+            <div className="till-cust-dates">
+              <DayMonthYearFields idPrefix="till-cust-birthday" label="Birthday" value={birthday} onChange={setBirthday} />
+              <DayMonthYearFields idPrefix="till-cust-anniversary" label="Anniversary" value={anniversary} onChange={setAnniversary} />
+            </div>
+          ) : null}
           <Alert kind="error">{error}</Alert>
           <Button type="submit" variant="primary">
             Add customer

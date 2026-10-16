@@ -41,22 +41,29 @@ export class ImportsService implements OnApplicationBootstrap {
     return i;
   }
 
-  kindsFor(user: CurrentUser) {
-    return (Object.keys(IMPORT_KINDS) as ImportKind[])
-      .map((k) => this.kinds.get(k))
-      .filter((i) => hasPermission(user, i.importRight) && i.rights.every((r) => hasPermission(user, r)))
-      .map((i) => ({ kind: i.kind, label: IMPORT_KINDS[i.kind], fields: i.fields, exportable: !!i.exportRows }));
+  /** The kind's columns as they are now (fixed for most kinds). */
+  private async shape(i: Importer): Promise<{ fields: Importer['fields']; example: Importer['example'] }> {
+    return i.columns ? i.columns() : { fields: i.fields, example: i.example };
+  }
+
+  async kindsFor(user: CurrentUser) {
+    const allowed = (Object.keys(IMPORT_KINDS) as ImportKind[]).map((k) => this.kinds.get(k)).filter((i) => hasPermission(user, i.importRight) && i.rights.every((r) => hasPermission(user, r)));
+    const out = [];
+    for (const i of allowed) out.push({ kind: i.kind, label: IMPORT_KINDS[i.kind], fields: (await this.shape(i)).fields, exportable: !!i.exportRows });
+    return out;
   }
 
   /** The template: headings, one example row, and text columns formatted as text (leading zeros kept). */
-  template(kind: string, user: CurrentUser): { fileName: string; data: Buffer } {
+  async template(kind: string, user: CurrentUser): Promise<{ fileName: string; data: Buffer }> {
     const i = this.importer(kind, user);
-    const headings = i.fields.map((f) => `${f.label}${f.required ? ' *' : ''}`);
-    const textColumns = i.fields.flatMap((f, n) => (f.type === 'code' ? [n] : []));
-    const notes = i.fields.map((f) => f.hint ?? (f.type === 'date' ? 'Date, e.g. 16/10/2026' : f.type === 'yesno' ? 'Yes or No' : f.type === 'number' ? 'Number' : null));
-    const data = writeXlsx(IMPORT_KINDS[i.kind], [headings, i.example as Cell[], [], ['Notes (delete these rows before importing):'], ...i.fields.map((f, n) => [`${f.label}${f.required ? ' (required)' : ''}`, notes[n]])], {
+    const { fields, example } = await this.shape(i);
+    const headings = fields.map((f) => `${f.label}${f.required ? ' *' : ''}`);
+    // A birthday column is text too, so a typed 15-08 is not turned into a date of this year.
+    const textColumns = fields.flatMap((f, n) => (f.type === 'code' || f.type === 'daymonth' ? [n] : []));
+    const notes = fields.map((f) => f.hint ?? (f.type === 'date' ? 'Date, e.g. 16/10/2026' : f.type === 'yesno' ? 'Yes or No' : f.type === 'number' ? 'Number' : null));
+    const data = writeXlsx(IMPORT_KINDS[i.kind], [headings, example as Cell[], [], ['Notes (delete these rows before importing):'], ...fields.map((f, n) => [`${f.label}${f.required ? ' (required)' : ''}`, notes[n]])], {
       textColumns,
-      widths: i.fields.map((f) => Math.max(14, f.label.length + 4)),
+      widths: fields.map((f) => Math.max(14, f.label.length + 4)),
     });
     return { fileName: `${i.kind}-template.xlsx`, data };
   }
@@ -64,6 +71,7 @@ export class ImportsService implements OnApplicationBootstrap {
   /** Reads the file and checks every row; saves the job as "previewed". */
   async preview(fileName: string, buf: Buffer, options: ImportOptions, actor: Actor, user: CurrentUser) {
     const i = this.importer(options.kind, user);
+    const { fields } = await this.shape(i);
     const company = await this.company.current();
     let sheet: Cell[][];
     try {
@@ -75,9 +83,9 @@ export class ImportsService implements OnApplicationBootstrap {
     if (headerAt < 0) throw new BadRequestException('The file is empty');
     // Headings may carry the template's " *" for required columns.
     const headings = sheet[headerAt].map((h) => (h === null ? null : String(h).replace(/\s*\*\s*$/, '')));
-    const { columns, unmatched } = matchColumns(headings, i.fields, options.mapping);
+    const { columns, unmatched } = matchColumns(headings, fields, options.mapping);
     // In change mode only the columns being changed (and the one that finds the record) are needed.
-    const missing = options.mode === 'change' ? [] : i.fields.filter((f) => f.required && !columns.includes(f.key)).map((f) => f.label);
+    const missing = options.mode === 'change' ? [] : fields.filter((f) => f.required && !columns.includes(f.key)).map((f) => f.label);
     const dataRows: { rowNumber: number; cells: Cell[] }[] = [];
     for (let r = headerAt + 1; r < sheet.length; r++) {
       const cells = sheet[r] ?? [];
@@ -87,7 +95,7 @@ export class ImportsService implements OnApplicationBootstrap {
       dataRows.push({ rowNumber: r + 1, cells });
     }
     if (dataRows.length > MAX_ROWS) throw new BadRequestException(`The file has ${dataRows.length} rows; import at most ${MAX_ROWS} at a time`);
-    const rowFields = options.mode === 'change' ? i.fields.map((f) => ({ ...f, required: false })) : i.fields;
+    const rowFields = options.mode === 'change' ? fields.map((f) => ({ ...f, required: false })) : fields;
     // A new look at a file replaces this person's earlier previews that were never run.
     await this.prisma.importJob.deleteMany({ where: { companyId: company.id, createdById: actor.userId, status: 'previewed' } });
     const parsed = dataRows.map((d) => ({ rowNumber: d.rowNumber, ...parseRow(d.cells, columns, rowFields), cells: d.cells }));
@@ -116,13 +124,13 @@ export class ImportsService implements OnApplicationBootstrap {
       kind: i.kind,
       mode: options.mode,
       fileName,
-      columns: headings.map((h, n) => ({ heading: h, field: columns[n], label: i.fields.find((f) => f.key === columns[n])?.label ?? null })),
+      columns: headings.map((h, n) => ({ heading: h, field: columns[n], label: fields.find((f) => f.key === columns[n])?.label ?? null })),
       unmatched,
       missingRequired: missing,
       rows: parsed.length,
       ready: parsed.length - problems.length,
       problems: problems.slice(0, 200).map((p) => ({ rowNumber: p.rowNumber, problems: p.problems })),
-      fields: i.fields,
+      fields,
     };
   }
 
@@ -132,7 +140,7 @@ export class ImportsService implements OnApplicationBootstrap {
     const i = this.importer(job.kind, user);
     if (job.status !== 'previewed') throw new BadRequestException(job.status === 'running' ? 'This import is already running' : 'This import has already been run; upload the file again');
     const mapped = (job.mapping as { heading: string; field: string }[]).map((m) => m.field);
-    const missing = job.mode === 'change' ? [] : i.fields.filter((f) => f.required && !mapped.includes(f.key));
+    const missing = job.mode === 'change' ? [] : (await this.shape(i)).fields.filter((f) => f.required && !mapped.includes(f.key));
     if (missing.length) throw new BadRequestException(`Match these columns first: ${missing.map((f) => f.label).join(', ')}`);
     const claimed = await this.prisma.importJob.updateMany({ where: { id: jobId, status: 'previewed' }, data: { status: 'running', startedAt: new Date() } });
     if (!claimed.count) throw new BadRequestException('This import is already running');
@@ -221,7 +229,8 @@ export class ImportsService implements OnApplicationBootstrap {
     const rows = await this.prisma.importRow.findMany({ where: { jobId, outcome: 'failed' }, orderBy: { rowNumber: 'asc' } });
     const mapping = job.mapping as { heading: string; field: string }[];
     const headings = mapping.map((m) => m.heading);
-    const textColumns = mapping.flatMap((m, n) => (i.fields.find((f) => f.key === m.field)?.type === 'code' ? [n] : []));
+    const { fields } = await this.shape(i);
+    const textColumns = mapping.flatMap((m, n) => (fields.find((f) => f.key === m.field)?.type === 'code' ? [n] : []));
     const data = writeXlsx('Failed rows', [[...headings, 'Problem'], ...rows.map((r) => [...headings.map((_, n) => ((r.data as { cells: Cell[] }).cells[n] ?? null) as Cell), r.message])], { textColumns });
     return { fileName: `${job.kind}-failed-rows.xlsx`, data };
   }

@@ -11,6 +11,7 @@ import { ActiveBadge, Alert, Button, DataTable, SelectInput, type Column } from 
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups, itemKindLabel, showMoney } from "@/lib/catalogue";
+import type { SeasonDto } from "@/lib/styles-seasons";
 import type { BrandDto, ItemDto, ItemGroupNode, ItemPage } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
@@ -20,6 +21,7 @@ interface Filters {
   search: string;
   groupId: string;
   brandId: string;
+  seasonId: string;
   kind: string;
   active: string;
 }
@@ -28,14 +30,15 @@ export function ItemsList() {
   const params = useSearchParams();
   const { user } = useAuth();
   const canManage = hasPermission(user, "catalogue.manage");
-  const [filters, setFilters] = useState<Filters>({ search: params.get("search") ?? "", groupId: "", brandId: "", kind: "", active: "true" });
+  const [filters, setFilters] = useState<Filters>({ search: params.get("search") ?? "", groupId: "", brandId: "", seasonId: params.get("seasonId") ?? "", kind: "", active: "true" });
   const [page, setPage] = useState(1);
 
   const groups = useLoad(() => api.get<ItemGroupNode[]>("/catalogue/item-groups"));
   const brands = useLoad(() => api.get<BrandDto[]>("/catalogue/brands"));
+  const seasons = useLoad(() => api.get<SeasonDto[]>("/seasons"));
   const items = useLoad(
     () => api.get<ItemPage>(`/items${query({ ...filters, page, pageSize: PAGE_SIZE })}`),
-    [filters.search, filters.groupId, filters.brandId, filters.kind, filters.active, page],
+    [filters.search, filters.groupId, filters.brandId, filters.seasonId, filters.kind, filters.active, page],
   );
 
   function setFilter(key: keyof Filters, value: string) {
@@ -97,6 +100,16 @@ export function ItemsList() {
             </option>
           ))}
         </SelectInput>
+        {seasons.data?.length ? (
+          <SelectInput id="items-season" label="Season" value={filters.seasonId} onChange={(e) => setFilter("seasonId", e.target.value)}>
+            <option value="">All seasons</option>
+            {seasons.data.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </SelectInput>
+        ) : null}
         <SelectInput id="items-kind" label="Kind" value={filters.kind} onChange={(e) => setFilter("kind", e.target.value)}>
           <option value="">All kinds</option>
           <option value="stock">Stock items</option>

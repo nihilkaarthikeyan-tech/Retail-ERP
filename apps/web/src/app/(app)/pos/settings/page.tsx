@@ -3,6 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { posSettingsSchema } from "shared";
+import { DeliverySettings } from "@/components/pos/delivery-settings";
 import { posRights, type PosSettingsDto } from "@/components/pos/pos-shared";
 import { Alert, Badge, Button, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -144,6 +145,7 @@ export default function PosSettingsPage() {
           <p className="muted">A cash difference above {rupees(settings.data.cashDifferenceApprovalAmount)} at closing needs a manager.</p>
           <SettingsForm settings={settings.data} canEdit={rights.setup} onSaved={settings.setData} />
           <GoLive settings={settings.data} isOwner={rights.owner} onSaved={settings.setData} />
+          <DeliverySettings settings={settings.data} canEdit={rights.setup} onSaved={settings.setData} />
         </>
       ) : settings.loading ? (
         <p className="muted">Loading…</p>

@@ -26,6 +26,7 @@ Kept in the browser's built-in database on the till computer (IndexedDB), never 
 | **Catalogue snapshot**: sellable items, barcodes, units, MRP, maximum discount, HSN, GST rate | Every 15 minutes; only what changed since the last refresh is fetched | Scanning and searching offline |
 | **Prices** from the till's price list, including prices starting in the next 7 days | Same | Price changes at midnight work offline |
 | **Offers and coupons** that are active | Same | Offers offline (cumulative / sales-history offers are switched off offline, decision 18) |
+| **Sales staff** of the till's store (code, name) and the store's **home-delivery charge** (plan 11 C1, B4) | Same | Naming the salesperson and adding the delivery charge offline |
 | **Customers**: walk-in, plus customers with a mobile number (name, mobile, GSTIN, group) | Same | Finding a customer offline; new ones can be added offline (name + mobile) |
 | **Last known stock** per item at the till's location | Same | Shown to the cashier only; never blocks a sale (decision 32) |
 | **The bill being made** | On **every change** (each scan, each key) | Crash recovery (§6) |
@@ -66,6 +67,7 @@ The customer has paid and has a receipt, so **the server accepts the bill as it 
 - **Expired batches (decision 13)** are refused on the till itself from its snapshot. If the server finds the batch had expired, the bill is still recorded (it was sold) and put on the check report for the manager.
 - **Hard errors** stop that one bill and put it on a **"Sync problems"** list for the manager; the rest of the queue carries on. Examples: the till was switched off, or the bill's number is outside the till's series.
 - **Month-end stock lock:** a bill dated before the stock lock date is posted on the first open date and flagged on the check report.
+- **Salesperson and delivery (plan 11):** a salesperson switched off or moved meanwhile is kept on the bill and flagged; a home-delivery charge is kept as the till added it, flagged if the store's charge changed meanwhile.
 
 ## 6. When the till crashes or loses power
 

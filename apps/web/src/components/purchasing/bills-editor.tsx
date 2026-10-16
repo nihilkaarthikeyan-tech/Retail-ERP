@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { StockItemAdder } from "@/components/stock/stock-item-adder";
+import { SizeColourGrid } from "./size-colour-grid";
 import { useStockLocations } from "@/components/stock/use-stock-refs";
 import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, ApiError, errorMessage, query } from "@/lib/api";
@@ -183,7 +184,10 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
           <p className="muted">Choose the supplier first; their goods receipts waiting for a bill will be listed.</p>
         )
       ) : kind === "receives_goods" ? (
-        <StockItemAdder onAdd={(item, unitId) => setLines((ls) => [...ls, lineForItem(item, unitId)])} />
+        <>
+          <StockItemAdder onAdd={(item, unitId) => setLines((ls) => [...ls, lineForItem(item, unitId)])} />
+          <SizeColourGrid onAdd={(more) => setLines((ls) => [...ls, ...more.map((m) => ({ ...lineForItem(m.item, null), quantity: m.quantity }))])} />
+        </>
       ) : (
         <ServiceItemAdder onAdd={(item) => setLines((ls) => [...ls, lineForItem(item, null)])} />
       )}

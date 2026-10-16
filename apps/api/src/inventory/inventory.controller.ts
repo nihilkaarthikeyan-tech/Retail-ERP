@@ -94,6 +94,10 @@ export class InventoryController {
   @Get('balance') @RequirePermission('stock.view') balance(@Query(new ZodValidationPipe(stockBalanceQuerySchema)) q: StockBalanceQuery, @ReqUser() user: AuthUser) {
     return this.reports.balance(q, user);
   }
+  /** Plan 11 C3: a style's stock as a size × colour grid per shop. */
+  @Get('style-grid') @RequirePermission('stock.view') styleGrid(@Query('itemId', ParseUUIDPipe) itemId: string, @ReqUser() user: AuthUser, @Query('storeId', new ParseUUIDPipe({ optional: true })) storeId?: string) {
+    return this.reports.styleGrid(itemId, storeId, user);
+  }
   @Get('ledger') @RequirePermission('stock.view') ledger(@Query(new ZodValidationPipe(stockLedgerQuerySchema)) q: StockLedgerQuery, @ReqUser() user: AuthUser) {
     return this.reports.ledger(q, user);
   }

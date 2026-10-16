@@ -46,11 +46,15 @@ export const MENU: MenuEntry[] = [
   { href: "/catalogue/units", label: "Units", permissions: ["catalogue.view"], section: "Catalogue", icon: "ruler" },
   { href: "/catalogue/attributes", label: "Attributes", permissions: ["catalogue.view"], section: "Catalogue", icon: "sliders" },
   { href: "/catalogue/hsn-codes", label: "HSN codes", permissions: ["catalogue.view"], section: "Catalogue", icon: "receipt" },
+  // Plan 11 C4, C5
+  { href: "/catalogue/seasons", label: "Seasons", permissions: ["catalogue.view"], section: "Catalogue", icon: "calendar" },
   { href: "/price-lists", label: "Price lists", permissions: ["prices.view"], section: "Catalogue", icon: "list" },
   { href: "/prices", label: "Prices", permissions: ["prices.view"], section: "Catalogue", icon: "rupee" },
+  { href: "/markdowns", label: "Markdowns", permissions: ["prices.view"], section: "Catalogue", icon: "percent" },
   { href: "/catalogue/settings", label: "Catalogue settings", ownerAdminOnly: true, section: "Catalogue", icon: "settings" },
   // Module 3
   { href: "/customers", label: "Customers", permissions: ["customers.view"], section: "Parties", icon: "users" },
+  { href: "/customers/birthdays", label: "Birthdays this week", permissions: ["customers.view"], section: "Parties", icon: "calendar" },
   { href: "/suppliers", label: "Suppliers", permissions: ["suppliers.view"], section: "Parties", icon: "truck" },
   { href: "/customer-groups", label: "Customer groups", permissions: ["customers.view"], section: "Parties", icon: "folder" },
   { href: "/supplier-groups", label: "Supplier groups", permissions: ["suppliers.view"], section: "Parties", icon: "folder" },
@@ -79,6 +83,8 @@ export const MENU: MenuEntry[] = [
   { href: "/pos/bills", label: "Till bills", permissions: ["pos.sell", "pos.reports"], section: "Billing counter", icon: "list" },
   { href: "/pos/reports", label: "Till reports", permissions: ["pos.reports"], section: "Billing counter", icon: "history" },
   { href: "/pos/offers", label: "Offers and coupons", permissions: ["offers.manage"], section: "Billing counter", icon: "tag" },
+  { href: "/pos/sales-staff", label: "Sales staff", permissions: ["sales_staff.manage"], section: "Billing counter", icon: "users" },
+  { href: "/pos/deliveries", label: "Home deliveries", permissions: ["deliveries.manage"], section: "Billing counter", icon: "truck" },
   { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
   { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
   { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
@@ -87,6 +93,7 @@ export const MENU: MenuEntry[] = [
   // Module 7
   { href: "/accounts", label: "Chart of accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", exact: true, icon: "book" },
   { href: "/accounts/journals", label: "Journals", permissions: ["accounts.view", "journals.post", "cash.deposit"], section: "Accounts", icon: "file" },
+  { href: "/accounts/expenses", label: "Expenses", permissions: ["expenses.post", "accounts.view"], section: "Accounts", icon: "rupee" },
   { href: "/accounts/payments", label: "Receipts and payments", permissions: ["accounts.view", "payments.post", "cash.deposit"], section: "Accounts", icon: "rupee" },
   { href: "/accounts/banks", label: "Bank accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "bank" },
   { href: "/accounts/opening", label: "Opening balances", permissions: ["accounts.view", "journals.post"], section: "Accounts", icon: "calendar" },

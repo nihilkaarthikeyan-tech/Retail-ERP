@@ -22,6 +22,7 @@ const FIELD_TYPE_HINTS: Record<ImportFieldDto["type"], string> = {
   code: "Text (keep the zeros at the front)",
   number: "A number, e.g. 1,05,000.50",
   date: "A date, e.g. 16/10/2026",
+  daymonth: "Day first: 15-08-1990, or 15-08 without the year",
   yesno: "Yes or No",
 };
 

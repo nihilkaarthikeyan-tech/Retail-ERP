@@ -277,6 +277,8 @@ export type CreateOrdersFromSuggestionsInput = z.infer<typeof createOrdersFromSu
 export const purchaseSettingsSchema = z
   .object({
     requireOrderForReceipt: z.boolean(),
+    billNeedsOrder: z.boolean(),
+    billNeedsReceipt: z.boolean(),
     overOrderPercent: percent,
     overReceiptPercent: percent,
     overBillingPercent: percent,

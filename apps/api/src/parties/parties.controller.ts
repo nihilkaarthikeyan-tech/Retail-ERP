@@ -45,10 +45,12 @@ import {
   businessDate,
 } from 'shared';
 import { OwnerAdminOnly, RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
-import { type Actor, ReqActor } from '../common/request-context.js';
+import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { z } from 'zod';
 import { ContactsService } from './contacts.service.js';
+import { CustomerHistoryService } from './customer-history.service.js';
 import { CustomersService } from './customers.service.js';
 import { PartyMastersService } from './party-masters.service.js';
 import { PartySettingsService } from './party-settings.service.js';
@@ -59,6 +61,7 @@ export class CustomersController {
   constructor(
     private readonly customers: CustomersService,
     private readonly contacts: ContactsService,
+    private readonly history: CustomerHistoryService,
   ) {}
 
   @Get() @RequirePermission('customers.view') list(@Query(new ZodValidationPipe(customerQuerySchema)) q: CustomerQuery) {
@@ -70,6 +73,10 @@ export class CustomersController {
   @Post('quick-add') @RequirePermission('customers.quick_add') quickAdd(@Body(new ZodValidationPipe(quickAddCustomerSchema)) input: QuickAddCustomerInput, @ReqActor() actor: Actor) {
     return this.customers.quickAdd(input, actor);
   }
+  /** Plan 11 C10: birthdays and anniversaries in the next days (declared before ':id'). */
+  @Get('birthdays') @RequirePermission('customers.view') birthdays(@Query(new ZodValidationPipe(z.object({ days: z.coerce.number().int().min(1).max(31).optional() }))) q: { days?: number }) {
+    return this.history.upcoming(q.days ?? 7);
+  }
   @Get(':id') @RequirePermission('customers.view') get(@Param('id', ParseUUIDPipe) id: string) {
     return this.customers.get(id);
   }
@@ -78,6 +85,15 @@ export class CustomersController {
   }
   @Patch(':id/credit') @RequirePermission('customers.credit') credit(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(customerCreditSchema)) input: CustomerCreditInput, @ReqActor() actor: Actor) {
     return this.customers.setCredit(id, input, actor);
+  }
+
+  /** Plan 11 C9: till bills and returns, newest first, with this and last year's totals. */
+  @Get(':id/purchases') @RequirePermission('customers.view') purchases(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query(new ZodValidationPipe(z.object({ page: z.coerce.number().int().min(1).optional(), pageSize: z.coerce.number().int().min(1).max(200).optional() }))) q: { page?: number; pageSize?: number },
+    @ReqUser() user: AuthUser,
+  ) {
+    return this.history.purchases(id, q, user);
   }
 
   @Get(':id/addresses') @RequirePermission('customers.view') addresses(@Param('id', ParseUUIDPipe) id: string) {

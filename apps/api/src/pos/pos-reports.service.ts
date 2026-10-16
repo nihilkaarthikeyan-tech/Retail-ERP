@@ -1,10 +1,19 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Till reports (blueprint 09 "Reports"; decision 66; plan 06 §1 item 12).
 import { Injectable } from '@nestjs/common';
-import { type CurrentUser, Decimal, type PosReportQuery } from 'shared';
+import { type CurrentUser, Decimal, type PosReportQuery, type SalespersonReportQuery } from 'shared';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PosCommon } from './pos-common.service.js';
+
+interface SalespersonRow {
+  period: string;
+  salesStaffId: string | null;
+  bills: Set<string>;
+  returns: Set<string>;
+  sales: Decimal;
+  returnsAmount: Decimal;
+}
 
 @Injectable()
 export class PosReportsService {
@@ -21,8 +30,8 @@ export class PosReportsService {
       status: 'completed',
       ...(q.tillId ? { tillId: q.tillId } : {}),
       ...(q.cashierId ? { cashierId: q.cashierId } : {}),
-      ...(q.storeId ? { till: { storeId: q.storeId } } : {}),
-      ...(stores ? { till: { storeId: { in: stores } } } : {}),
+      // A chosen store must be one of the user's own.
+      ...(q.storeId || stores ? { till: { storeId: q.storeId ? (stores && !stores.includes(q.storeId) ? { in: [] } : q.storeId) : { in: stores } } } : {}),
       ...(q.from || q.to ? { businessDate: { ...(q.from ? { gte: fromIso(q.from) } : {}), ...(q.to ? { lte: fromIso(q.to) } : {}) } } : {}),
     };
   }
@@ -91,6 +100,60 @@ export class PosReportsService {
       groups.set(b.cashierId, g);
     }
     return [...groups.values()].map((g) => ({ ...g, total: g.total.toFixed(2) }));
+  }
+
+  /**
+   * Plan 11 C1: sales by salesperson, net of returns, by day or by month. Each
+   * line counts for its own salesperson (a return for the original line's).
+   * A bill's rounding goes with its salesperson, so the total equals the
+   * till's net sales for the period.
+   */
+  async bySalesperson(q: SalespersonReportQuery, user: CurrentUser) {
+    const bills = await this.prisma.posBill.findMany({
+      where: await this.where(q, user),
+      select: { id: true, kind: true, businessDate: true, salesStaffId: true, roundingAdjustment: true, lines: { select: { salesStaffId: true, lineTotal: true }, orderBy: { lineNo: 'asc' } } },
+    });
+    const groups = new Map<string, SalespersonRow>();
+    const row = (period: string, staffId: string | null) => {
+      const key = `${period}|${staffId ?? ''}`;
+      const g = groups.get(key) ?? { period, salesStaffId: staffId, bills: new Set<string>(), returns: new Set<string>(), sales: new Decimal(0), returnsAmount: new Decimal(0) };
+      groups.set(key, g);
+      return g;
+    };
+    const add = (g: SalespersonRow, kind: string, billId: string, amount: Decimal) => {
+      if (kind === 'sale') {
+        g.bills.add(billId);
+        g.sales = g.sales.add(amount);
+      } else {
+        g.returns.add(billId);
+        g.returnsAmount = g.returnsAmount.add(amount);
+      }
+    };
+    for (const b of bills) {
+      const date = iso(b.businessDate)!;
+      const period = q.groupBy === 'month' ? date.slice(0, 7) : date;
+      for (const l of b.lines) add(row(period, l.salesStaffId), b.kind, b.id, D(l.lineTotal));
+      // The rounding to the rupee goes with the bill's salesperson (else its first named line's).
+      const holder = b.salesStaffId ?? b.lines.find((l) => l.salesStaffId)?.salesStaffId ?? null;
+      if (!D(b.roundingAdjustment).isZero()) add(row(period, holder), b.kind, b.id, D(b.roundingAdjustment));
+    }
+    const ids = [...new Set([...groups.values()].map((g) => g.salesStaffId).filter((x): x is string => !!x))];
+    const staff = await this.prisma.salesStaff.findMany({ where: { id: { in: ids } }, select: { id: true, code: true, name: true } });
+    const who = new Map(staff.map((s) => [s.id, s]));
+    return [...groups.values()]
+      .filter((g) => !q.salesStaffId || g.salesStaffId === q.salesStaffId)
+      .map((g) => ({
+        period: g.period,
+        salesStaffId: g.salesStaffId,
+        code: g.salesStaffId ? (who.get(g.salesStaffId)?.code ?? '') : '',
+        name: g.salesStaffId ? (who.get(g.salesStaffId)?.name ?? '-') : 'No salesperson',
+        bills: g.bills.size,
+        returns: g.returns.size,
+        sales: g.sales.toFixed(2),
+        returnsAmount: g.returnsAmount.toFixed(2),
+        net: g.sales.add(g.returnsAmount).toFixed(2),
+      }))
+      .sort((a, b) => a.period.localeCompare(b.period) || Number(!a.salesStaffId) - Number(!b.salesStaffId) || a.name.localeCompare(b.name));
   }
 
   /** Bills made offline whose prices, offers, GST or stock differ from what the server would have done (pos-offline §5). */

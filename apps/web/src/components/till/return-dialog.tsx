@@ -5,16 +5,30 @@
 // quantities; new items added afterwards make it an exchange, netted on one
 // payment. Refunds go back only by refund methods (pay screen); a bill paid
 // on account may be refunded on account for its named customer (plan 07 §1a).
+// Without the original bill (plan 11 A9) the cashier scans what comes back;
+// it is priced from the till's list, needs a manager's PIN and the connection.
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import type { RecentBill, TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
-import type { DraftBill, DraftReturnLine } from "@/lib/till/pricing";
-import type { BillDto } from "@/lib/till/types";
+import { type DraftBill, type DraftReturnLine, listPriceFor, scan, searchItems } from "@/lib/till/pricing";
+import type { BillDto, SnapItem, StoredSnapshot } from "@/lib/till/types";
+
+export const NO_BILL_OFFLINE_HINT = "Returns without a bill need the connection: a manager approves them on the server. Try again when the till is online.";
+
+/** An item coming back without a bill, as typed in the dialog. */
+interface NoBillRow {
+  key: string;
+  item: SnapItem;
+  unitId: string;
+  quantity: string;
+  /** What the customer paid, if the cashier types it; blank = the list price. */
+  price: string;
+}
 
 /** Quantity still returnable on a line, in the line's own unit. */
 export function leftToReturn(l: BillDto["lines"][number]): Decimal {
@@ -27,11 +41,15 @@ export function leftToReturn(l: BillDto["lines"][number]): Decimal {
 interface ReturnDialogProps {
   open: boolean;
   engine: TillEngine;
+  snapshot: StoredSnapshot;
+  /** The till can reach the server (a return without a bill needs it). */
+  online: boolean;
   onClose: () => void;
-  onChosen: (ret: NonNullable<DraftBill["ret"]>, bill: BillDto) => void;
+  /** The original bill, or null for a return without a bill. */
+  onChosen: (ret: NonNullable<DraftBill["ret"]>, bill: BillDto | null) => void;
 }
 
-export function ReturnDialog({ open, engine, onClose, onChosen }: ReturnDialogProps) {
+export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen }: ReturnDialogProps) {
   const [number, setNumber] = useState("");
   const [bill, setBill] = useState<BillDto | null>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
@@ -39,6 +57,11 @@ export function ReturnDialog({ open, engine, onClose, onChosen }: ReturnDialogPr
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<RecentBill[]>([]);
+  const [noBill, setNoBill] = useState(false);
+  const [rows, setRows] = useState<NoBillRow[]>([]);
+  const [search, setSearch] = useState("");
+  const today = engine.today();
+  const results = useMemo(() => (noBill && search.trim().length >= 2 && !scan(snapshot, search) ? searchItems(snapshot, search, 8) : []), [noBill, snapshot, search]);
 
   useEffect(() => {
     if (!open) return;
@@ -113,6 +136,162 @@ export function ReturnDialog({ open, engine, onClose, onChosen }: ReturnDialogPr
     setReason("");
   }
 
+  // ---- Without the original bill ----
+
+  function addBack(item: SnapItem, unitId: string) {
+    setError(null);
+    setSearch("");
+    // The server cannot tell which batch or serial came back without the bill.
+    if (item.isStockItem && (item.trackSerials || item.trackBatches)) {
+      return setError(`${item.name} is tracked by ${item.trackSerials ? "serial number" : "batch"}; return it against its bill`);
+    }
+    const same = rows.find((r) => r.item.id === item.id && r.unitId === unitId);
+    if (same) return setRows(rows.map((r) => (r.key === same.key ? { ...r, quantity: new Decimal(r.quantity || "0").add(1).toString() } : r)));
+    setRows([...rows, { key: engine.uuid(), item, unitId, quantity: "1", price: "" }]);
+  }
+
+  function onScanBack(e?: FormEvent) {
+    e?.preventDefault();
+    const text = search.trim();
+    if (!text) return;
+    const hit = scan(snapshot, text);
+    if (hit) return addBack(hit.item, hit.unitId);
+    const found = searchItems(snapshot, text, 8);
+    if (found.length === 1) return addBack(found[0], found[0].baseUnitId);
+    if (!found.length) setError(`Nothing found for "${text}"`);
+  }
+
+  function confirmNoBill() {
+    if (!online) return setError(NO_BILL_OFFLINE_HINT);
+    if (!rows.length) return setError("Scan or search what comes back");
+    const lines: DraftReturnLine[] = [];
+    for (const r of rows) {
+      let q: Decimal;
+      try {
+        q = new Decimal(r.quantity || "0");
+      } catch {
+        return setError(`${r.item.name}: the quantity is not a number`);
+      }
+      if (q.lte(0)) return setError(`${r.item.name}: the quantity must be above zero`);
+      if (r.price.trim()) {
+        try {
+          if (new Decimal(r.price).isNegative()) return setError(`${r.item.name}: the price cannot be below zero`);
+        } catch {
+          return setError(`${r.item.name}: the price is not a number`);
+        }
+      }
+      lines.push({ key: r.key, originalLineId: null, itemId: r.item.id, unitId: r.unitId, code: r.item.code, name: r.item.name, quantity: q.toString(), priceOverride: r.price.trim() || null });
+    }
+    onChosen({ originalBillId: null, originalNumber: null, customerId: null, lines, reason: reason.trim() || null, paidOnAccount: false }, null);
+    setNoBill(false);
+    setRows([]);
+    setSearch("");
+    setReason("");
+    setError(null);
+  }
+
+  if (noBill) {
+    return (
+      <Dialog open={open} title="Return without a bill" onClose={onClose}>
+        <p className="till-dialog-lead">Scan or search each item coming back. A manager approves the return with their PIN; the refund goes back only by methods allowed for refunds.</p>
+        {!online ? <Alert kind="error">{NO_BILL_OFFLINE_HINT}</Alert> : null}
+        <form onSubmit={onScanBack} className="till-row">
+          <label className="sr-only" htmlFor="till-return-scan">
+            Scan or search the item coming back
+          </label>
+          <input id="till-return-scan" className="input till-input-big" placeholder="Scan barcode, or type code or name" autoComplete="off" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+          <Button type="submit" variant="primary">
+            Add
+          </Button>
+        </form>
+        {results.length ? (
+          <ul className="till-list" aria-label="Matching items">
+            {results.map((i) => (
+              <li key={i.id}>
+                <button type="button" className="till-list-button" onClick={() => addBack(i, i.baseUnitId)}>
+                  <span>
+                    {i.name} <span className="muted mono">{i.code}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {rows.length ? (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th className="num">List price</th>
+                <th className="num">Coming back</th>
+                <th className="num">Price paid (if known)</th>
+                <th>
+                  <span className="sr-only">Remove</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const list = listPriceFor(snapshot, r.item, r.unitId, "1", null, today);
+                return (
+                  <tr key={r.key}>
+                    <td>
+                      {r.item.name} <span className="muted mono">{r.item.code}</span>
+                    </td>
+                    <td className="num">{list ? rupees(list) : "No price"}</td>
+                    <td className="num">
+                      <input
+                        className="input till-input-small"
+                        inputMode="decimal"
+                        aria-label={`Quantity of ${r.item.name} coming back`}
+                        value={r.quantity}
+                        onChange={(e) => setRows(rows.map((x) => (x.key === r.key ? { ...x, quantity: e.target.value.replace(/[^\d.]/g, "") } : x)))}
+                      />
+                    </td>
+                    <td className="num">
+                      <input
+                        className="input till-input-small"
+                        inputMode="decimal"
+                        aria-label={`Price paid for ${r.item.name}`}
+                        placeholder={list ? list.toFixed(2) : ""}
+                        value={r.price}
+                        onChange={(e) => setRows(rows.map((x) => (x.key === r.key ? { ...x, price: e.target.value.replace(/[^\d.]/g, "") } : x)))}
+                      />
+                    </td>
+                    <td>
+                      <Button variant="link" aria-label={`Do not return ${r.item.name}`} onClick={() => setRows(rows.filter((x) => x.key !== r.key))}>
+                        ✕
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : null}
+        <label className="till-pin-label" htmlFor="till-return-reason">
+          Reason (optional)
+        </label>
+        <input id="till-return-reason" className="input" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Alert kind="error">{error}</Alert>
+        <div className="actions">
+          <Button variant="primary" className="till-big" onClick={confirmNoBill} disabled={!online || !rows.length}>
+            Return these (manager PIN next)
+          </Button>
+          <Button
+            onClick={() => {
+              setNoBill(false);
+              setError(null);
+            }}
+          >
+            Find a bill instead
+          </Button>
+        </div>
+        <p className="muted">After this, scan new items for an exchange; the customer pays or gets back only the difference.</p>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog open={open} title="Return or exchange" onClose={onClose}>
       {!bill ? (
@@ -142,7 +321,18 @@ export function ReturnDialog({ open, engine, onClose, onChosen }: ReturnDialogPr
               </ul>
             </>
           ) : null}
-          <p className="muted">Returns without a bill need a manager and are done from the back office.</p>
+          <div className="till-row">
+            <Button
+              disabled={!online}
+              onClick={() => {
+                setNoBill(true);
+                setError(null);
+              }}
+            >
+              Return without a bill
+            </Button>
+          </div>
+          <p className="muted">{online ? "No bill? The items are priced from the till's price list and a manager approves the return with their PIN." : NO_BILL_OFFLINE_HINT}</p>
         </>
       ) : (
         <>

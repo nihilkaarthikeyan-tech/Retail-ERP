@@ -2,7 +2,7 @@
 // Offers and coupons (plan 06 answer 2: simple offers + coupons). The best
 // offer is chosen automatically and a sale is never blocked (decision 17).
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { bestOffer, type CouponInput, Decimal, lineOfferSaving, type OfferInput } from 'shared';
+import { bestOffer, type CouponInput, Decimal, lineOfferSaving, type OfferInput, type OfferKind, type PlanOffer } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Coupon, Offer } from '../generated/prisma/client.js';
@@ -83,6 +83,11 @@ export class OffersService {
             ? await db.brand.count({ where: { id: { in: ids } } })
             : 0;
     if (input.appliesTo !== 'bill' && found !== new Set(ids).size) throw new BadRequestException(`Some of the chosen ${input.appliesTo} were not found`);
+    // Plan 11 B3: the free item of "buy X, get Y" is a sellable item that is not a style.
+    if (input.kind === 'buy_get' && input.freeItemId) {
+      const free = await db.item.findUnique({ where: { id: input.freeItemId } });
+      if (!free || !free.canSell || free.isParentStyle) throw new BadRequestException('The free item must be an item that can be sold (a size or colour, not the style)');
+    }
     // Blueprint 04: a percentage offer cannot exceed a listed item's maximum discount.
     if (input.appliesTo === 'items' && input.kind === 'percent') {
       const over = await db.item.findFirst({ where: { id: { in: ids }, maxDiscountPercent: { lt: input.value ?? '0' } } });
@@ -148,6 +153,11 @@ export class OffersService {
     );
   }
 
+  /** An offer as the shared offer planner takes it (plan 11 B3); buy_get also needs what its free unit is worth. */
+  planOffer(o: Offer, freeUnitValue: Decimal | null = null): PlanOffer & { row: Offer } {
+    return { ...toInput(o), id: o.id, code: o.code, priority: o.priority, setQuantity: o.setQuantity, setPrice: o.setPrice?.toString() ?? null, cheapestFree: o.cheapestFree, freeUnitValue, row: o };
+  }
+
   /** Does a line offer cover this item (the item or its style, its group or a parent group, its brand)? */
   covers(offer: Offer, item: ItemForOffers): boolean {
     switch (offer.appliesTo) {
@@ -162,15 +172,6 @@ export class OffersService {
     }
   }
 
-  /** The line offer giving the biggest saving (decision 17), or null. */
-  bestLineOffer(offers: Offer[], item: ItemForOffers, line: { quantity: Decimal; price: Decimal }): ChosenOffer | null {
-    const candidates = offers
-      .filter((o) => o.appliesTo !== 'bill' && this.covers(o, item))
-      .map((o) => ({ offer: o, code: o.code, priority: o.priority, saving: lineOfferSaving(toInput(o), line) }));
-    const best = bestOffer(candidates);
-    return best ? { offer: best.offer, saving: best.saving } : null;
-  }
-
   /** The whole-bill offer giving the biggest saving on this amount, or null. */
   bestBillOffer(offers: Offer[], billAmount: Decimal): ChosenOffer | null {
     const candidates = offers
@@ -183,7 +184,7 @@ export class OffersService {
 
 function toInput(o: Offer) {
   return {
-    kind: o.kind as 'percent' | 'amount' | 'special_price' | 'free_goods',
+    kind: o.kind as OfferKind,
     value: o.value?.toString() ?? null,
     buyQuantity: o.buyQuantity?.toString() ?? null,
     freeQuantity: o.freeQuantity?.toString() ?? null,
@@ -201,6 +202,11 @@ function offerData(input: OfferInput) {
     value: input.value ?? null,
     buyQuantity: input.buyQuantity ?? null,
     freeQuantity: input.freeQuantity ?? null,
+    // Plan 11 B3: only the fields of the offer's own kind are kept.
+    freeItemId: input.kind === 'buy_get' ? (input.freeItemId ?? null) : null,
+    setQuantity: input.kind === 'mix_match' ? (input.setQuantity ?? null) : null,
+    setPrice: input.kind === 'mix_match' && !input.cheapestFree ? (input.setPrice ?? null) : null,
+    cheapestFree: input.kind === 'mix_match' && !!input.cheapestFree,
     minQuantity: input.minQuantity ?? null,
     minAmount: input.minAmount ?? null,
     storeIds: input.storeIds,
@@ -224,6 +230,10 @@ export function offerDto(o: Offer) {
     value: o.value?.toString() ?? null,
     buyQuantity: o.buyQuantity?.toString() ?? null,
     freeQuantity: o.freeQuantity?.toString() ?? null,
+    freeItemId: o.freeItemId,
+    setQuantity: o.setQuantity,
+    setPrice: o.setPrice?.toFixed(2) ?? null,
+    cheapestFree: o.cheapestFree,
     minQuantity: o.minQuantity?.toString() ?? null,
     minAmount: o.minAmount?.toFixed(2) ?? null,
     storeIds: o.storeIds,

@@ -8,7 +8,7 @@ import { Alert, Badge, Button, DataTable, type Column } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { ACCOUNT_ROLE_LABELS, BILL_KIND_LABELS, BILL_STATUS_LABELS, purchaseRights, rupees, statusTone, type SupplierBillDto, type SupplierBillLineDto } from "@/lib/purchasing";
+import { ACCOUNT_ROLE_LABELS, BILL_KIND_LABELS, BILL_PAYMENT_LABELS, BILL_STATUS_LABELS, purchaseRights, rupees, statusTone, type SupplierBillDto, type SupplierBillLineDto } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
 import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { BillCancelDialog, BillDebitNoteDialog, BillHoldDialog, heldText, PriceDifferenceDialog } from "./bills-dialogs";
@@ -24,11 +24,15 @@ interface BillViewProps {
   onDebitNote?: (note: SupplierBillDto) => void;
 }
 
-/** Status, overdue and held badges of a bill. */
-export function BillBadges({ bill }: { bill: Pick<SupplierBillDto, "status" | "overdue" | "held"> }) {
+/** Status (paid, part paid or not paid once finalised), overdue and held badges of a bill. */
+export function BillBadges({ bill }: { bill: Pick<SupplierBillDto, "status" | "overdue" | "held" | "paymentStatus"> }) {
   return (
     <>
-      <Badge kind={statusTone(bill.status)}>{BILL_STATUS_LABELS[bill.status]}</Badge>
+      {bill.status === "unpaid" && bill.paymentStatus ? (
+        <Badge kind={bill.paymentStatus === "paid" ? "ok" : bill.paymentStatus === "part_paid" ? "warn" : statusTone(bill.status)}>{BILL_PAYMENT_LABELS[bill.paymentStatus]}</Badge>
+      ) : (
+        <Badge kind={statusTone(bill.status)}>{BILL_STATUS_LABELS[bill.status]}</Badge>
+      )}
       {bill.overdue ? (
         <>
           {" "}
@@ -213,6 +217,12 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
               <dd>
                 {formatDate(bill.dueDate)} {bill.overdue ? <Badge kind="off">Overdue</Badge> : null}
               </dd>
+              {bill.amountDue !== undefined ? (
+                <>
+                  <dt>Still owed</dt>
+                  <dd>{rupees(bill.amountDue)}</dd>
+                </>
+              ) : null}
             </>
           ) : null}
           {bill.returnOfId ? (

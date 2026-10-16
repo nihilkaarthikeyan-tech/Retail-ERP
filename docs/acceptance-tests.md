@@ -509,3 +509,106 @@ Reports only read. Each scenario checks that a report agrees with the documents 
 
 ### 10.11 Store limits and rights
 - **Then** a store manager prints only their own stores' documents, and a cashier can neither import nor export.
+
+## Module 11 — Fixes and extras for clothing and fancy stores (plan 11, part 1)
+
+### 11.1 Items that have moved cannot change their unit or tracking (A1)
+- **Given** an item with an opening stock of 10
+- **Then** changing its basic unit, batch or serial tracking, or stock/service flag is refused with a plain message; its name and MRP can still change.
+- An item with no stock movement can still change all of them.
+
+### 11.2 Selling below cost (A2)
+- **Given** "block selling below cost" is on, and an item costs ₹90 (last purchase ₹95) and sells at ₹120
+- **Then** a till sale at a typed price of ₹92 is refused (below the last purchase price); with a manager's PIN it is saved and the override is logged.
+- A return, and a free line from an offer, are never refused.
+- **Given** "allow price change on bill" is off for the company
+- **Then** a typed price is refused even on a till that allows price changes.
+- **Given** "save typed prices" is on, and an item has no price in the till's list
+- **Then** after a sale at a typed ₹55, the item has a price of ₹55 in that list from that day.
+
+### 11.3 Supplier bill payment status (A3)
+- **Given** a ₹11,970.00 supplier bill
+- **Then** after a ₹5,000.00 payment it shows "part paid" with ₹6,970.00 due; after the rest, "paid", never "overdue", and it cannot be put on hold.
+- Cancelling the payment brings it back to "part paid" or "unpaid".
+
+### 11.4 Ledger screens show everything (A4)
+- **Given** an account with 6,000 lines in a period
+- **Then** the general ledger pages through all 6,000. The closing balance equals the trial balance for that account, whatever page is shown.
+
+### 11.5 A 20,000-line count (A5)
+- **Given** an opening count of 20,000 items
+- **Then** finalising it succeeds in one go; stock value equals the sum of quantity × cost; the stock ledger has 20,000 rows.
+
+### 11.6 Blocked and switched-off customers, group credit limits (A6, A7)
+- **Then** a blocked customer is refused at the till when online; an offline bill for them is saved and flagged.
+- **Then** a customer with no own limit in a group with a ₹10,000 limit cannot buy ₹12,000 on account without a manager's PIN.
+- **Then** a customer in a group marked "skip credit check" can buy on account with no limit check.
+
+### 11.7 Bills need an order or receipt (A8)
+- **Given** "a bill needs a goods receipt" is on
+- **Then** a supplier bill that receives goods directly is refused, except for a supplier whose exception allows bills without a receipt.
+
+### 11.8 Return without the original bill (A9)
+- **Then** at the till, a return of 1 shirt without a bill needs a manager's PIN, refunds ₹899.00 in cash, and puts the shirt back at its current cost.
+- **Then** it is refused offline, and refused for a refund to a method that does not allow refunds.
+
+### 11.9 Year-end closing checks (A10)
+- **Then** closing the year is refused while the stock value and the stock accounts differ, or while the year's last month is not locked; the message says which.
+
+### 11.10 Sizes and colours from Excel (B1)
+- **Given** a sheet of 8 rows: one shirt style in sizes S, M, L, XL and colours Red and Blue, with barcodes and prices
+- **Then** one style and 8 variants (`…-RED-M` etc.) are created, each with its barcode and price.
+- Importing the same sheet again adds nothing twice; a row with an unknown size fails with its row number.
+
+### 11.11 Style changes reach the variants (B2)
+- **Then** changing a style's MRP from ₹999 to ₹1,099 with "also change all sizes and colours" sets every variant's MRP to ₹1,099; codes, barcodes and prices are unchanged. Each variant's history shows the change.
+
+### 11.12 New offers (B3)
+- **Any 3 for ₹999** on group T-shirts (₹399 each):
+  - **Then** a bill of 3 T-shirts totals ₹999.00, with the ₹198.00 saving spread over the three lines;
+  - a bill of 4 totals ₹1,398.00.
+- **Buy 2, cheapest free** on tops priced ₹599 and ₹499:
+  - **Then** the ₹499 top is free and the bill is ₹599.00;
+  - returning the ₹599 top later refunds ₹599.00, the amount actually paid for that line; the free top stays sold at ₹0.
+- **Buy a shirt, get a belt free:**
+  - **Then** adding the shirt adds the belt at ₹0, and the belt leaves stock at its cost.
+- **Then** with several offers possible, the bill gets the one that saves the customer most.
+
+### 11.13 Home delivery (B4)
+- **Given** a fixed delivery charge of ₹50, free above ₹2,000
+- **Then:**
+  - a ₹1,500 bill with delivery adds a ₹50.00 charge line and shows in the store's pending deliveries;
+  - marking it delivered records who and when;
+  - a ₹2,500 bill has no charge.
+
+### 11.14 Salesperson (C1)
+- **Given** salespeople Priya and Arun
+- **Then:**
+  - a bill by Priya with one line changed to Arun shows each line's sales against the right person;
+  - a later return of Arun's line reduces Arun's sales, not Priya's;
+  - sales by salesperson for the day equals the till's net sales.
+
+### 11.15 Size × colour grid (C2)
+- **Then** typing quantities 2, 3, 3, 2 under S, M, L, XL for Red on a goods receipt adds 4 lines (one per variant) with those quantities.
+
+### 11.16 Reports by style, size and colour (C3)
+- **Then** item sales grouped by size shows S, M, L, XL totals that add up to the style's total; the stock of a style shows as a size × colour grid per shop.
+
+### 11.17 Seasons and markdowns (C4, C5)
+- **Given** season "Summer 2026" on 20 styles, and a 30% markdown from 1 August
+- **Then:**
+  - from 1 August the selling price is 70% of the old price, rounded to the rupee and never above MRP;
+  - before 1 August the old price applies;
+  - season sell-through shows bought, sold, in stock and percentage sold.
+
+### 11.18 Expense entry and cash book (C8)
+- **Given** a rent expense of ₹30,000.00 paid in cash at MAIN
+- **Then:**
+  - rent is debited and MAIN's cash in hand credited by ₹30,000.00, with MAIN as the store;
+  - the cash book for that day shows it under money out, and the closing balance matches the ledger;
+  - cancelling the expense reverses it on the same date.
+
+### 11.19 Customer purchases and birthdays (C9, C10)
+- **Then:**
+  - a customer's purchases tab lists their bills and returns with this year's total equal to the sales report filtered by that customer;
+  - a customer with a birthday in the next 7 days appears in "birthdays this week".

@@ -444,6 +444,9 @@ describe('7.11 year-end closing', () => {
     const pl = (await owner.get('/reports/profit-and-loss?from=2025-04-01&to=2026-03-31').expect(200)).body;
     expect(pl.netTotal).toBe('700.00');
 
+    // Plan 11 A10: the year's books must be locked to its last day first.
+    expect((await owner.post('/year-end-closings').send({ financialYearId: fy2526, closingAccountId: await acct('retained_earnings') }).expect(400)).body.message).toMatch(/Lock the books up to 2026-03-31/);
+    await owner.patch('/accounting/lock-date').send({ lockDate: '2026-03-31', reason: 'Year end' }).expect(200);
     const closing = (await owner.post('/year-end-closings').send({ financialYearId: fy2526, closingAccountId: await acct('retained_earnings') }).expect(201)).body;
     expect(await bal('other_income', MAIN)).toBe('0.00');
     expect(await bal('rent', MAIN)).toBe('0.00');

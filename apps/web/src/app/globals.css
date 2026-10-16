@@ -1650,6 +1650,14 @@ form > .till-big {
   margin: 12px 0;
 }
 
+/* Plan 11 C10: birthday and anniversary at the till's quick add, three small fields a row. */
+.till-cust-dates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 8px;
+  margin: 8px 0;
+}
+
 .till-denoms {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

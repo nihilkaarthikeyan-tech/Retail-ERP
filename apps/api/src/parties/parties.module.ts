@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { CompanyModule } from '../company/company.module.js';
 import { NumberingModule } from '../numbering/numbering.module.js';
 import { ContactsService } from './contacts.service.js';
+import { CustomerHistoryService } from './customer-history.service.js';
 import { CustomersService } from './customers.service.js';
 import { CustomersController, PartyMastersController, SuppliersController } from './parties.controller.js';
 import { PartyMastersService } from './party-masters.service.js';
@@ -12,7 +13,7 @@ import { SuppliersService } from './suppliers.service.js';
 @Module({
   imports: [CompanyModule, NumberingModule],
   controllers: [CustomersController, SuppliersController, PartyMastersController],
-  providers: [PartySettingsService, PartyMastersService, ContactsService, CustomersService, SuppliersService],
+  providers: [PartySettingsService, PartyMastersService, ContactsService, CustomersService, SuppliersService, CustomerHistoryService],
   exports: [PartySettingsService, PartyMastersService, ContactsService, CustomersService, SuppliersService],
 })
 export class PartiesModule {}

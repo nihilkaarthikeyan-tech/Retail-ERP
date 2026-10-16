@@ -213,6 +213,7 @@ export const REPORTS: ReportEntry[] = [
   { id: "till-payments", title: "Payments by method", question: "How much came in as cash, card, UPI and so on.", href: pos("payments"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-hourly", title: "Hourly sales", question: "Which hours of the day are busiest.", href: pos("hourly"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-cashier", title: "Sales per cashier", question: "How much each cashier billed, and their returns.", href: pos("by-cashier"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
+  { id: "till-salesperson", title: "Sales by salesperson", question: "How much each salesperson sold, net of returns, by day or month.", href: pos("by-salesperson"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-shifts", title: "Shifts", question: "Each shift's sales, returns and the difference found when the cash was counted.", href: pos("shifts"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-offline", title: "Offline bills to check", question: "Bills made while a till was offline that need a second look.", href: pos("offline-check"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-sync", title: "Till sync problems", question: "Bills a till sent that the server could not save.", href: pos("sync-problems"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
@@ -221,9 +222,12 @@ export const REPORTS: ReportEntry[] = [
   { id: "in-transit", title: "Goods in transit", question: "Stock sent from one store that has not been received at the other yet.", href: "/stock/transfers", frequency: "daily", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
   { id: "order-follow-up", title: "Purchase order follow-up", question: "Which ordered goods are still to come, and which are late.", href: purchases("order-follow-up"), frequency: "daily", area: "purchase", where: "Purchase reports", anyOf: ["purchase.view"] },
   { id: "day-book", title: "Day book", question: "Every accounts entry of a day, in order.", href: accounts("day-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
+  { id: "cash-book", title: "Cash book", question: "A store's cash in hand day by day: opening, money in, money out and closing, with each entry.", href: accounts("cash-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
+  { id: "bank-book", title: "Bank book", question: "A bank account day by day: opening, money in, money out and closing, with each entry.", href: accounts("bank-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
 
   // ---- Weekly ----
-  { id: "item-sales", title: "Item-wise sales", question: "What sold, by item, group or brand, with quantity and value.", href: "/reports/item-sales", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
+  { id: "item-sales", title: "Item-wise sales", question: "What sold, by item, style, size, colour, season, group or brand, with quantity and value.", href: "/reports/item-sales", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
+  { id: "season-sell-through", title: "Season sell-through", question: "For each season, or each style of one season: how much came in, how much sold, what is left and the share sold.", href: "/reports/season-sell-through", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
   { id: "best-sellers", title: "Best and worst sellers", question: "The top and bottom items by quantity, sales or margin.", href: "/reports/best-sellers", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
   { id: "sales-by-group", title: "Sales by group or brand", question: "Which item groups or brands sell, week by week.", href: "/reports/sales-by-group", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
   { id: "stock-cover", title: "Stock cover and sell-through", question: "How many days of stock are left at the current rate of sale, and how much of what came in has sold.", href: "/reports/stock-cover", frequency: "weekly", area: "stock", anyOf: ["stock.view"] },
@@ -300,7 +304,7 @@ export interface DailySalesDto {
   totals: SalesTotals;
 }
 
-export type GroupBy = "item" | "group" | "brand" | "customer" | "store" | "cashier";
+export type GroupBy = "item" | "group" | "brand" | "customer" | "store" | "cashier" | "style" | "season" | "attribute";
 
 export interface GroupedRow extends SalesTotals {
   key: string;

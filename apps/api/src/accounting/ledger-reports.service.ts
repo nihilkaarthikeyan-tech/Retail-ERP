@@ -74,23 +74,38 @@ export class LedgerReportsService {
     const opening = q.from
       ? await this.prisma.ledgerLine.aggregate({ where: { ...where, entryDate: { lt: fromIso(q.from) } }, _sum: { debit: true, credit: true } })
       : { _sum: { debit: null, credit: null } };
-    const rows = await this.prisma.ledgerLine.findMany({
-      where: { ...where, ...(q.from || q.to ? { entryDate: { ...(q.from ? { gte: fromIso(q.from) } : {}), ...(q.to ? { lte: fromIso(q.to) } : {}) } } : {}) },
-      include: { entry: true },
-      orderBy: [{ entryDate: 'asc' }, { id: 'asc' }],
-      take: 5000,
-    });
+    const inPeriod: Prisma.LedgerLineWhereInput = { ...where, ...(q.from || q.to ? { entryDate: { ...(q.from ? { gte: fromIso(q.from) } : {}), ...(q.to ? { lte: fromIso(q.to) } : {}) } } : {}) };
+    // Plan 11 A4: page through every line; totals and balances always come from all of them.
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 1000;
+    const [rows, total, period] = await Promise.all([
+      this.prisma.ledgerLine.findMany({ where: inPeriod, include: { entry: true }, orderBy: [{ entryDate: 'asc' }, { id: 'asc' }], skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.ledgerLine.count({ where: inPeriod }),
+      this.prisma.ledgerLine.aggregate({ where: inPeriod, _sum: { debit: true, credit: true } }),
+    ]);
+    const openingBalance = D(opening._sum.debit ?? 0).sub(D(opening._sum.credit ?? 0));
+    // The lines of the period before this page, so the running balance carries on from the previous page.
+    const first = rows[0];
+    const before =
+      first && page > 1
+        ? await this.prisma.ledgerLine.aggregate({
+            where: { AND: [inPeriod, { OR: [{ entryDate: { lt: first.entryDate } }, { entryDate: first.entryDate, id: { lt: first.id } }] }] },
+            _sum: { debit: true, credit: true },
+          })
+        : { _sum: { debit: null, credit: null } };
+    let running = openingBalance.add(D(before._sum.debit ?? 0)).sub(D(before._sum.credit ?? 0));
+    const pageOpening = running;
     const n = await this.names(rows);
-    let running = D(opening._sum.debit ?? 0).sub(D(opening._sum.credit ?? 0));
-    const openingBalance = running;
-    let debit = ZERO;
-    let credit = ZERO;
+    const debit = D(period._sum.debit ?? 0);
+    const credit = D(period._sum.credit ?? 0);
     return {
       opening: money(openingBalance),
+      pageOpening: money(pageOpening),
+      page,
+      pageSize,
+      total,
       rows: rows.map((l) => {
         running = running.add(D(l.debit)).sub(D(l.credit));
-        debit = debit.add(D(l.debit));
-        credit = credit.add(D(l.credit));
         const a = byId.get(l.accountId)!;
         return {
           id: l.id.toString(),
@@ -110,7 +125,7 @@ export class LedgerReportsService {
           cancelled: !!l.entry.cancelsId,
         };
       }),
-      totals: { debit: money(debit), credit: money(credit), closing: money(running) },
+      totals: { debit: money(debit), credit: money(credit), closing: money(openingBalance.add(debit).sub(credit)) },
     };
   }
 
@@ -119,14 +134,16 @@ export class LedgerReportsService {
     const company = await this.common.ready();
     const { byId } = await this.accounts(company.id);
     const allowed = this.common.storeFilter(user);
-    const entries = await this.prisma.ledgerEntry.findMany({
-      where: { companyId: company.id, entryDate: { gte: fromIso(q.from), lte: fromIso(q.to) }, ...(q.storeId ? { storeId: q.storeId } : allowed ? { storeId: { in: allowed } } : {}) },
-      include: { lines: true },
-      orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }],
-      take: 2000,
-    });
+    const where: Prisma.LedgerEntryWhereInput = { companyId: company.id, entryDate: { gte: fromIso(q.from), lte: fromIso(q.to) }, ...(q.storeId ? { storeId: q.storeId } : allowed ? { storeId: { in: allowed } } : {}) };
+    // Plan 11 A4: every entry, a page at a time, never cut off silently.
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 500;
+    const [entries, total] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({ where, include: { lines: true }, orderBy: [{ entryDate: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }], skip: (page - 1) * pageSize, take: pageSize }),
+      this.prisma.ledgerEntry.count({ where }),
+    ]);
     const n = await this.names(entries.flatMap((e) => e.lines));
-    return entries.map((e) => ({
+    const rows = entries.map((e) => ({
       id: e.id,
       date: iso(e.entryDate),
       documentType: e.documentType,
@@ -137,6 +154,7 @@ export class LedgerReportsService {
       isCancellation: !!e.cancelsId,
       lines: e.lines.map((l) => ({ account: this.common.accountName(byId.get(l.accountId)!), party: n.party(l.partyId), store: n.store(l.storeId), debit: money(D(l.debit)), credit: money(D(l.credit)), remark: l.remark })),
     }));
+    return { rows, total, page, pageSize };
   }
 
   /** The ledger entries of one document (the "View ledger entry" link on every document). */
@@ -259,7 +277,7 @@ export class LedgerReportsService {
 
   async partyStatement(partyType: 'customer' | 'supplier', partyId: string, q: { from?: string; to?: string }, user: CurrentUser) {
     const company = await this.common.ready();
-    const gl = await this.generalLedger({ partyType, partyId, from: q.from, to: q.to, includeCancelled: false }, user);
+    const gl = await this.generalLedger({ partyType, partyId, from: q.from, to: q.to, includeCancelled: false, pageSize: 100_000 }, user);
     const sign = partyType === 'customer' ? 1 : -1;
     const flip = (v: string) => money(D(v).mul(sign));
     const items = await this.ledger.openItems(this.prisma, partyType, partyId);

@@ -2,12 +2,12 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import { JOURNAL_KINDS, type JournalKind, journalSchema } from "shared";
+import { type JournalKind, journalSchema } from "shared";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { useOrderStores } from "@/components/purchasing/orders-shared";
 import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { type AccountDto, accountRights, balancingAmounts, dec, documentLabel, JOURNAL_KIND_LABELS, type JournalDto, journalTotals, needsStore, partyFor, postable, unpaidBills } from "@/lib/accounts";
+import { type AccountDto, accountRights, balancingAmounts, dec, documentLabel, JOURNAL_FORM_KINDS, JOURNAL_KIND_LABELS, type JournalDto, journalTotals, needsStore, partyFor, postable, unpaidBills } from "@/lib/accounts";
 import { useAuth } from "@/lib/auth-context";
 import { blankToNull, formatDate } from "@/lib/format";
 import { useBusinessToday } from "@/lib/stock";
@@ -83,7 +83,7 @@ export function JournalForm({ journal, presetKind, onSaved, onClose, accounts: g
   const rights = accountRights(user);
   const chart = useChart();
   const { stores } = useOrderStores();
-  const kinds: JournalKind[] = rights.cashJournalsOnly ? ["cash"] : [...JOURNAL_KINDS];
+  const kinds: JournalKind[] = rights.cashJournalsOnly ? ["cash"] : [...JOURNAL_FORM_KINDS];
   const [chosenKind, setKind] = useState<JournalKind | null>(journal?.kind ?? presetKind ?? null);
   // The rights are known only once the user has loaded; a kind the user may not use falls back to the first allowed.
   const kind: JournalKind = chosenKind && kinds.includes(chosenKind) ? chosenKind : kinds[0];

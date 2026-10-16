@@ -8,7 +8,7 @@ import { businessDate, type CurrentUser, Decimal, type OpenShiftInput, type PosT
 import { ApiError, errorMessage } from "../api";
 import type { TillDeviceInfo } from "../till-device";
 import { NumberCounter, prefixFor } from "./numbers";
-import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, priceBill, usesOnAccount } from "./pricing";
+import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, isNoBillReturn, priceBill, usesOnAccount } from "./pricing";
 import { type QueueItem, type QueueResult, SendQueue } from "./queue";
 import { localReceipts } from "./receipt";
 import { isStale, loadSnapshot, REFRESH_MS, refreshSnapshot } from "./snapshot";
@@ -109,6 +109,50 @@ export function creditOverride(err: unknown): string | null {
   if (!/A manager must approve\.?$/.test(err.message)) return null;
   if (!err.message.startsWith("Over the credit limit") && !/^₹[\d,.]+ is overdue/.test(err.message)) return null;
   return err.message;
+}
+
+/** Plain messages for returns without the original bill (plan 11 A9): a manager approves them on the server, so they are never kept offline. */
+export const NO_BILL_RETURN_OFFLINE = "A return without a bill needs the connection: a manager approves it on the server. Try again when the till is online, or find the original bill.";
+export const NO_BILL_RETURN_DROPPED = "The connection dropped while sending this return. A return without a bill needs the connection, so it was not kept on the till: try again when the till is online.";
+export const APPROVAL_SPENT = "A manager approval on this bill was already used or has expired. Ask the manager again (Manager PIN), then finish the bill.";
+
+/**
+ * The server refused an online sale line priced below cost (400, plan 11 A2).
+ * The cashier cannot see costs, so the till learns it only here; a manager's
+ * PIN (price change) on that line lets the same bill through.
+ */
+export class BelowCostError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly itemCode: string,
+    /** The draft line the manager approves. */
+    readonly lineKey: string,
+  ) {
+    super(reason);
+    this.name = "BelowCostError";
+  }
+}
+
+/** The item code from a 400 "<CODE>: this price is below cost; a manager must approve it", or null. */
+export function belowCostCode(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.statusCode !== 400) return null;
+  const m = /^(.+?): this price is below cost; a manager must approve it\.?$/.exec(err.message);
+  return m ? m[1] : null;
+}
+
+/** A 403 for a manager approval already used, expired or not for this: the till asks again. */
+export function approvalSpent(err: unknown): boolean {
+  return err instanceof ApiError && err.statusCode === 403 && /^The manager approval (was already used|has expired|is not valid)/.test(err.message);
+}
+
+/** The bill without any manager approvals (they are asked for again). */
+function withoutApprovals(d: DraftBill): DraftBill {
+  return {
+    ...d,
+    lines: d.lines.map((l) => ({ ...l, approvalToken: undefined, approvedBy: undefined })),
+    billDiscount: d.billDiscount ? { ...d.billDiscount, approvalToken: undefined, approvedBy: undefined } : null,
+    ret: d.ret ? { ...d.ret, approvalToken: undefined, approvedBy: undefined } : null,
+  };
 }
 
 export interface FinishOptions {
@@ -453,6 +497,9 @@ export class TillEngine {
    * printed; if the server cannot be reached it goes to the queue as an offline
    * bill with what was charged, and the till's own receipt is printed.
    * A bill paid on account is never queued: it needs the server's credit check.
+   * Nor is a return without a bill: the server checks the manager's approval.
+   * A line the server finds below cost comes back as BelowCostError, so a
+   * manager can approve it and the same bill is sent again.
    */
   async finish(input: DraftBill, options: FinishOptions = {}): Promise<FinishResult> {
     const snapshot = this.state.snapshot;
@@ -473,6 +520,8 @@ export class TillEngine {
     const onAccount = usesOnAccount(draft.payments, methods);
     if (onAccount && !hasNamedCustomer(draft, snapshot.till.walkInCustomerId)) throw new Error(ON_ACCOUNT_NAMED);
     if (onAccount && (!this.state.online || this.state.signedOut)) throw new Error(ON_ACCOUNT_OFFLINE);
+    const noBill = isNoBillReturn(draft);
+    if (noBill && (!this.state.online || this.state.signedOut)) throw new Error(NO_BILL_RETURN_OFFLINE);
 
     // The identity and the numbers are given once and saved before anything is sent (pos-offline §3–§4).
     draft.clientId = draft.clientId ?? this.uuid();
@@ -500,20 +549,40 @@ export class TillEngine {
         if (serverTotal !== null) throw new PriceChangedError(serverTotal, bill.net.toFixed(2));
         const credit = creditOverride(err);
         if (credit !== null) throw new CreditApprovalError(credit);
+        const belowCost = belowCostCode(err);
+        if (belowCost !== null) {
+          // The first line of that item without an approval is the one the server stopped at.
+          const line = bill.sale?.lines.find((l) => !l.isFree && l.item.code === belowCost && l.draftKey && !draft.lines.find((d) => d.key === l.draftKey)?.approvalToken);
+          if (line?.draftKey) throw new BelowCostError(err instanceof Error ? err.message : String(err), belowCost, line.draftKey);
+          throw err;
+        }
+        if (approvalSpent(err)) {
+          // Approvals are single-use; one was used up by an earlier try. Ask for them again.
+          await this.saveDraft(withoutApprovals(draft));
+          throw new Error(APPROVAL_SPENT);
+        }
         if (err instanceof ApiError && err.statusCode === 401) this.set({ signedOut: true });
         else if (isOfflineError(err)) this.set({ online: false });
         else throw err;
         // The bill keeps its identity and numbers; it is not queued.
         if (onAccount) throw new Error(ON_ACCOUNT_DROPPED);
+        if (noBill) throw new Error(NO_BILL_RETURN_DROPPED);
       }
     }
     if (onAccount) throw new Error(ON_ACCOUNT_OFFLINE);
+    if (noBill) throw new Error(NO_BILL_RETURN_OFFLINE);
 
     // Offline: kept on the till and sent when the connection returns.
     const tx = buildTransaction(draft, bill, methods, { ...opts, offline: true });
     const label = [draft.numbers.ret, draft.numbers.sale].filter(Boolean).join(" + ");
     await this.queue.enqueue({ clientId: draft.clientId, kind: "bill", label: `Bill ${label}`, payload: tx, cashierId: cashier?.id });
-    const receipts = localReceipts(bill, draft.numbers, { soldAt: draft.soldAt, till: snapshot.till, payments: tx.payments, change: pay.change });
+    const receipts = localReceipts(bill, draft.numbers, {
+      soldAt: draft.soldAt,
+      till: snapshot.till,
+      payments: tx.payments,
+      change: pay.change,
+      extras: { staff: snapshot.salesStaff, salesStaffId: draft.salesStaffId, delivery: draft.delivery, deliveryCharge: bill.delivery?.charge ?? null },
+    });
     for (const r of receipts) await this.store.set(`${RECENT}${r.number}`, { number: r.number, savedAt: this.now().toISOString(), bill: null, receipts: [r] } satisfies RecentBill);
     await this.store.set(LAST_RECEIPTS_KEY, receipts);
     await this.newDraft();

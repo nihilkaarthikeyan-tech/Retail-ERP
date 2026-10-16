@@ -139,9 +139,9 @@ function SettingsForm({ settings, groups, units, lists, canEdit, onSaved }: { se
 
       <fieldset disabled={!canEdit}>
         <legend>At the till (used from the point of sale module on)</legend>
-        <CheckInput id="cs-allowChange" label="Allow changing the price on a bill" description="Off = cashiers cannot type a different price on a line." checked={form.allowPriceChangeOnBill} onChange={setFlag("allowPriceChangeOnBill")} />
-        <CheckInput id="cs-blockBelowCost" label="Block selling below cost" description="Refuses a line whose price is under the item's cost." checked={form.blockSellingBelowCost} onChange={setFlag("blockSellingBelowCost")} />
-        <CheckInput id="cs-saveTyped" label="Save typed prices into the price list" description="A price typed on a bill becomes the item's new price in that list." checked={form.saveTypedPrices} onChange={setFlag("saveTypedPrices")} />
+        <CheckInput id="cs-allowChange" label="Allow changing the price on a bill" description="Off = only a manager (with their PIN) can change a price on a bill, even on tills that allow price changes." checked={form.allowPriceChangeOnBill} onChange={setFlag("allowPriceChangeOnBill")} />
+        <CheckInput id="cs-blockBelowCost" label="Block selling below cost" description="A till line whose price before GST is under the item's last purchase price or current cost needs a manager's PIN. Returns and free items are never blocked." checked={form.blockSellingBelowCost} onChange={setFlag("blockSellingBelowCost")} />
+        <CheckInput id="cs-saveTyped" label="Save typed prices into the price list" description="When an item has no price in the till's list, the price typed on the bill is used and saved as its price from that day." checked={form.saveTypedPrices} onChange={setFlag("saveTypedPrices")} />
       </fieldset>
 
       {canEdit ? (

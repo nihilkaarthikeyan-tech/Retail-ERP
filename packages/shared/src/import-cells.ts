@@ -2,6 +2,7 @@
 // Reading cells from imported files (plan 10 §1.C and §4; blueprint 17 edge
 // cases). Numbers may use Indian grouping (1,05,000.50); dates are read
 // day-first, as written in India; anything unclear is reported, never guessed.
+import { dayMonthYearProblem } from './customer-dates.js';
 import { isIsoDate } from './financial-year.js';
 
 export type CellResult<T> = { ok: true; value: T } | { ok: false; problem: string };
@@ -64,6 +65,37 @@ export function readDate(raw: unknown): CellResult<string> {
   if (month > 12) return { ok: false, problem: `"${text}" is unclear: dates are read day first (16/10/2026)` };
   const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   return isIsoDate(iso) ? { ok: true, value: iso } : { ok: false, problem: `"${text}" is not a real date` };
+}
+
+/**
+ * A birthday or anniversary (plan 11 C10): a full date (15-08-1990, 15 Aug
+ * 1990, a spreadsheet date) or only the day and month (15-08, 15/08, 15 Aug),
+ * day first. Gives "MM-DD", or "YYYY-MM-DD" when the year is known. A
+ * two-digit year in the future is read as the last century (15/08/90 is 1990).
+ */
+export function readDayMonth(raw: unknown, today: string): CellResult<string> {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  let dayMonth: string;
+  let year: number | null = null;
+  const numeric = text.match(/^(\d{1,2})[/.-](\d{1,2})$/);
+  const named = text.match(/^(\d{1,2})[\s-]([A-Za-z]{3,9})$/);
+  if (numeric || named) {
+    const day = Number((numeric ?? named)![1]);
+    const month = numeric ? Number(numeric[2]) : MONTHS.indexOf(named![2].slice(0, 3).toLowerCase()) + 1;
+    if (month === 0) return { ok: false, problem: `"${named![2]}" is not a month` };
+    if (month > 12) return { ok: false, problem: `"${text}" is unclear: write the day first (15/08)` };
+    dayMonth = `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  } else {
+    const d = readDate(raw);
+    if (!d.ok) return d.problem.includes('is not a date;') ? { ok: false, problem: `"${text}" is not a date; write it as 15/08/1990 or 15/08` } : d;
+    year = Number(d.value.slice(0, 4));
+    if (/[\s/.-]\d{2}$/.test(text) && d.value > today) year -= 100;
+    dayMonth = d.value.slice(5);
+  }
+  const problem = dayMonthYearProblem(dayMonth, year, today);
+  const shown = text || (year === null ? dayMonth : `${year}-${dayMonth}`);
+  if (problem) return { ok: false, problem: `"${shown}": ${problem.charAt(0).toLowerCase()}${problem.slice(1)}` };
+  return { ok: true, value: year === null ? dayMonth : `${year}-${dayMonth}` };
 }
 
 /** Text kept exactly as typed (codes, barcodes, HSN, mobile): a number cell that lost its leading zeros is reported. */

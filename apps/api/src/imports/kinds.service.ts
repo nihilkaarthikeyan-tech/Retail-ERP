@@ -3,7 +3,7 @@
 // Lookups are by the codes people see (item group code, unit code, store
 // code); writes go through the module services so their rules apply.
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { businessDate, Decimal, type ImportKind, type ImportMode } from 'shared';
+import { barcodeProblem, businessDate, Decimal, guessBarcodeType, type ImportKind, type ImportMode, numericValueProblem, variantValuesKey } from 'shared';
 import { ClosingService } from '../accounting/closing.service.js';
 import { MastersService } from '../catalogue/masters.service.js';
 import { InventoryMastersService } from '../inventory/inventory-masters.service.js';
@@ -13,7 +13,7 @@ import { CustomersService } from '../parties/customers.service.js';
 import { SuppliersService } from '../parties/suppliers.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { bool, type Importer, type ImportContext, type ParsedRow, type RowOutcome, str } from './importers.js';
+import { bool, type Field, type Importer, type ImportContext, type ParsedRow, type RowOutcome, str } from './importers.js';
 
 type V = ParsedRow['values'];
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
@@ -21,6 +21,10 @@ type Num = string | number | boolean | { toString(): string } | null | undefined
 /** Two numbers equal (a decimal from the database against a value read from the file); empty equals empty. */
 const sameNumber = (a: Num, b: Num) => (a === undefined || a === null || a === '' ? b === null || b === undefined : b !== null && b !== undefined && new Decimal(a.toString()).eq(new Decimal(b.toString())));
 const BARCODE_LENGTHS = [8, 12, 13, 14];
+/** A birthday or anniversary cell as read ("MM-DD" or "YYYY-MM-DD") → the customer's day-month and year (plan 11 C10). */
+const splitDayMonth = (v: string) => (v.length > 5 ? { dayMonth: v.slice(5), year: Number(v.slice(0, 4)) } : { dayMonth: v, year: null });
+/** The customer's day-month and year as the export writes them, day first: 15-08-1990, or 15-08 without the year. */
+const dayMonthCell = (dayMonth: string | null, year: number | null) => (dayMonth ? `${dayMonth.slice(3)}-${dayMonth.slice(0, 2)}${year ? `-${year}` : ''}` : null);
 
 @Injectable()
 export class ImportKindsService {
@@ -38,7 +42,7 @@ export class ImportKindsService {
     private readonly closing: ClosingService,
   ) {
     this.importers = new Map(
-      [this.itemGroups(), this.brands(), this.itemsKind(), this.prices(), this.customersKind(), this.suppliersKind(), this.reorderLevels(), this.openingStock(), this.openingBills()].map((i) => [i.kind, i]),
+      [this.itemGroups(), this.brands(), this.itemsKind(), this.stylesVariants(), this.prices(), this.customersKind(), this.suppliersKind(), this.reorderLevels(), this.openingStock(), this.openingBills()].map((i) => [i.kind, i]),
     );
   }
 
@@ -63,6 +67,7 @@ export class ImportKindsService {
   private item = (code?: string) => this.id('Item', code, (c) => this.prisma.item.findUnique({ where: { code: c } }));
   private store = (companyId: string, code?: string) => this.id('Store', code, (c) => this.prisma.store.findFirst({ where: { companyId, code: c } }));
   private terms = (code?: string) => this.id('Payment terms', code, (c) => this.prisma.paymentTerms.findUnique({ where: { code: c } }));
+  private season = (companyId: string, code?: string) => this.id('Season', code, (c) => this.prisma.season.findFirst({ where: { companyId, code: c.toUpperCase() } }));
   private priceList = (companyId: string, code?: string) => this.id('Price list', code, (c) => this.prisma.priceList.findFirst({ where: { companyId, code: c } }));
 
   // ---- Item groups and brands ----
@@ -150,12 +155,14 @@ export class ImportKindsService {
         { key: 'packUnit', label: 'Pack unit', type: 'code', hint: 'A bigger unit it is also sold or bought in, e.g. BOX' },
         { key: 'packSize', label: 'Pack size', type: 'number', hint: 'How many basic units in one pack' },
         { key: 'packBarcode', label: 'Pack barcode', type: 'code', digitsLength: BARCODE_LENGTHS },
+        { key: 'season', label: 'Season code', type: 'code', hint: 'Plan 11: the season or collection, e.g. SUMMER26' },
       ],
-      example: ['', 'Ponni Rice 1 kg', 'RICE', 'AASHIRVAAD', 'PCS', '1006', 72, 5, 'Yes', 'Yes', 'Yes', 'No', '', 70, '8901234567890', '', 'BOX', 10, ''],
+      example: ['', 'Ponni Rice 1 kg', 'RICE', 'AASHIRVAAD', 'PCS', '1006', 72, 5, 'Yes', 'Yes', 'Yes', 'No', '', 70, '8901234567890', '', 'BOX', 10, '', ''],
       keyOf: (v) => str(v.code) ?? (str(v.name) ? `${str(v.group)}|${str(v.name)!.toLowerCase()}` : null),
       apply: (v, mode, ctx) => this.applyItem(v, mode, ctx),
-      exportRows: async () => {
+      exportRows: async ({ companyId }) => {
         const settings = await this.prisma.catalogueSettings.findFirst();
+        const seasons = new Map((await this.prisma.season.findMany({ where: { companyId }, select: { id: true, code: true } })).map((s) => [s.id, s.code]));
         const today = businessDate();
         const rows = await this.prisma.item.findMany({
           where: { isParentStyle: false },
@@ -189,6 +196,7 @@ export class ImportKindsService {
             pack?.unit.code ?? null,
             pack ? Number(pack.factor.toString()) : null,
             pack ? (i.barcodes.find((b) => b.unitId === pack.unitId)?.code ?? null) : null,
+            i.seasonId ? (seasons.get(i.seasonId) ?? null) : null,
           ];
         });
       },
@@ -206,6 +214,7 @@ export class ImportKindsService {
     const groupId = await this.group(str(v.group));
     const brandId = await this.brand(str(v.brand));
     const baseUnitId = await this.unit(str(v.unit));
+    const seasonId = await this.season(ctx.companyId, str(v.season));
     if (existing) {
       if (mode === 'add') return { outcome: 'unchanged', recordId: existing.id, message: 'Already there' };
       const full = await this.prisma.item.findUniqueOrThrow({ where: { id: existing.id }, include: { units: true, barcodes: true } });
@@ -222,6 +231,7 @@ export class ImportKindsService {
         if (b !== undefined && b !== full[f]) change[f] = b;
       }
       if (str(v.shelfLife) !== undefined && Number(v.shelfLife) !== full.shelfLifeDays) change.shelfLifeDays = Number(v.shelfLife);
+      if (seasonId && seasonId !== full.seasonId) change.seasonId = seasonId;
       let changed = false;
       if (Object.keys(change).length) {
         await this.items.update(full.id, change, ctx.actor, ctx.user);
@@ -251,6 +261,7 @@ export class ImportKindsService {
         shelfLifeDays: str(v.shelfLife) ? Number(v.shelfLife) : null,
         units: packUnitId ? [{ unitId: packUnitId, factor: str(v.packSize)! }] : undefined,
         sellingPrice: str(v.price) ?? null,
+        seasonId: seasonId ?? null,
       },
       ctx.actor,
       ctx.user,
@@ -301,6 +312,154 @@ export class ImportKindsService {
     if (current && sameNumber(v.price, current.price)) return false;
     await this.pricing.createPrice({ priceListId: settings.defaultSellingPriceListId, itemId, unitId: baseUnitId, price: str(v.price)!, startDate: today }, ctx.actor, ctx.user);
     return true;
+  }
+
+  // ---- Styles and variants (plan 11 B1) ----
+
+  /** The column of a variant attribute (Size, Colour…), matched by its name or code. */
+  private static attrKey = (code: string) => `attr:${code}`;
+
+  private stylesVariants(): Importer {
+    const fixedBefore: Field[] = [
+      { key: 'style', label: 'Style name', type: 'text', required: true, aliases: ['Style'], hint: 'Rows with the same style name (or style code) make one style' },
+      { key: 'styleCode', label: 'Style code', type: 'code', hint: 'Leave empty to number new styles automatically; variant codes add the short codes, e.g. SHIRT-RED-M' },
+      { key: 'group', label: 'Item group code', type: 'code', required: true },
+      { key: 'brand', label: 'Brand code', type: 'code' },
+      { key: 'unit', label: 'Unit', type: 'code', required: true, hint: 'The basic unit, e.g. PCS' },
+      { key: 'hsn', label: 'HSN code', type: 'code', digitsLength: [4, 6, 8] },
+      { key: 'mrp', label: 'MRP', type: 'number' },
+      { key: 'season', label: 'Season code', type: 'code' },
+    ];
+    const fixedAfter: Field[] = [
+      { key: 'barcode', label: 'Barcode', type: 'code', digitsLength: BARCODE_LENGTHS },
+      { key: 'price', label: 'Selling price', type: 'number', hint: 'Including GST, per basic unit, in the default selling price list' },
+    ];
+    return {
+      kind: 'styles_variants',
+      importRight: 'import.masters',
+      rights: ['catalogue.manage', 'prices.manage'],
+      fields: [...fixedBefore, ...fixedAfter],
+      example: [],
+      // One column per attribute in use, in name order (so a style varying by Colour and Size gets codes like SHIRT-RED-M).
+      columns: async () => {
+        const attrs = await this.prisma.variantAttribute.findMany({ where: { active: true }, include: { values: { orderBy: { sortOrder: 'asc' } } }, orderBy: { name: 'asc' } });
+        const attrFields: Field[] = attrs.map((a) => ({
+          key: ImportKindsService.attrKey(a.code),
+          label: a.name,
+          type: 'code',
+          aliases: [a.code],
+          hint: a.kind === 'list' ? `One of: ${a.values.slice(0, 12).map((x) => x.value).join(', ')}${a.values.length > 12 ? '…' : ''}` : `A number from ${a.rangeStart?.toString()} to ${a.rangeEnd?.toString()}`,
+        }));
+        const example = ['Linen shirt', 'SHIRT', 'MENS', '', 'PCS', '6205', 1299, '', ...attrs.map((a) => (a.kind === 'list' ? (a.values[0]?.value ?? '') : (a.rangeStart?.toString() ?? ''))), '', 999];
+        return { fields: [...fixedBefore, ...attrFields, ...fixedAfter], example };
+      },
+      keyOf: (v) => {
+        const style = str(v.styleCode) ?? (str(v.style) ? `${str(v.group)}|${str(v.style)!.toLowerCase()}` : null);
+        if (!style) return null;
+        const values = Object.keys(v)
+          .filter((k) => k.startsWith('attr:') && str(v[k]))
+          .sort()
+          .map((k) => `${k}=${str(v[k])!.toLowerCase()}`);
+        return [style, ...values].join('|');
+      },
+      apply: (v, mode, ctx) => this.applyStyleVariant(v, mode, ctx),
+    };
+  }
+
+  /**
+   * One variant row: finds or creates the style (varying by the attributes the
+   * row gives), then the variant, its barcode and its selling price. What can
+   * be checked is checked before anything is saved, so a refused row leaves
+   * nothing behind.
+   */
+  private async applyStyleVariant(v: V, mode: ImportMode, ctx: ImportContext): Promise<RowOutcome> {
+    const name = str(v.style)!;
+    const styleCode = str(v.styleCode)?.toUpperCase();
+    const groupId = (await this.group(str(v.group)))!;
+    const brandId = await this.brand(str(v.brand));
+    const baseUnitId = (await this.unit(str(v.unit)))!;
+    const seasonId = await this.season(ctx.companyId, str(v.season));
+
+    // The values on the row, checked against each attribute's list or range.
+    const attrs = await this.prisma.variantAttribute.findMany({ where: { active: true }, include: { values: true }, orderBy: { name: 'asc' } });
+    const given = attrs.flatMap((a) => {
+      const raw = str(v[ImportKindsService.attrKey(a.code)]);
+      return raw === undefined ? [] : [{ a, raw: raw.trim() }];
+    });
+    if (!given.length) throw new BadRequestException('Give the size, colour or other attribute values of this variant');
+    const values = given.map(({ a, raw }) => {
+      if (a.kind === 'list') {
+        const match = a.values.find((x) => x.valueKey === raw.toLowerCase()) ?? a.values.find((x) => x.shortCode.toLowerCase() === raw.toLowerCase());
+        if (!match) throw new BadRequestException(`"${raw}" is not a value of ${a.name}`);
+        return { attributeId: a.id, name: a.name, value: match.value, shortCode: match.shortCode };
+      }
+      const n = Number(raw);
+      const problem = Number.isFinite(n) ? numericValueProblem(n, { start: Number(a.rangeStart), end: Number(a.rangeEnd), step: Number(a.rangeStep) }) : 'Must be a number';
+      if (problem) throw new BadRequestException(`${a.name}: ${problem}`);
+      return { attributeId: a.id, name: a.name, value: String(n), shortCode: String(n) };
+    });
+
+    // The style: by its code, else by its name within the group.
+    const withAttrs = { variantAttributes: { orderBy: { sortOrder: 'asc' as const } } };
+    let style = styleCode
+      ? await this.prisma.item.findUnique({ where: { code: styleCode }, include: withAttrs })
+      : await this.prisma.item.findFirst({ where: { isParentStyle: true, itemGroupId: groupId, name: { equals: name, mode: 'insensitive' } }, include: withAttrs, orderBy: { createdAt: 'asc' } });
+    if (style && !style.isParentStyle) throw new BadRequestException(`${style.code} is an item, not a style with sizes and colours`);
+    if (style) {
+      const styleAttrs = style.variantAttributes.map((x) => x.attributeId);
+      const extra = values.filter((x) => !styleAttrs.includes(x.attributeId));
+      if (extra.length) throw new BadRequestException(`Style ${style.code} does not vary by ${extra.map((x) => x.name).join(', ')}`);
+      const missing = attrs.filter((a) => styleAttrs.includes(a.id) && !values.some((x) => x.attributeId === a.id));
+      if (missing.length) throw new BadRequestException(`Give the ${missing.map((a) => a.name).join(' and ')} of this variant`);
+    } else if (mode === 'change') {
+      throw new BadRequestException(`Style ${styleCode ?? name} does not exist`);
+    }
+
+    const variantKey = variantValuesKey(values);
+    let variant = style ? await this.prisma.item.findUnique({ where: { parentItemId_variantKey: { parentItemId: style.id, variantKey } } }) : null;
+    if (variant && mode === 'add') return { outcome: 'unchanged', recordId: variant.id, message: 'Already there' };
+    if (!variant && mode === 'change') throw new BadRequestException(`${values.map((x) => x.value).join(' ')} of ${style!.code} does not exist`);
+
+    // Barcode and price list are checked now, so a refused row saves nothing.
+    const barcode = str(v.barcode);
+    if (barcode) {
+      const found = await this.prisma.barcode.findUnique({ where: { code: barcode } });
+      if (found && found.itemId !== variant?.id) throw new BadRequestException(`Barcode ${barcode} already belongs to another item`);
+      const problem = found ? null : barcodeProblem(barcode, guessBarcodeType(barcode));
+      if (problem) throw new BadRequestException(problem);
+    }
+    if (str(v.price) && !(await this.prisma.catalogueSettings.findFirst())?.defaultSellingPriceListId) throw new BadRequestException('No default selling price list is set');
+
+    let added = false;
+    if (!style) {
+      const created = (await this.items.create(
+        { code: styleCode, name, itemGroupId: groupId, brandId: brandId ?? null, baseUnitId, hsnCode: str(v.hsn) ?? null, mrp: str(v.mrp) ?? null, seasonId: seasonId ?? null, variantAttributeIds: values.map((x) => x.attributeId) },
+        ctx.actor,
+        ctx.user,
+      )) as { id: string };
+      style = await this.prisma.item.findUniqueOrThrow({ where: { id: created.id }, include: withAttrs });
+    }
+    if (!variant) {
+      const r = await this.items.createVariants(style.id, { values: Object.fromEntries(values.map((x) => [x.attributeId, [x.value]])) }, ctx.actor, ctx.user);
+      variant = await this.prisma.item.findUniqueOrThrow({ where: { parentItemId_variantKey: { parentItemId: style.id, variantKey } } });
+      added = r.created.length > 0;
+    }
+    // A size can have its own MRP or HSN (an XL often costs more); the style keeps the first row's.
+    const change: Record<string, unknown> = {};
+    if (str(v.mrp) !== undefined && !sameNumber(v.mrp, variant.mrp)) change.mrp = str(v.mrp);
+    if (str(v.hsn) !== undefined && str(v.hsn) !== variant.hsnCode) change.hsnCode = str(v.hsn);
+    if (seasonId && seasonId !== variant.seasonId) change.seasonId = seasonId;
+    let changed = false;
+    if (Object.keys(change).length) {
+      await this.items.update(variant.id, change, ctx.actor, ctx.user);
+      changed = true;
+    }
+    if (barcode && !(await this.prisma.barcode.findUnique({ where: { code: barcode } }))) {
+      await this.items.addBarcode(variant.id, { code: barcode, unitId: null }, ctx.actor);
+      changed = true;
+    }
+    changed = (await this.itemPrice(variant.id, variant.baseUnitId, v, ctx)) || changed;
+    return { outcome: added ? 'added' : changed ? 'changed' : 'unchanged', recordId: variant.id, message: added ? variant.code : undefined };
   }
 
   // ---- Prices ----
@@ -387,8 +546,13 @@ export class ImportKindsService {
       kind: 'customers',
       importRight: 'import.masters',
       rights: ['customers.manage'],
-      fields: this.partyFields('customer'),
-      example: ['', 'Lakshmi Stores', '9840011223', '', 'RETAIL', '', '33', 'NET30', '12 Market Road', '', 'Chennai', '600001'],
+      fields: [
+        ...this.partyFields('customer'),
+        // Plan 11 C10: customers only.
+        { key: 'birthday', label: 'Birthday', type: 'daymonth', hint: 'Day first: 15-08-1990, or 15-08 without the year' },
+        { key: 'anniversary', label: 'Anniversary', type: 'daymonth', hint: 'Day first: 20-11-2015, or 20-11 without the year' },
+      ],
+      example: ['', 'Lakshmi Stores', '9840011223', '', 'RETAIL', '', '33', 'NET30', '12 Market Road', '', 'Chennai', '600001', '15-08-1990', '20-11'],
       keyOf: (v) => str(v.code) ?? str(v.mobile) ?? null,
       apply: async (v, mode, ctx) => {
         const existing = str(v.code)
@@ -406,13 +570,36 @@ export class ImportKindsService {
           }
           if (groupId && groupId !== existing.customerGroupId) change.customerGroupId = groupId;
           if (termsId && termsId !== existing.paymentTermsId) change.paymentTermsId = termsId;
+          // An empty birthday or anniversary cell leaves the saved one alone; a day and month without a year clears the year.
+          for (const [k, dm, yr] of [['birthday', 'birthday', 'birthYear'], ['anniversary', 'anniversary', 'anniversaryYear']] as const) {
+            if (str(v[k]) === undefined) continue;
+            const d = splitDayMonth(str(v[k])!);
+            if (d.dayMonth !== existing[dm] || d.year !== existing[yr]) Object.assign(change, { [dm]: d.dayMonth, [yr]: d.year });
+          }
           if (!Object.keys(change).length) return { outcome: 'unchanged', recordId: existing.id };
           await this.customers.update(existing.id, { ...change, confirmDuplicate: true }, ctx.actor);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException('This customer does not exist');
+        const birthday = str(v.birthday) ? splitDayMonth(str(v.birthday)!) : null;
+        const anniversary = str(v.anniversary) ? splitDayMonth(str(v.anniversary)!) : null;
         const created = (await this.customers.create(
-          { code: str(v.code), name: str(v.name)!, mobile: str(v.mobile) ?? null, email: str(v.email) ?? null, customerGroupId: groupId, gstin: str(v.gstin) ?? null, stateCode: str(v.state) ?? null, paymentTermsId: termsId ?? null, isBusiness: !!str(v.gstin), address: await this.address(v, ctx.companyId) },
+          {
+            code: str(v.code),
+            name: str(v.name)!,
+            mobile: str(v.mobile) ?? null,
+            email: str(v.email) ?? null,
+            customerGroupId: groupId,
+            gstin: str(v.gstin) ?? null,
+            stateCode: str(v.state) ?? null,
+            paymentTermsId: termsId ?? null,
+            isBusiness: !!str(v.gstin),
+            address: await this.address(v, ctx.companyId),
+            birthday: birthday?.dayMonth ?? null,
+            birthYear: birthday?.year ?? null,
+            anniversary: anniversary?.dayMonth ?? null,
+            anniversaryYear: anniversary?.year ?? null,
+          },
           ctx.actor,
         )) as { id: string };
         return { outcome: 'added', recordId: created.id };
@@ -422,7 +609,22 @@ export class ImportKindsService {
         const addresses = await this.prisma.address.findMany({ where: { partyType: 'customer', partyId: { in: rows.map((r) => r.id) }, isMain: true } });
         return rows.map((c) => {
           const a = addresses.find((x) => x.partyId === c.id);
-          return [c.code, c.name, c.mobile, c.email, c.customerGroup.code, c.gstin, c.stateCode, c.paymentTerms?.code ?? null, a?.addressLine1 ?? null, a?.addressLine2 ?? null, a?.city ?? null, a?.pincode ?? null];
+          return [
+            c.code,
+            c.name,
+            c.mobile,
+            c.email,
+            c.customerGroup.code,
+            c.gstin,
+            c.stateCode,
+            c.paymentTerms?.code ?? null,
+            a?.addressLine1 ?? null,
+            a?.addressLine2 ?? null,
+            a?.city ?? null,
+            a?.pincode ?? null,
+            dayMonthCell(c.birthday, c.birthYear),
+            dayMonthCell(c.anniversary, c.anniversaryYear),
+          ];
         });
       },
     };

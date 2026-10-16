@@ -7,6 +7,7 @@ import { createGoodsReceiptSchema, Decimal, updateGoodsReceiptSchema } from "sha
 import { PrintButton } from "@/components/documents/print-button";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { StockItemAdder } from "@/components/stock/stock-item-adder";
+import { SizeColourGrid } from "./size-colour-grid";
 import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -297,6 +298,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
         <>
           <p className="muted">Goods that came without an order: scan or search for the item.</p>
           <StockItemAdder onAdd={(item, unitId) => setLines([...lines, lineWithoutOrder(item, unitId)])} />
+          <SizeColourGrid onAdd={(more) => setLines([...lines, ...more.map((m) => ({ ...lineWithoutOrder(m.item, null), received: m.quantity }))])} />
         </>
       ) : null}
       <ReceiptLineGrid lines={lines} onChange={setLines} shelves={shelves} problems={problems} seesPrices={rights.prices} readOnly={!editable} />

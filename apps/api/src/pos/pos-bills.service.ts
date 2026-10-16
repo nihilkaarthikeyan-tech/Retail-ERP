@@ -11,16 +11,21 @@ import {
   changeDue,
   checkDiscount,
   type CurrentUser,
+  dayMonthYearProblem,
   Decimal,
+  type DeliveryDetailsInput,
+  deliveryChargeFor,
   effectiveDiscountPercent,
-  freeUnits,
   hasPermission,
   inclusiveTax,
+  isCountedOffer,
   isExpiredOn,
+  planOffers,
   type PosBillQuery,
   type PosLineInput,
   type PosTransactionInput,
   QUANTITY_TOLERANCE,
+  type QuickAddCustomerInput,
   quantityProblem,
   roundBill,
   roundMoney,
@@ -31,7 +36,7 @@ import {
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
-import type { Customer, Item, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
+import type { Customer, GstRate, Item, Offer, PosDelivery, PosSettings, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
 import { type Movement, StockEngine } from '../inventory/stock-engine.service.js';
 import { ItemsService } from '../items/items.service.js';
 import { CustomersService } from '../parties/customers.service.js';
@@ -40,7 +45,7 @@ import { PricingService } from '../pricing/pricing.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
-import { D, fromIso, iso, PosCommon, type TillWithRefs } from './pos-common.service.js';
+import { D, fromIso, iso, type PendingApproval, PosCommon, type TillWithRefs } from './pos-common.service.js';
 
 export const billInclude = {
   lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { id: true, code: true, name: true, hsnCode: true, isStockItem: true, trackSerials: true, trackBatches: true } } } },
@@ -77,6 +82,8 @@ interface BuiltLine {
   approvedById: string | null;
   /** Return lines: the original out-entry the goods come back at. */
   costSourceId: bigint | null;
+  /** Plan 11 C1: who sold the line. */
+  salesStaffId: string | null;
 }
 
 interface BuiltBill {
@@ -88,6 +95,62 @@ interface BuiltBill {
   approvedById: string | null;
   couponId: string | null;
   billDiscount: Decimal;
+  /** Plan 11 C1: the bill's salesperson. */
+  salesStaffId: string | null;
+  /** Plan 11 B4: home delivery of the sale, with the charge added. */
+  delivery: (Omit<DeliveryDetailsInput, 'charge'> & { charge: Decimal }) | null;
+}
+
+interface BuildContext {
+  till: TillWithRefs;
+  date: string;
+  input: PosTransactionInput;
+  user: CurrentUser;
+  flags: Set<string>;
+  interState: boolean;
+  settings: PosSettings;
+  customer: Customer;
+  approvals: string[];
+  catalogue: { allowPriceChange: boolean; blockBelowCost: boolean; saveTyped: boolean };
+  newPrices: { itemId: string; code: string; unitId: string; price: Decimal }[];
+  pending: PendingApproval[];
+}
+
+/** A sale line priced and checked, before the bill's offers are chosen. */
+interface PricedLine {
+  l: PosLineInput;
+  b: { item: Item; unitId: string; factor: Decimal; quantity: Decimal; basicQuantity: Decimal; mrp: Decimal | null };
+  listPrice: Decimal;
+  price: Decimal;
+  approvedById: string | null;
+  gst: GstRate;
+  manualPct: Decimal;
+  /** Offers covering the item (none when the price was typed). */
+  covering: Offer[];
+}
+
+/** What a "buy X, get Y" offer gives (plan 11 B3). */
+interface FreeItemInfo {
+  item: Item;
+  unitId: string;
+  factor: Decimal;
+  mrp: Decimal | null;
+  /** One unit's worth: its price, else its MRP. */
+  value: Decimal;
+  gstRate: Decimal;
+  provisional: boolean;
+}
+
+/** Names shown with a bill: offers used, salespeople, the delivery. */
+interface BillExtras {
+  offers: Map<string, { code: string; name: string }>;
+  staff: Map<string, { code: string; name: string }>;
+  deliveries: Map<string, PosDelivery>;
+}
+
+/** The delivery charge line follows the bill's own lines (the till numbers its lines 1, 2, 3 …). */
+function deliveryLineNo(lines: PosLineInput[]): number {
+  return Math.max(0, ...lines.filter((x) => !x.freeOfLineNo).map((x) => x.lineNo)) + 1;
 }
 
 @Injectable()
@@ -149,6 +212,11 @@ export class PosBillsService {
     }
     const cashierId = await this.common.cashierFor(this.prisma, till.id, input.cashierToken, user);
     const customer = await this.customerFor(company.id, input, actor, flags);
+    // Plan 11 A6 (blueprint 05): a blocked customer is refused except for the credit controller; offline bills are kept and flagged.
+    if (customer.status === 'blocked' && !hasPermission(user, 'customers.credit')) {
+      if (!input.offline) throw new BadRequestException(`${customer.name} is blocked; only a credit controller can bill them`);
+      flags.add('customer_blocked');
+    }
     const interState = this.common.interState(till.store.stateCode, company.stateCode, customer);
     const coupon = input.couponCode && input.sale ? await this.offers.couponFor(this.prisma, company.id, input.couponCode, date, customer.id) : null;
     const offerCtx = { companyId: company.id, storeId: till.storeId, date, customerGroupId: customer.customerGroupId, couponOfferId: coupon?.offerId ?? null };
@@ -156,7 +224,14 @@ export class PosBillsService {
     if (!year) throw new BadRequestException(`No financial year covers ${date}`);
 
     const approvals: string[] = [];
-    const ctx = { till, date, input, user, flags, interState, settings, customer, approvals };
+    const cat = await this.prisma.catalogueSettings.findUnique({ where: { companyId: company.id } });
+    // Plan 11 A2: the catalogue settings for prices on bills.
+    const catalogue = { allowPriceChange: cat?.allowPriceChangeOnBill ?? false, blockBelowCost: cat?.blockSellingBelowCost ?? false, saveTyped: cat?.saveTypedPrices ?? false };
+    const newPrices: { itemId: string; code: string; unitId: string; price: Decimal }[] = [];
+    // Manager approvals are checked now but only used up when the bill is saved.
+    const pending: PendingApproval[] = [];
+    const ctx: BuildContext = { till, date, input, user, flags, interState, settings, customer, approvals, catalogue, newPrices, pending };
+    await this.checkSalesStaff(company.id, till, input, flags);
 
     const ret = input.ret ? await this.buildReturn(ctx) : null;
     const sale = input.sale ? await this.buildSale(ctx, offerCtx, coupon?.id ?? null) : null;
@@ -175,7 +250,7 @@ export class PosBillsService {
       if (D(p.amount).lt(0) && !m.allowRefund) throw new BadRequestException(`${m.name} cannot be used for refunds`);
       if (m.needsReference && !D(p.amount).eq(0) && !p.reference?.trim()) throw new BadRequestException(`${m.name} needs the approval code or reference`);
     }
-    await this.checkOnAccount(company.id, input, till, customer, methods, date, approvals, flags);
+    await this.checkOnAccount(company.id, input, till, customer, methods, date, approvals, flags, pending);
     const paid = changeDue({ total: net, payments: input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })) });
     if (net.gte(0)) {
       if (paid.short.gt(0)) throw new BadRequestException(`₹${paid.short.toFixed(2)} is still to be paid`);
@@ -233,6 +308,7 @@ export class PosBillsService {
               gstProvisional: b.lines.some((l) => l.provisional),
               returnReason: b.returnReason,
               approvedById: b.approvedById,
+              salesStaffId: b.salesStaffId,
               lines: { create: t.lines.map((l) => lineData(l)) },
               ...(holds ? { payments: { create: input.payments.filter((p) => !D(p.amount).eq(0)).map((p) => ({ paymentMethodId: p.paymentMethodId, amount: D(p.amount).toFixed(2), reference: p.reference ?? null })) } } : {}),
             },
@@ -247,6 +323,7 @@ export class PosBillsService {
             }
           }
           if (b.couponId) await this.offers.countCouponUse(tx, b.couponId, 1);
+          if (b.delivery) await this.saveDelivery(tx, bill, b.delivery, till, customer, actor);
           await this.audit.record(tx, actor, {
             action: 'create',
             entityType: 'pos_bill',
@@ -256,11 +333,57 @@ export class PosBillsService {
           created.push(bill.id);
         }
         if (flags.size) await tx.posBill.updateMany({ where: { id: { in: created } }, data: { checkFlags: [...flags] } });
+        await this.common.markApprovalsUsed(tx, pending);
+        for (const p of newPrices) {
+          const row = await tx.price.create({ data: { priceListId: till.priceListId, itemId: p.itemId, unitId: p.unitId, price: p.price.toFixed(4), startDate: fromIso(date), createdById: actor.userId, updatedById: actor.userId } });
+          await this.audit.record(tx, actor, { action: 'create', entityType: 'price', entityId: row.id, changes: { item: p.code, price: p.price.toFixed(2), from: 'typed on a till bill' } });
+        }
         return tx.posBill.findMany({ where: { id: { in: created } }, include: billInclude, orderBy: { kind: 'desc' } });
       },
       { timeout: 60_000, maxWait: 30_000 },
     );
     return this.transactionDto(saved, user, false);
+  }
+
+  /**
+   * Plan 11 C1: the bill's and lines' salespeople are from the till's store and
+   * in use. Offline, someone switched off or moved meanwhile is kept and flagged.
+   */
+  private async checkSalesStaff(companyId: string, till: TillWithRefs, input: PosTransactionInput, flags: Set<string>) {
+    const ids = new Set<string>();
+    if (input.salesStaffId) ids.add(input.salesStaffId);
+    for (const l of [...(input.sale?.lines ?? []), ...(input.ret?.lines ?? [])]) if (l.salesStaffId) ids.add(l.salesStaffId);
+    if (!ids.size) return;
+    const rows = await this.prisma.salesStaff.findMany({ where: { id: { in: [...ids] } } });
+    for (const id of ids) {
+      const s = rows.find((r) => r.id === id);
+      if (!s || s.companyId !== companyId) throw new BadRequestException('Salesperson not found');
+      if (s.storeId !== till.storeId || !s.active) {
+        if (!input.offline) throw new BadRequestException(s.active ? `${s.name} (${s.code}) is not a salesperson of this store` : `${s.name} (${s.code}) is switched off as a salesperson`);
+        flags.add('sales_staff_changed');
+      }
+    }
+  }
+
+  /** Plan 11 B4 (decision 46): the delivery details, saved with the bill. */
+  private async saveDelivery(tx: Db, bill: BillRow, d: NonNullable<BuiltBill['delivery']>, till: TillWithRefs, customer: Customer, actor: Actor) {
+    const row = await tx.posDelivery.create({
+      data: {
+        companyId: bill.companyId,
+        storeId: till.storeId,
+        billId: bill.id,
+        customerId: customer.isWalkIn ? null : customer.id,
+        name: d.name ?? (customer.isWalkIn ? null : customer.name),
+        address: d.address,
+        phone: d.phone ?? customer.mobile ?? null,
+        deliverOn: d.deliverOn ? fromIso(d.deliverOn) : null,
+        chargeAmount: d.charge.toFixed(2),
+        remarks: d.remarks ?? null,
+        createdById: actor.userId,
+        updatedById: actor.userId,
+      },
+    });
+    await this.audit.record(tx, actor, { action: 'create', entityType: 'pos_delivery', entityId: row.id, changes: { bill: bill.number, address: row.address, deliverOn: iso(row.deliverOn), charge: row.chargeAmount.toFixed(2) } });
   }
 
   /** The bill's number must be the till's own (pos-offline §3): STORE-TILL-FY-000001. */
@@ -285,6 +408,7 @@ export class PosBillsService {
     date: string,
     approvals: string[],
     flags: Set<string>,
+    pending: PendingApproval[],
   ) {
     const onAccount = input.payments.filter((p) => methods.get(p.paymentMethodId)?.kind === 'on_account').reduce((s, p) => s.add(D(p.amount)), new Decimal(0));
     if (onAccount.isZero()) return;
@@ -292,15 +416,18 @@ export class PosBillsService {
     if (customer.isWalkIn) throw new BadRequestException('Choose the customer to sell on account');
     if (customer.status !== 'active') throw new BadRequestException(`${customer.name} is ${customer.status === 'blocked' ? 'blocked' : 'switched off'}; they cannot buy on account`);
     if (onAccount.lt(0)) return; // A refund on account only reduces what they owe.
+    // Plan 11 A7: the customer's own limits, else the group's; a group may skip the check altogether.
+    const terms = await this.customers.creditTermsFor(this.prisma, customer);
+    if (terms.skip) return;
     const owed = (await this.ledger.partyBalance(this.prisma, 'customer', customer.id)).add(await this.pendingOnAccount(customer.id));
     const overdue = (await this.ledger.openItems(this.prisma, 'customer', customer.id))
       .filter((i) => i.owed.gt(0) && (i.dueDate ?? i.date) < date)
       .reduce((s, i) => s.add(i.owed), new Decimal(0));
-    const verdict = creditCheck({ creditLimit: customer.creditLimit.toString(), owed, thisBill: onAccount, overdue, overdueLimit: customer.overdueLimit.toString() });
+    const verdict = creditCheck({ creditLimit: terms.creditLimit.toString(), owed, thisBill: onAccount, overdue, overdueLimit: terms.overdueLimit.toString() });
     if (verdict.ok) return;
     if (!verdict.canOverride) throw new BadRequestException(verdict.reason);
     if (!input.creditApprovalToken) throw new ForbiddenException(`${verdict.reason}. A manager must approve`);
-    const managerId = await this.common.useApproval(this.prisma, input.creditApprovalToken, till.id, ['credit_over_limit'], `${customer.code} ₹${onAccount.toFixed(2)}`);
+    const managerId = await this.common.useApproval(this.prisma, input.creditApprovalToken, till.id, ['credit_over_limit'], `${customer.code} ₹${onAccount.toFixed(2)}`, pending);
     approvals.push(`credit over limit ${customer.code} ₹${onAccount.toFixed(2)} by ${managerId}`);
     flags.add('credit_override');
   }
@@ -325,7 +452,18 @@ export class PosBillsService {
         flags.add('customer_matched_by_mobile');
         return byMobile;
       }
-      const created = await this.customers.quickAdd({ name: nc.name, mobile: nc.mobile }, actor);
+      // Plan 11 C10: a birthday or anniversary that is not a real date is left out (and noted), never a reason to refuse the bill.
+      const dates: Pick<QuickAddCustomerInput, 'birthday' | 'birthYear' | 'anniversary' | 'anniversaryYear'> = {};
+      const today = businessDate();
+      for (const [dm, yr] of [
+        ['birthday', 'birthYear'],
+        ['anniversary', 'anniversaryYear'],
+      ] as const) {
+        if (!nc[dm]) continue;
+        if (dayMonthYearProblem(nc[dm], nc[yr] ?? null, today)) flags.add('customer_dates_left_out');
+        else Object.assign(dates, { [dm]: nc[dm], [yr]: nc[yr] ?? null });
+      }
+      const created = await this.customers.quickAdd({ name: nc.name, mobile: nc.mobile, ...dates }, actor);
       return this.prisma.customer.update({ where: { id: created.id }, data: { offlineTillRef: nc.clientId } });
     }
     if (input.customerId) {
@@ -354,45 +492,62 @@ export class PosBillsService {
     return { item, unitId, factor, quantity, basicQuantity: roundQuantity(quantity.mul(factor)), mrp };
   }
 
-  private async buildSale(
-    ctx: { till: TillWithRefs; date: string; input: PosTransactionInput; user: CurrentUser; flags: Set<string>; interState: boolean; customer: Customer; approvals: string[] },
-    offerCtx: Parameters<OffersService['activeOffers']>[1],
-    couponId: string | null,
-  ): Promise<BuiltBill> {
+  private async buildSale(ctx: BuildContext, offerCtx: Parameters<OffersService['activeOffers']>[1], couponId: string | null): Promise<BuiltBill> {
     const { till, date, input, user, flags } = ctx;
     const part = input.sale!;
     const offers = await this.offers.activeOffers(this.prisma, offerCtx);
+    const billStaff = input.salesStaffId ?? null;
     const lines: BuiltLine[] = [];
     // Online, free lines are worked out here from the offers; offline the till's free lines are kept as sold.
     const sentFree = part.lines.filter((l) => l.freeOfLineNo);
+
+    // 1. Price, approvals and GST of each line.
+    const priced: PricedLine[] = [];
     for (const l of part.lines.filter((x) => !x.freeOfLineNo)) {
       const b = await this.lineBasics(l);
       const code = b.item.code;
       let listPrice: Decimal;
+      let typedNewPrice = false;
       try {
         const found = await this.pricing.lookup({ itemId: b.item.id, unitId: b.unitId, priceListId: till.priceListId, date, quantity: l.quantity, customerId: input.customerId ?? undefined, batchId: l.batchId ?? undefined }, user);
         if (!found.found || found.rate === null) throw new BadRequestException(`${code} has no price in the till’s price list`);
         listPrice = D(found.rate);
       } catch (err) {
-        if (!input.offline || !l.charged) throw err;
-        listPrice = D(l.charged.listPrice);
-        flags.add('price_missing');
+        if (input.offline && l.charged) {
+          listPrice = D(l.charged.listPrice);
+          flags.add('price_missing');
+        } else if (!input.offline && ctx.catalogue.saveTyped && l.price !== undefined && err instanceof BadRequestException) {
+          // Plan 11 A2 (blueprint 04): with no price in the list, the typed price is used and saved.
+          listPrice = D(l.price);
+          typedNewPrice = true;
+        } else {
+          throw err;
+        }
       }
       let approvedById: string | null = null;
       let price = listPrice;
-      if (l.price !== undefined && !D(l.price).eq(listPrice)) {
+      // A cashier changes prices freely only where both the company and the till allow it; otherwise a manager approves.
+      const cashierMayChangePrice = till.allowPriceChange && ctx.catalogue.allowPriceChange;
+      if (typedNewPrice) {
+        if (!cashierMayChangePrice) {
+          approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`, ctx.pending);
+          ctx.approvals.push(`price ${code}`);
+        }
+        ctx.newPrices.push({ itemId: b.item.id, code, unitId: b.unitId, price: listPrice });
+      } else if (l.price !== undefined && !D(l.price).eq(listPrice)) {
         if (input.offline) {
           price = D(l.price);
         } else {
-          if (!till.allowPriceChange) {
-            approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`);
+          if (!cashierMayChangePrice) {
+            approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`, ctx.pending);
             ctx.approvals.push(`price ${code}`);
           }
           price = D(l.price);
         }
       }
       // Offers apply to the list price; a typed price switches them off for the line (blueprint 04).
-      const chosen = price.eq(listPrice) ? this.offers.bestLineOffer(offers, { id: b.item.id, parentItemId: b.item.parentItemId, brandId: b.item.brandId, itemGroup: await this.groupOf(b.item.itemGroupId) }, { quantity: b.quantity, price }) : null;
+      const forOffers = { id: b.item.id, parentItemId: b.item.parentItemId, brandId: b.item.brandId, itemGroup: await this.groupOf(b.item.itemGroupId) };
+      const covering = price.eq(listPrice) ? offers.filter((o) => o.appliesTo !== 'bill' && this.offers.covers(o, forOffers)) : [];
       const gst = await this.common.gstRateFor(this.prisma, b.item, date);
       const manualPct = D(l.discountPercent ?? '0');
       const verdict = checkDiscount({
@@ -408,11 +563,45 @@ export class PosBillsService {
         if (!verdict.needsApproval) throw new BadRequestException(`${code}: ${verdict.reason}`);
         // Offline, only an approval the till obtained before the connection dropped is accepted.
         if (input.offline && !l.approvalToken) throw new BadRequestException(`${code}: ${verdict.reason}`);
-        approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['discount', 'price_change'], `line ${l.lineNo}`);
+        approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['discount', 'price_change'], `line ${l.lineNo}`, ctx.pending);
         ctx.approvals.push(`discount ${code} ${manualPct.toFixed(2)}%`);
       }
-      const offerDiscount = chosen && chosen.offer.kind !== 'free_goods' ? chosen.saving : new Decimal(0);
+      priced.push({ l, b, listPrice, price, approvedById, gst, manualPct, covering });
+    }
+
+    // 2. The offers of the whole bill (decision 17; plan 11 B3): line offers, mix and match, buy X get Y.
+    const freeItems = new Map<string, FreeItemInfo | null>();
+    for (const o of offers) {
+      if (o.kind === 'buy_get' && o.freeItemId && priced.some((p) => p.covering.includes(o))) freeItems.set(o.id, await this.freeItemInfo(o.freeItemId, till, date, input.customerId ?? undefined, user));
+    }
+    const planned = new Map(offers.map((o) => [o.id, this.offers.planOffer(o, freeItems.get(o.id)?.value ?? null)]));
+    const plan = planOffers(priced.map((p) => ({ lineNo: p.l.lineNo, quantity: p.b.quantity, price: p.price, offers: p.covering.map((o) => planned.get(o.id)!), countable: p.manualPct.isZero() })));
+
+    // 3. Amounts, the below-cost check and stock details.
+    for (const p of priced) {
+      const { l, b, listPrice, price, gst, manualPct } = p;
+      let approvedById = p.approvedById;
+      const code = b.item.code;
+      const chosen = plan.lines.get(l.lineNo) ?? null;
+      const offerDiscount = chosen?.discount ?? new Decimal(0);
       const { amount, discount } = saleLineAmount({ quantity: b.quantity, price, discountPercent: manualPct, discountAmount: offerDiscount });
+      // Mix-and-match prices are the owner's own promotion, like free lines: never refused as below cost.
+      const promoted = !!chosen && isCountedOffer(chosen.offer.kind) && offerDiscount.gt(0);
+      if (ctx.catalogue.blockBelowCost && b.basicQuantity.gt(0) && !promoted) {
+        // Plan 11 A2 (blueprint 04): net price per basic unit, before GST, not below the last purchase price or the current cost.
+        const net = roundMoney(amount.div(D(1).add(D(gst.rate).div(100))).div(b.basicQuantity));
+        const lastBought = D(b.item.lastPurchasePrice ?? 0);
+        const cost = b.item.isStockItem ? D(await this.currentCost(this.prisma, b.item.id, till.locationId)) : new Decimal(0);
+        const floor = roundMoney(Decimal.max(lastBought, cost));
+        if (net.lt(floor)) {
+          if (input.offline) flags.add('below_cost');
+          else if (!approvedById) {
+            if (!l.approvalToken) throw new BadRequestException(`${code}: this price is below cost; a manager must approve it`);
+            approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change', 'discount'], `line ${l.lineNo}`, ctx.pending);
+          }
+          if (!input.offline) ctx.approvals.push(`below cost ${code}`);
+        }
+      }
       const stock = await this.stockDetails(b.item, l, till, date, b.basicQuantity, input.offline, flags);
       const line: BuiltLine = {
         lineNo: l.lineNo,
@@ -437,35 +626,71 @@ export class PosBillsService {
         returnOfLineId: null,
         approvedById,
         costSourceId: null,
+        salesStaffId: l.salesStaffId ?? billStaff,
       };
       // Offline bills are recorded as charged; differences go on the check report (pos-offline §5).
       if (input.offline && l.charged) this.applyCharged(line, l, flags);
       lines.push(line);
-      if (!input.offline && chosen?.offer.kind === 'free_goods') {
-        const free = freeUnits(b.quantity, chosen.offer.buyQuantity?.toString() ?? '0', chosen.offer.freeQuantity?.toString() ?? '0');
-        if (free.gt(0)) {
-          lines.push({
-            ...line,
-            lineNo: 1000 + l.lineNo,
-            quantity: free,
-            basicQuantity: roundQuantity(free.mul(b.factor)),
-            ...(await this.stockDetails(b.item, { ...l, serialNumbers: [] }, till, date, roundQuantity(free.mul(b.factor)), input.offline, flags)),
-            price: new Decimal(0),
-            listPrice,
-            discountPercent: new Decimal(0),
-            discountAmount: new Decimal(0),
-            offerDiscount: new Decimal(0),
-            isFree: true,
-            amount: new Decimal(0),
-            approvedById: null,
-          });
-        }
+      if (!input.offline && chosen && chosen.freeQuantity.gt(0)) {
+        const free = chosen.freeQuantity;
+        lines.push({
+          ...line,
+          lineNo: 1000 + l.lineNo,
+          quantity: free,
+          basicQuantity: roundQuantity(free.mul(b.factor)),
+          ...(await this.stockDetails(b.item, { ...l, serialNumbers: [] }, till, date, roundQuantity(free.mul(b.factor)), input.offline, flags)),
+          price: new Decimal(0),
+          listPrice,
+          discountPercent: new Decimal(0),
+          discountAmount: new Decimal(0),
+          offerDiscount: new Decimal(0),
+          isFree: true,
+          amount: new Decimal(0),
+          approvedById: null,
+        });
+      }
+    }
+    // Buy X, get Y (plan 11 B3): the other item at ₹0, after the first line that counted; it leaves stock at its cost.
+    if (!input.offline) {
+      for (const f of plan.freeItems) {
+        const info = freeItems.get(f.offer.id);
+        const parent = lines.find((x) => x.lineNo === f.ofLineNo);
+        if (!info || !parent) continue;
+        const basic = roundQuantity(f.quantity.mul(info.factor));
+        const freeLine = { lineNo: 1000 + f.ofLineNo, itemId: info.item.id, quantity: f.quantity.toString(), serialNumbers: [] } as PosLineInput;
+        lines.push({
+          lineNo: 1000 + f.ofLineNo,
+          item: info.item,
+          unitId: info.unitId,
+          factor: info.factor,
+          quantity: f.quantity,
+          basicQuantity: basic,
+          barcode: null,
+          ...(await this.stockDetails(info.item, freeLine, till, date, basic, false, flags)),
+          mrp: info.mrp,
+          listPrice: info.value,
+          price: new Decimal(0),
+          discountPercent: new Decimal(0),
+          discountAmount: new Decimal(0),
+          offerDiscount: new Decimal(0),
+          offerId: f.offer.id,
+          isFree: true,
+          gstRate: info.gstRate,
+          provisional: info.provisional,
+          amount: new Decimal(0),
+          returnOfLineId: null,
+          approvedById: null,
+          costSourceId: null,
+          salesStaffId: parent.salesStaffId,
+        });
       }
     }
     if (input.offline) {
       for (const f of sentFree) {
         const b = await this.lineBasics(f);
         const parent = lines.find((x) => x.lineNo === f.freeOfLineNo);
+        // A free line of another item (buy X, get Y) keeps its own GST rate and price.
+        const own = parent && parent.item.id !== b.item.id ? await this.freeItemInfo(b.item.id, till, date, input.customerId ?? undefined, user) : null;
         lines.push({
           lineNo: f.lineNo,
           item: b.item,
@@ -476,19 +701,20 @@ export class PosBillsService {
           barcode: f.barcode ?? null,
           ...(await this.stockDetails(b.item, f, till, date, b.basicQuantity, true, flags)),
           mrp: b.mrp,
-          listPrice: parent?.listPrice ?? new Decimal(0),
+          listPrice: own ? own.value : (parent?.listPrice ?? new Decimal(0)),
           price: new Decimal(0),
           discountPercent: new Decimal(0),
           discountAmount: new Decimal(0),
           offerDiscount: new Decimal(0),
           offerId: f.offerId ?? parent?.offerId ?? null,
           isFree: true,
-          gstRate: parent?.gstRate ?? new Decimal(0),
-          provisional: parent?.provisional ?? true,
+          gstRate: own ? own.gstRate : (parent?.gstRate ?? new Decimal(0)),
+          provisional: own ? own.provisional : (parent?.provisional ?? true),
           amount: new Decimal(0),
           returnOfLineId: null,
           approvedById: null,
           costSourceId: null,
+          salesStaffId: f.salesStaffId ?? parent?.salesStaffId ?? billStaff,
         });
       }
     }
@@ -503,7 +729,7 @@ export class PosBillsService {
       billDiscount = input.billDiscount.amount ? roundMoney(input.billDiscount.amount) : roundMoney(base.mul(D(input.billDiscount.percent!)).div(100));
       const pct = base.gt(0) ? billDiscount.div(base).mul(100) : new Decimal(0);
       if (pct.gt(D(till.cashierDiscountPercent))) {
-        await this.common.useApproval(this.prisma, input.billDiscount.approvalToken, till.id, ['bill_discount', 'discount'], 'bill discount');
+        await this.common.useApproval(this.prisma, input.billDiscount.approvalToken, till.id, ['bill_discount', 'discount'], 'bill discount', ctx.pending);
         ctx.approvals.push(`bill discount ${billDiscount.toFixed(2)}`);
       }
     } else if (!input.offline) {
@@ -523,8 +749,79 @@ export class PosBillsService {
         if (pct.gt(D(l.item.maxDiscountPercent)) && l.offerDiscount.eq(0)) throw new BadRequestException(`${l.item.code}: the bill discount takes it above its maximum discount of ${D(l.item.maxDiscountPercent).toFixed(2)}%`);
       }
     }
-    void sentFree;
-    return { kind: 'sale', number: part.number, lines, returnOfId: null, returnReason: null, approvedById: null, couponId, billDiscount };
+
+    // Home delivery (plan 11 B4, decision 47): the store's charge as a service line, none at or above "free above".
+    let delivery: BuiltBill['delivery'] = null;
+    if (input.delivery) {
+      const d = input.delivery;
+      if (!input.offline && d.deliverOn && d.deliverOn < date) throw new BadRequestException('The delivery date cannot be before the bill date');
+      const goods = lines.reduce((s, l) => s.add(l.amount), new Decimal(0));
+      const store = await this.prisma.store.findUniqueOrThrow({ where: { id: till.storeId } });
+      let charge = deliveryChargeFor(goods, store.deliveryCharge.toString(), store.deliveryFreeAbove?.toString() ?? null);
+      if (input.offline && d.charge !== undefined) {
+        if (!D(d.charge).eq(charge)) flags.add('delivery_charge_changed');
+        charge = roundMoney(d.charge);
+      }
+      if (charge.gt(0)) {
+        if (!ctx.settings.deliveryItemId) throw new BadRequestException('Choose the delivery charge item in the till settings first');
+        const item = await this.items.assertItemUsable(this.prisma, ctx.settings.deliveryItemId, 'sale');
+        const gst = await this.common.gstRateFor(this.prisma, item, date);
+        lines.push({
+          lineNo: deliveryLineNo(part.lines),
+          item,
+          unitId: item.baseUnitId,
+          factor: new Decimal(1),
+          quantity: new Decimal(1),
+          basicQuantity: new Decimal(1),
+          barcode: null,
+          batchId: null,
+          serialNumbers: [],
+          mrp: null,
+          listPrice: charge,
+          price: charge,
+          discountPercent: new Decimal(0),
+          discountAmount: new Decimal(0),
+          offerDiscount: new Decimal(0),
+          offerId: null,
+          isFree: false,
+          gstRate: D(gst.rate),
+          provisional: !gst.approvedAt,
+          amount: charge,
+          returnOfLineId: null,
+          approvedById: null,
+          costSourceId: null,
+          // A delivery charge is not a salesperson's sale.
+          salesStaffId: null,
+        });
+      }
+      delivery = { ...d, charge };
+    }
+    return { kind: 'sale', number: part.number, lines, returnOfId: null, returnReason: null, approvedById: null, couponId, billDiscount, salesStaffId: billStaff, delivery };
+  }
+
+  /**
+   * The item a "buy X, get Y" offer gives (plan 11 B3): its unit, GST rate and
+   * what one unit is worth (its price, else its MRP). Null when it cannot be
+   * sold, so the offer is not used; the till does the same.
+   */
+  private async freeItemInfo(itemId: string, till: TillWithRefs, date: string, customerId: string | undefined, user: CurrentUser): Promise<FreeItemInfo | null> {
+    let item: Item;
+    try {
+      item = await this.items.assertItemUsable(this.prisma, itemId, 'sale');
+    } catch {
+      return null;
+    }
+    let value: Decimal | null = null;
+    try {
+      const found = await this.pricing.lookup({ itemId: item.id, unitId: item.baseUnitId, priceListId: till.priceListId, date, quantity: '1', customerId }, user);
+      if (found.found && found.rate !== null) value = D(found.rate);
+    } catch {
+      // No price in the list: its MRP below.
+    }
+    value = value ?? (item.mrp ? D(item.mrp) : null);
+    if (!value || value.lte(0)) return null;
+    const rate = await this.common.gstRateFor(this.prisma, item, date).catch(() => null);
+    return { item, unitId: item.baseUnitId, factor: new Decimal(1), mrp: item.mrp ? D(item.mrp) : null, value, gstRate: D(rate?.rate ?? 0), provisional: !rate?.approvedAt };
   }
 
   /** Offline: keep what the till charged; flag where the server would differ (pos-offline §5). */
@@ -585,14 +882,17 @@ export class PosBillsService {
   }
 
   /** Returns at the original prices, or without a bill with a manager's approval (decision 40). */
-  private async buildReturn(ctx: { till: TillWithRefs; date: string; input: PosTransactionInput; user: CurrentUser; flags: Set<string>; customer: Customer; approvals: string[] }): Promise<BuiltBill> {
+  private async buildReturn(ctx: { till: TillWithRefs; date: string; input: PosTransactionInput; user: CurrentUser; flags: Set<string>; customer: Customer; approvals: string[]; pending: PendingApproval[] }): Promise<BuiltBill> {
     const { till, date, input, user } = ctx;
     const part = input.ret!;
     const lines: BuiltLine[] = [];
     let approvedById: string | null = null;
+    // Against a bill, the return carries the original bill's salesperson; without one, the salesperson chosen now.
+    let billStaff: string | null = input.salesStaffId ?? null;
     if (part.returnOfId) {
       const orig = await this.prisma.posBill.findUnique({ where: { id: part.returnOfId }, include: { lines: { include: { item: true } } } });
       if (!orig || orig.kind !== 'sale' || orig.companyId !== till.companyId) throw new BadRequestException('The original bill was not found');
+      billStaff = orig.salesStaffId;
       if (orig.status !== 'completed') throw new BadRequestException(`Bill ${orig.number} is cancelled`);
       if (orig.customerId !== ctx.customer.id) throw new BadRequestException('A return must be for the same customer as the original bill');
       for (const l of part.lines) {
@@ -636,11 +936,13 @@ export class PosBillsService {
           returnOfLineId: o.id,
           approvedById: null,
           costSourceId: outEntry?.id ?? null,
+          // Plan 11 C1: a return stays with the original line's salesperson.
+          salesStaffId: o.salesStaffId,
         });
       }
     } else {
       if (input.offline) throw new BadRequestException('A return without a bill needs a manager and the connection');
-      approvedById = await this.common.useApproval(this.prisma, part.approvalToken, till.id, ['return_without_bill'], 'return without bill');
+      approvedById = await this.common.useApproval(this.prisma, part.approvalToken, till.id, ['return_without_bill'], 'return without bill', ctx.pending);
       ctx.approvals.push('return without bill');
       for (const l of part.lines) {
         const b = await this.lineBasics(l);
@@ -672,10 +974,11 @@ export class PosBillsService {
           returnOfLineId: null,
           approvedById,
           costSourceId: null,
+          salesStaffId: l.salesStaffId ?? input.salesStaffId ?? null,
         });
       }
     }
-    return { kind: 'return', number: part.number, lines, returnOfId: part.returnOfId ?? null, returnReason: part.reason ?? null, approvedById, couponId: null, billDiscount: new Decimal(0) };
+    return { kind: 'return', number: part.number, lines, returnOfId: part.returnOfId ?? null, returnReason: part.reason ?? null, approvedById, couponId: null, billDiscount: new Decimal(0), salesStaffId: billStaff, delivery: null };
   }
 
   private pendingReturned(lines: BuiltLine[], originalLineId: string): Decimal {
@@ -791,6 +1094,8 @@ export class PosBillsService {
             }
           }
           if (b.couponId) await this.offers.countCouponUse(tx, b.couponId, -1);
+          // Plan 11 B4: a cancelled bill is not delivered.
+          await tx.posDelivery.updateMany({ where: { billId: b.id, status: 'pending' }, data: { status: 'cancelled', remarks: `Bill cancelled: ${reason}`, updatedById: actor.userId } });
           await tx.posBill.update({ where: { id: b.id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: user.id, cancelReason: reason } });
           await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_bill', entityId: b.id, changes: { status: { old: 'completed', new: 'cancelled' }, number: b.number, approvedBy: managerId }, reason });
         }
@@ -823,7 +1128,8 @@ export class PosBillsService {
       this.prisma.posBill.findMany({ where, include: billInclude, orderBy: { soldAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
       this.prisma.posBill.count({ where }),
     ]);
-    return { rows: rows.map((b) => this.billDto(b, user)), total, page, pageSize };
+    const extras = await this.extras(rows);
+    return { rows: rows.map((b) => this.billDto(b, user, extras)), total, page, pageSize };
   }
 
   async get(id: string, user: CurrentUser) {
@@ -831,7 +1137,7 @@ export class PosBillsService {
     await this.common.usableTill(this.prisma, b.tillId, user).catch(() => {
       if (!hasPermission(user, 'pos.reports')) throw new ForbiddenException('You are not allowed to work in this store');
     });
-    return this.billDto(b, user);
+    return this.billDto(b, user, await this.extras([b]));
   }
 
   /** Receipt data for printing again; marked as a duplicate and logged. */
@@ -842,7 +1148,8 @@ export class PosBillsService {
       await tx.posBill.update({ where: { id }, data: { reprints: { increment: 1 } } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_bill', entityId: id, changes: { reprint: b.reprints + 1, number: b.number } });
     });
-    return this.receipt(await this.getRow(this.prisma, id), true);
+    const row = await this.getRow(this.prisma, id);
+    return this.receipt(row, true, await this.extras([row]));
   }
 
   async getRow(db: Db, id: string): Promise<BillRow> {
@@ -867,22 +1174,37 @@ export class PosBillsService {
 
   // ---- Output ----
 
-  private transactionDto(bills: BillRow[], user: CurrentUser, repeated: boolean) {
+  /** Offer, salesperson and delivery details of these bills (plan 11 B3, B4, C1). */
+  private async extras(bills: BillRow[]): Promise<BillExtras> {
+    const offerIds = [...new Set(bills.flatMap((b) => b.lines.map((l) => l.offerId)).filter((x): x is string => !!x))];
+    const staffIds = [...new Set(bills.flatMap((b) => [b.salesStaffId, ...b.lines.map((l) => l.salesStaffId)]).filter((x): x is string => !!x))];
+    const [offers, staff, deliveries] = await Promise.all([
+      offerIds.length ? this.prisma.offer.findMany({ where: { id: { in: offerIds } }, select: { id: true, code: true, name: true } }) : [],
+      staffIds.length ? this.prisma.salesStaff.findMany({ where: { id: { in: staffIds } }, select: { id: true, code: true, name: true } }) : [],
+      this.prisma.posDelivery.findMany({ where: { billId: { in: bills.map((b) => b.id) } } }),
+    ]);
+    return { offers: new Map(offers.map((o) => [o.id, o])), staff: new Map(staff.map((x) => [x.id, x])), deliveries: new Map(deliveries.map((d) => [d.billId, d])) };
+  }
+
+  private async transactionDto(bills: BillRow[], user: CurrentUser, repeated: boolean) {
+    const extras = await this.extras(bills);
     const sale = bills.find((b) => b.kind === 'sale');
     const ret = bills.find((b) => b.kind === 'return');
     const change = bills.reduce((s, b) => s.add(D(b.changeAmount)), new Decimal(0));
     return {
       repeated,
-      sale: sale ? this.billDto(sale, user) : null,
-      return: ret ? this.billDto(ret, user) : null,
+      sale: sale ? this.billDto(sale, user, extras) : null,
+      return: ret ? this.billDto(ret, user, extras) : null,
       net: bills.reduce((s, b) => s.add(D(b.total)), new Decimal(0)).toFixed(2),
       change: change.toFixed(2),
-      receipts: bills.map((b) => this.receipt(b, false)),
+      receipts: bills.map((b) => this.receipt(b, false, extras)),
     };
   }
 
-  billDto(b: BillRow, user: CurrentUser) {
+  billDto(b: BillRow, user: CurrentUser, extras: BillExtras) {
     const cost = hasPermission(user, 'stock.cost.view');
+    const staff = (id: string | null) => (id ? (extras.staff.get(id) ?? null) : null);
+    const delivery = extras.deliveries.get(b.id);
     return {
       id: b.id,
       number: b.number,
@@ -914,6 +1236,10 @@ export class PosBillsService {
       returnReason: b.returnReason,
       cancelReason: b.cancelReason,
       reprints: b.reprints,
+      salesStaffId: b.salesStaffId,
+      salesStaff: staff(b.salesStaffId),
+      offers: offersUsed(b, extras),
+      delivery: delivery ? deliveryDto(delivery) : null,
       lines: b.lines.map((l) => ({
         id: l.id,
         lineNo: l.lineNo,
@@ -931,6 +1257,9 @@ export class PosBillsService {
         discountAmount: l.discountAmount.toFixed(2),
         offerDiscount: l.offerDiscount.toFixed(2),
         offerId: l.offerId,
+        offerName: l.offerId ? (extras.offers.get(l.offerId)?.name ?? null) : null,
+        salesStaffId: l.salesStaffId,
+        salesStaff: staff(l.salesStaffId),
         isFree: l.isFree,
         gstRate: l.gstRate.toString(),
         taxableAmount: l.taxableAmount.toFixed(2),
@@ -947,7 +1276,7 @@ export class PosBillsService {
   }
 
   /** What the receipt shows (blueprint 16 "Till receipt"); the layout is approved with the GST module (decision 43). */
-  receipt(b: BillRow, duplicate: boolean) {
+  receipt(b: BillRow, duplicate: boolean, extras: BillExtras) {
     const byRate = new Map<string, { taxable: Decimal; cgst: Decimal; sgst: Decimal; igst: Decimal }>();
     for (const l of b.lines) {
       const k = l.gstRate.toString();
@@ -963,13 +1292,59 @@ export class PosBillsService {
       soldAt: b.soldAt,
       till: b.till.code,
       footer: b.till.receiptFooter,
-      lines: b.lines.map((l) => ({ name: l.item.name, code: l.item.code, hsn: l.item.hsnCode, quantity: l.quantity.toString(), price: l.price.toFixed(2), discount: l.discountAmount.toFixed(2), amount: l.lineTotal.toFixed(2), free: l.isFree, serials: l.serialNumbers })),
+      lines: b.lines.map((l) => ({
+        name: l.item.name,
+        code: l.item.code,
+        hsn: l.item.hsnCode,
+        quantity: l.quantity.toString(),
+        price: l.price.toFixed(2),
+        discount: l.discountAmount.toFixed(2),
+        amount: l.lineTotal.toFixed(2),
+        free: l.isFree,
+        serials: l.serialNumbers,
+        offer: l.offerId ? (extras.offers.get(l.offerId)?.name ?? null) : null,
+        salesStaff: l.salesStaffId ? (extras.staff.get(l.salesStaffId)?.code ?? null) : null,
+      })),
+      // Plan 11 B3: each offer used and what it saved the customer.
+      offers: offersUsed(b, extras).map((o) => ({ name: o.name, saving: o.saving })),
+      salesStaff: b.salesStaffId ? (extras.staff.get(b.salesStaffId)?.name ?? null) : null,
+      delivery: extras.deliveries.has(b.id) ? deliveryDto(extras.deliveries.get(b.id)!) : null,
       gstTable: [...byRate.entries()].map(([rate, r]) => ({ rate, taxable: r.taxable.toFixed(2), cgst: r.cgst.toFixed(2), sgst: r.sgst.toFixed(2), igst: r.igst.toFixed(2) })),
       totals: { gross: b.grossAmount.toFixed(2), discount: b.discountAmount.toFixed(2), taxable: b.taxableAmount.toFixed(2), rounding: b.roundingAdjustment.toFixed(2), total: b.total.toFixed(2) },
       payments: b.payments.map((p) => ({ method: p.paymentMethod.name, amount: p.amount.toFixed(2), reference: p.reference })),
       change: b.changeAmount.toFixed(2),
     };
   }
+}
+
+/**
+ * The offers used on a bill and what each saved: rupees off its lines, and
+ * the worth of its free lines at their list price (plan 11 B3).
+ */
+function offersUsed(b: BillRow, extras: BillExtras) {
+  const used = new Map<string, Decimal>();
+  for (const l of b.lines) {
+    if (!l.offerId) continue;
+    const saving = l.isFree ? D(l.listPrice).mul(D(l.quantity)) : D(l.offerDiscount);
+    used.set(l.offerId, (used.get(l.offerId) ?? new Decimal(0)).add(saving));
+  }
+  return [...used.entries()].map(([id, saving]) => ({ id, code: extras.offers.get(id)?.code ?? null, name: extras.offers.get(id)?.name ?? 'Offer', saving: roundMoney(saving.abs()).toFixed(2) }));
+}
+
+export function deliveryDto(d: PosDelivery) {
+  return {
+    id: d.id,
+    billId: d.billId,
+    name: d.name,
+    address: d.address,
+    phone: d.phone,
+    deliverOn: iso(d.deliverOn),
+    status: d.status,
+    chargeAmount: d.chargeAmount.toFixed(2),
+    deliveredAt: d.deliveredAt,
+    deliveredById: d.deliveredById,
+    remarks: d.remarks,
+  };
 }
 
 function lineData(l: BuiltLine & { tax: ReturnType<typeof inclusiveTax> }) {
@@ -999,5 +1374,6 @@ function lineData(l: BuiltLine & { tax: ReturnType<typeof inclusiveTax> }) {
     lineTotal: l.amount.toFixed(2),
     returnOfLineId: l.returnOfLineId,
     approvedById: l.approvedById,
+    salesStaffId: l.salesStaffId,
   };
 }

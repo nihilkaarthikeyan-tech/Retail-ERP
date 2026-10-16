@@ -7,6 +7,8 @@ import {
   createBarcodeSchema,
   type CreateItemInput,
   createItemSchema,
+  type CreateSeasonInput,
+  createSeasonSchema,
   type CreateVariantsInput,
   createVariantsSchema,
   type ItemQuery,
@@ -17,18 +19,24 @@ import {
   updateBarcodeSchema,
   type UpdateItemInput,
   updateItemSchema,
+  type UpdateSeasonInput,
+  updateSeasonSchema,
 } from 'shared';
 import { RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { ItemsService } from './items.service.js';
+import { SeasonsService } from './seasons.service.js';
 
 const imageSchema = z.object({ mimeType: z.string().max(40), dataBase64: z.string().min(1).max(800_000) });
 type ImageInput = z.infer<typeof imageSchema>;
 
 @Controller()
 export class ItemsController {
-  constructor(private readonly items: ItemsService) {}
+  constructor(
+    private readonly items: ItemsService,
+    private readonly seasons: SeasonsService,
+  ) {}
 
   @Get('catalogue/scan/:code')
   @RequirePermission('catalogue.view')
@@ -93,6 +101,14 @@ export class ItemsController {
     return this.items.updateBarcode(id, barcodeId, input, actor);
   }
 
+  /** Plan 11 B2: copies the style's MRP, HSN, brand, group, maximum discount, description and season to all its variants. */
+  @Post('items/:id/apply-to-variants')
+  @HttpCode(200)
+  @RequirePermission('catalogue.manage')
+  applyToVariants(@Param('id', ParseUUIDPipe) id: string, @ReqActor() actor: Actor) {
+    return this.items.applyToVariants(id, actor);
+  }
+
   @Get('items/:id/variants')
   @RequirePermission('catalogue.view')
   variants(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser) {
@@ -108,6 +124,26 @@ export class ItemsController {
     @ReqUser() user: AuthUser,
   ) {
     return this.items.createVariants(id, input, actor, user);
+  }
+
+  // ---- Seasons (plan 11 C4) ----
+
+  @Get('seasons')
+  @RequirePermission('catalogue.view')
+  listSeasons() {
+    return this.seasons.list();
+  }
+
+  @Post('seasons')
+  @RequirePermission('catalogue.manage')
+  createSeason(@Body(new ZodValidationPipe(createSeasonSchema)) input: CreateSeasonInput, @ReqActor() actor: Actor) {
+    return this.seasons.create(input, actor);
+  }
+
+  @Patch('seasons/:id')
+  @RequirePermission('catalogue.manage')
+  updateSeason(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(updateSeasonSchema)) input: UpdateSeasonInput, @ReqActor() actor: Actor) {
+    return this.seasons.update(id, input, actor);
   }
 
   @Get('items/:id/image')

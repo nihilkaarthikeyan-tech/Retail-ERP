@@ -162,6 +162,10 @@ export interface SupplierBillHeader {
   paymentTermsId: string | null;
   dueDate: string;
   overdue: boolean;
+  /** From the accounts (plan 11 A3): finalised bills only. */
+  paymentStatus?: "unpaid" | "part_paid" | "paid";
+  /** Still owed, when buying prices may be seen. */
+  amountDue?: string;
   held: boolean;
   holdReason: string | null;
   holdUntil: string | null;
@@ -238,6 +242,8 @@ export interface ReorderSuggestionDto {
 
 export interface PurchaseSettingsDto {
   requireOrderForReceipt: boolean;
+  billNeedsOrder: boolean;
+  billNeedsReceipt: boolean;
   overOrderPercent: string;
   overReceiptPercent: string;
   overBillingPercent: string;
@@ -272,6 +278,12 @@ export const BILL_STATUS_LABELS: Record<SupplierBillStatus, string> = {
   draft: "Draft",
   unpaid: "Not paid",
   cancelled: "Cancelled",
+};
+
+export const BILL_PAYMENT_LABELS: Record<"unpaid" | "part_paid" | "paid", string> = {
+  unpaid: "Not paid",
+  part_paid: "Part paid",
+  paid: "Paid",
 };
 
 export const BILL_KIND_LABELS: Record<SupplierBillKind, string> = {

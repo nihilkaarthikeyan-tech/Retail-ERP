@@ -21,7 +21,9 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "dev": "nest start --watch",
     "postinstall": "prisma generate",
-    "prisma": "prisma"
+    "prisma": "prisma",
+    "perf:seed": "vitest run --config ./vitest.config.perf.ts perf/seed.perf.ts",
+    "perf:measure": "vitest run --config ./vitest.config.perf.ts perf/measure.perf.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

@@ -70,6 +70,8 @@ export class SalesReportsService {
     if (q.customerId) conds.push(Prisma.sql`AND b."customerId" = ${q.customerId}::uuid`);
     if (q.cashierId) conds.push(Prisma.sql`AND b."cashierId" = ${q.cashierId}::uuid`);
     if (q.tillId) conds.push(Prisma.sql`AND b."tillId" = ${q.tillId}::uuid`);
+    // Plan 11 C4: a variant without its own season takes its style's.
+    if (q.seasonId) conds.push(Prisma.sql`AND COALESCE(i."seasonId", (SELECT p."seasonId" FROM "Item" p WHERE p.id = i."parentItemId")) = ${q.seasonId}::uuid`);
     return this.prisma.$queryRaw<SaleLineRow[]>`
       SELECT l.id AS "lineId", l."billId", b.number, b.kind::text AS kind, b."businessDate", b."soldAt", t."storeId", b."cashierId", b."customerId",
              l."itemId", i."itemGroupId", i."brandId", l.quantity, l."basicQuantity", l."listPrice", l.price, l."discountPercent",
@@ -167,8 +169,12 @@ export class SalesReportsService {
     const seesCost = this.common.seesCost(user);
     const by = q.groupBy ?? defaultGroup;
     const lines = await this.lines(company.id, from, to, scope, q);
+    // Plan 11 C3, C4: style, size or colour, and season come from the item's style and values.
+    const styled = by === 'style' || by === 'attribute' || by === 'season' ? await this.styleKeys([...new Set(lines.map((l) => l.itemId))], q.attributeId) : null;
     const keyOf = (l: SaleLineRow) =>
-      by === 'item' ? l.itemId : by === 'group' ? l.itemGroupId : by === 'brand' ? (l.brandId ?? 'none') : by === 'customer' ? l.customerId : by === 'store' ? l.storeId : by === 'cashier' ? l.cashierId : iso(l.businessDate)!;
+      styled
+        ? styled.get(l.itemId)![by as 'style' | 'attribute' | 'season']
+        : by === 'item' ? l.itemId : by === 'group' ? l.itemGroupId : by === 'brand' ? (l.brandId ?? 'none') : by === 'customer' ? l.customerId : by === 'store' ? l.storeId : by === 'cashier' ? l.cashierId : iso(l.businessDate)!;
     const groups = new Map<string, Totals & { bills: Set<string> }>();
     for (const l of lines) {
       const k = keyOf(l);
@@ -374,7 +380,31 @@ export class SalesReportsService {
       const m = await this.common.users(keys);
       return (k) => ({ code: null, name: m.get(k) ?? k });
     }
+    if (by === 'style') {
+      const m = await this.common.items(keys);
+      return (k) => ({ code: m.get(k)?.code ?? null, name: m.get(k)?.name ?? k });
+    }
+    if (by === 'season') {
+      const m = new Map((await this.prisma.season.findMany({ where: { id: { in: keys.filter((k) => k !== 'none') } }, select: { id: true, code: true, name: true } })).map((s) => [s.id, s]));
+      return (k) => ({ code: m.get(k)?.code ?? null, name: k === 'none' ? 'No season' : (m.get(k)?.name ?? k) });
+    }
+    if (by === 'attribute') return (k) => ({ code: null, name: k === 'none' ? 'Not given' : k });
     return (k) => ({ code: null, name: k });
+  }
+
+  /**
+   * Plan 11 C3, C4: for each item, the style it belongs to (itself when it has
+   * none), its value of one attribute (e.g. its size) and its season (a variant
+   * without its own season takes its style's). "none" when there is nothing.
+   */
+  private async styleKeys(itemIds: string[], attributeId?: string): Promise<Map<string, { style: string; attribute: string; season: string }>> {
+    const items = await this.prisma.item.findMany({
+      where: { id: { in: itemIds } },
+      select: { id: true, parentItemId: true, seasonId: true, parent: { select: { seasonId: true } }, variantValues: attributeId ? { where: { attributeId }, select: { value: true } } : false },
+    });
+    return new Map(
+      items.map((i) => [i.id, { style: i.parentItemId ?? i.id, attribute: (i.variantValues as { value: string }[] | undefined)?.[0]?.value ?? 'none', season: i.seasonId ?? i.parent?.seasonId ?? 'none' }]),
+    );
   }
 }
 

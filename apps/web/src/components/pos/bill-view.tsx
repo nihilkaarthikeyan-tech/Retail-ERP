@@ -67,6 +67,8 @@ export function BillView({ bill, onChanged }: { bill: PosBillDto; onChanged: () 
       render: (l) => (
         <>
           <span className="mono">{l.item.code}</span> {l.item.name} {l.isFree ? <Badge kind="ok">Free</Badge> : null}
+          {l.offerName ? <div className="muted">{l.offerName}</div> : null}
+          {l.salesStaff ? <div className="muted">Sold by {l.salesStaff.name}</div> : null}
           {l.serialNumbers.length ? <div className="muted">S/N {l.serialNumbers.join(", ")}</div> : null}
         </>
       ),
@@ -184,6 +186,38 @@ export function BillView({ bill, onChanged }: { bill: PosBillDto; onChanged: () 
                 ) : (
                   "Part of an exchange"
                 )}
+              </dd>
+            </>
+          ) : null}
+          {bill.salesStaff ? (
+            <>
+              <dt>Salesperson</dt>
+              <dd>
+                {bill.salesStaff.name} <span className="mono muted">{bill.salesStaff.code}</span>
+              </dd>
+            </>
+          ) : null}
+          {bill.offers?.length ? (
+            <>
+              <dt>Offers</dt>
+              <dd>
+                {bill.offers.map((o) => (
+                  <div key={o.id}>
+                    {o.name}: saved {rupees(o.saving)}
+                  </div>
+                ))}
+              </dd>
+            </>
+          ) : null}
+          {bill.delivery ? (
+            <>
+              <dt>Home delivery</dt>
+              <dd>
+                {bill.delivery.name ? `${bill.delivery.name}, ` : ""}
+                {bill.delivery.address}
+                {bill.delivery.phone ? `, ${bill.delivery.phone}` : ""}
+                {bill.delivery.deliverOn ? ` on ${formatDate(bill.delivery.deliverOn)}` : ""}{" "}
+                <Badge kind={bill.delivery.status === "delivered" ? "ok" : bill.delivery.status === "pending" ? "warn" : "off"}>{bill.delivery.status === "delivered" ? "Delivered" : bill.delivery.status === "pending" ? "Pending" : "Cancelled"}</Badge>
               </dd>
             </>
           ) : null}

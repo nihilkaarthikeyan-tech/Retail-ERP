@@ -14,6 +14,7 @@ import {
   type ItemQuery,
   numericValueProblem,
   type SetItemUnitsInput,
+  STYLE_FIELDS_FOR_VARIANTS,
   type UpdateBarcodeInput,
   type UpdateItemInput,
   variantCombinations,
@@ -28,6 +29,7 @@ import { CompanyService } from '../company/company.service.js';
 import type { Item, Prisma } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SeasonsService } from './seasons.service.js';
 
 export const itemInclude = {
   itemGroup: { select: { id: true, code: true, name: true } },
@@ -59,6 +61,7 @@ export class ItemsService {
     private readonly units: UnitsService,
     private readonly settings: CatalogueSettingsService,
     private readonly numbering: NumberingService,
+    private readonly seasons: SeasonsService,
   ) {}
 
   // ---- Reading ----
@@ -69,6 +72,7 @@ export class ItemsService {
     const where: Prisma.ItemWhereInput = {
       ...(q.groupId ? { itemGroupId: q.groupId } : {}),
       ...(q.brandId ? { brandId: q.brandId } : {}),
+      ...(q.seasonId ? { seasonId: q.seasonId } : {}),
       ...(q.kind === 'stock' ? { isStockItem: true, isParentStyle: false } : {}),
       ...(q.kind === 'service' ? { isStockItem: false, isParentStyle: false } : {}),
       ...(q.kind === 'style' ? { isParentStyle: true } : {}),
@@ -111,6 +115,7 @@ export class ItemsService {
       hasImage: item.imageMimeType !== null,
       itemGroup: item.itemGroup,
       brand: item.brand,
+      seasonId: item.seasonId,
       baseUnit: item.baseUnit,
       hsnCode: item.hsnCode,
       mrp: dec(item.mrp),
@@ -158,6 +163,18 @@ export class ItemsService {
     return item;
   }
 
+  /** assertItemUsable for many items at once (plan 11 A5: counts and imports of thousands of lines). */
+  async assertItemsUsable(db: Db, itemIds: string[], purpose: 'sale' | 'purchase' | 'stock' | 'any' = 'any'): Promise<Map<string, Item>> {
+    const byId = new Map((await db.item.findMany({ where: { id: { in: [...new Set(itemIds)] } } })).map((i) => [i.id, i]));
+    for (const id of itemIds) {
+      const item = byId.get(id);
+      if (!item) throw new NotFoundException('Item not found');
+      const problem = this.usabilityProblem(item, purpose);
+      if (problem) throw new BadRequestException(`Item ${item.code} is ${problem}`);
+    }
+    return byId;
+  }
+
   /** Scan box: exact barcode, else exact item code. */
   async scan(code: string, user: CurrentUser) {
     const trimmed = code.trim();
@@ -193,6 +210,7 @@ export class ItemsService {
       throw new BadRequestException('Brand not found or switched off');
     }
     this.checkFlags(input);
+    if (input.seasonId) await this.seasons.assertUsable(this.prisma, input.seasonId);
     const isParentStyle = (input.variantAttributeIds?.length ?? 0) > 0;
     if (isParentStyle) {
       const attrs = await this.prisma.variantAttribute.findMany({ where: { id: { in: input.variantAttributeIds }, active: true } });
@@ -213,6 +231,7 @@ export class ItemsService {
           description: input.description ?? null,
           itemGroupId: group.id,
           brandId: input.brandId ?? null,
+          seasonId: input.seasonId ?? null,
           baseUnitId: baseUnit.id,
           hsnCode: input.hsnCode ?? group.hsnCode ?? null,
           mrp: input.mrp != null ? new Decimal(input.mrp) : null,
@@ -274,9 +293,21 @@ export class ItemsService {
     if (input.brandId && !(await this.prisma.brand.findFirst({ where: { id: input.brandId, active: true } }))) {
       throw new BadRequestException('Brand not found or switched off');
     }
+    if (input.seasonId && input.seasonId !== before.seasonId) await this.seasons.assertUsable(this.prisma, input.seasonId);
+    if (input.applyToVariants && !before.isParentStyle) throw new BadRequestException(`${before.code} is not a style with sizes and colours`);
     const baseUnitChanged = !!input.baseUnitId && input.baseUnitId !== before.baseUnitId;
+    // Plan 11 A1: once stock has moved, these would change the meaning of every past quantity.
+    const changed = [
+      baseUnitChanged && 'basic unit',
+      input.trackBatches !== undefined && input.trackBatches !== before.trackBatches && 'batch tracking',
+      input.trackSerials !== undefined && input.trackSerials !== before.trackSerials && 'serial number tracking',
+      input.isStockItem !== undefined && input.isStockItem !== before.isStockItem && 'stock item or service',
+    ].filter((c): c is string => !!c);
+    if (changed.length && (await this.prisma.stockLedgerEntry.count({ where: { itemId: id }, take: 1 }))) {
+      throw new BadRequestException(`${before.code} already has stock movements, so its ${changed.join(', ')} cannot change. Create a new item instead.`);
+    }
     if (baseUnitChanged) {
-      // Allowed only while the item has never had stock (checked by module 4); the unit list is cleared.
+      // Allowed only while the item has never had stock (checked above); the unit list is cleared.
       const unit = await this.units.get(this.prisma, input.baseUnitId!);
       if (!unit.active) throw new BadRequestException(`Unit ${unit.code} is switched off`);
       const pricedInOtherUnits = await this.prisma.price.count({ where: { itemId: id, unitId: { not: input.baseUnitId } } });
@@ -290,6 +321,7 @@ export class ItemsService {
           description: input.description,
           itemGroupId: input.itemGroupId,
           brandId: input.brandId,
+          seasonId: input.seasonId,
           baseUnitId: input.baseUnitId,
           hsnCode: input.hsnCode,
           mrp: input.mrp === undefined ? undefined : input.mrp === null ? null : new Decimal(input.mrp),
@@ -310,9 +342,40 @@ export class ItemsService {
         include: itemInclude,
       });
       await this.audit.recordUpdate(tx, actor, 'item', id, summarise(before), summarise(after));
+      if (input.applyToVariants) {
+        const fields = STYLE_FIELDS_FOR_VARIANTS.filter((f) => input[f] !== undefined);
+        await this.copyToVariants(tx, after, fields, actor);
+      }
       return after;
     });
     return this.toDto(updated, user);
+  }
+
+  /** Plan 11 B2: copies the style's MRP, HSN, brand, group, maximum discount, description and season to all its variants. */
+  async applyToVariants(id: string, actor: Actor) {
+    const style = await this.getRow(this.prisma, id);
+    if (!style.isParentStyle) throw new BadRequestException(`${style.code} is not a style with sizes and colours`);
+    const changed = await this.prisma.$transaction((tx) => this.copyToVariants(tx, style, [...STYLE_FIELDS_FOR_VARIANTS], actor));
+    return { variants: style._count.variants, changed };
+  }
+
+  /**
+   * Copies the given style fields to every variant, in the style's transaction.
+   * Codes, barcodes, prices, units and tracking are never copied; each variant
+   * that changes gets its own history row.
+   */
+  private async copyToVariants(tx: Db, style: Item, fields: (typeof STYLE_FIELDS_FOR_VARIANTS)[number][], actor: Actor): Promise<number> {
+    if (!fields.length) return 0;
+    const data = Object.fromEntries(fields.map((f) => [f, style[f]])) as Prisma.ItemUncheckedUpdateInput;
+    const variants = await tx.item.findMany({ where: { parentItemId: style.id }, include: itemInclude, orderBy: { code: 'asc' } });
+    let changed = 0;
+    for (const v of variants) {
+      if (fields.every((f) => sameValue(v[f], style[f]))) continue;
+      const after = await tx.item.update({ where: { id: v.id }, data: { ...data, updatedById: actor.userId }, include: itemInclude });
+      await this.audit.recordUpdate(tx, actor, 'item', v.id, summarise(v), summarise(after), `Copied from style ${style.code}`);
+      changed++;
+    }
+    return changed;
   }
 
   async setUnits(id: string, input: SetItemUnitsInput, actor: Actor, user: CurrentUser) {
@@ -443,6 +506,7 @@ export class ItemsService {
             description: parent.description,
             itemGroupId: parent.itemGroupId,
             brandId: parent.brandId,
+            seasonId: parent.seasonId,
             baseUnitId: parent.baseUnitId,
             hsnCode: parent.hsnCode,
             mrp: parent.mrp,
@@ -541,6 +605,7 @@ function summarise(item: ItemRow): Record<string, unknown> {
     description: item.description,
     itemGroup: item.itemGroup.code,
     brand: item.brand?.code ?? null,
+    seasonId: item.seasonId,
     baseUnit: item.baseUnit.code,
     hsnCode: item.hsnCode,
     mrp: dec(item.mrp),
@@ -556,6 +621,13 @@ function summarise(item: ItemRow): Record<string, unknown> {
     trackSerials: item.trackSerials,
     warrantyDays: item.warrantyDays,
   };
+}
+
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === null || b === null || a === undefined || b === undefined) return (a ?? null) === (b ?? null);
+  // Decimals compare by value; everything else copied is a string.
+  if (Decimal.isDecimal(a) || Decimal.isDecimal(b)) return new Decimal((a as Decimal).toString()).eq((b as Decimal).toString());
+  return a === b;
 }
 
 function unitSummary(item: ItemRow): string[] {

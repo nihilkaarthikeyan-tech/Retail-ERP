@@ -13,6 +13,10 @@ import {
   closeShiftSchema,
   type CouponInput,
   couponSchema,
+  type DeliveryQuery,
+  deliveryQuerySchema,
+  type DeliveryUpdateInput,
+  deliveryUpdateSchema,
   type GstRateInput,
   gstRateSchema,
   type OfferInput,
@@ -33,8 +37,12 @@ import {
   reasonSchema,
   type RegisterDeviceInput,
   registerDeviceSchema,
+  type SalespersonReportQuery,
+  salespersonReportQuerySchema,
   type SetPinInput,
   setPinSchema,
+  type StoreDeliveryChargesInput,
+  storeDeliveryChargesSchema,
   type SwitchCashierInput,
   switchCashierSchema,
   type TillInput,
@@ -47,6 +55,7 @@ import {
 import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
+import { DeliveriesService } from './deliveries.service.js';
 import { OffersService } from './offers.service.js';
 import { PinService } from './pin.service.js';
 import { PosBillsService } from './pos-bills.service.js';
@@ -69,6 +78,7 @@ export class PosController {
     private readonly bills: PosBillsService,
     private readonly snapshots: PosSnapshotService,
     private readonly reports: PosReportsService,
+    private readonly deliveries: DeliveriesService,
   ) {}
 
   // ---- GST rate list ----
@@ -112,6 +122,12 @@ export class PosController {
   }
   @Get('settings') @RequireAnyPermission('pos.setup', 'pos.sell', 'pos.reports') settings() {
     return this.setup.getSettings();
+  }
+  @Get('delivery-charges') @RequireAnyPermission('pos.setup', 'deliveries.manage') deliveryCharges(@ReqUser() user: AuthUser) {
+    return this.setup.deliveryCharges(user);
+  }
+  @Patch('stores/:id/delivery-charges') @RequirePermission('pos.setup') updateDeliveryCharges(@Param('id', id()) storeId: string, @Body(zod(storeDeliveryChargesSchema)) input: StoreDeliveryChargesInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.setup.updateDeliveryCharges(storeId, input, actor, user);
   }
   @Patch('settings') @RequirePermission('pos.setup') updateSettings(@Body(zod(posSettingsSchema)) input: PosSettingsInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.setup.updateSettings(input, actor, user);
@@ -189,7 +205,21 @@ export class PosController {
     return this.bills.reprint(billId, actor, user);
   }
 
+  // ---- Home deliveries (plan 11 B4) ----
+  @Get('deliveries') @RequireAnyPermission('deliveries.manage', 'pos.reports') listDeliveries(@Query(zod(deliveryQuerySchema)) q: DeliveryQuery, @ReqUser() user: AuthUser) {
+    return this.deliveries.list(q, user);
+  }
+  @Post('deliveries/:id/delivered') @HttpCode(200) @RequirePermission('deliveries.manage') delivered(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.deliveries.markDelivered(deliveryId, input, actor, user);
+  }
+  @Post('deliveries/:id/cancel') @HttpCode(200) @RequirePermission('deliveries.manage') cancelDelivery(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.deliveries.cancel(deliveryId, input, actor, user);
+  }
+
   // ---- Reports ----
+  @Get('reports/by-salesperson') @RequirePermission('pos.reports') bySalesperson(@Query(zod(salespersonReportQuerySchema)) q: SalespersonReportQuery, @ReqUser() user: AuthUser) {
+    return this.reports.bySalesperson(q, user);
+  }
   @Get('reports/register') @RequirePermission('pos.reports') registerReport(@Query(zod(posReportQuerySchema)) q: PosReportQuery, @ReqUser() user: AuthUser) {
     return this.reports.register(q, user);
   }

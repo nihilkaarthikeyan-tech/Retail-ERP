@@ -78,6 +78,10 @@ export const PERMISSIONS = {
   'import.opening': 'Import opening stock and unpaid bills from before going live',
   'export.masters': 'Export items, prices, customers, suppliers and reorder levels for Excel',
   'golive.manage': 'Clear trial data and record the go-live date (Owner)',
+  // Plan 11
+  'sales_staff.manage': 'Add and change the salespeople of own stores',
+  'deliveries.manage': 'See and update home deliveries of own stores',
+  'expenses.post': 'Enter simple expenses (rent, salaries, power) paid in cash or from the bank, and cancel them',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -139,6 +143,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'books.lock',
     'import.opening',
     'export.masters',
+    'expenses.post',
   ],
   store_manager: [
     'company.view',
@@ -173,6 +178,9 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'cash.deposit',
     'labels.print',
     'export.masters',
+    'sales_staff.manage',
+    'deliveries.manage',
+    'expenses.post',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
   cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close'],

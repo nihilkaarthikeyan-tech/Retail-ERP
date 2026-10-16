@@ -258,6 +258,8 @@ export interface ItemDto {
   hasImage: boolean;
   itemGroup: ItemRef;
   brand: ItemRef | null;
+  /** Plan 11 C4: the season or collection. */
+  seasonId?: string | null;
   baseUnit: { id: string; code: string; name: string; allowsFractions: boolean };
   hsnCode: string | null;
   mrp: string | null;
@@ -399,6 +401,11 @@ export interface CustomerDto {
   mobile: string | null;
   email: string | null;
   notes: string | null;
+  /** Plan 11 C10: "MM-DD", with the year when known. */
+  birthday: string | null;
+  birthYear: number | null;
+  anniversary: string | null;
+  anniversaryYear: number | null;
   customerGroup: PartyRef;
   gstin: string | null;
   stateCode: string | null;

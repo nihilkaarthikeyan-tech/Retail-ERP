@@ -2,7 +2,9 @@
 // Module 3 input validation: customers, suppliers, groups, addresses,
 // contacts, payment terms and party settings.
 import { z } from 'zod';
+import { businessDate } from '../business-date.js';
 import { GSTIN_RE, PAN_RE } from '../company.js';
+import { dayMonthYearProblem, EARLIEST_CUSTOMER_YEAR, isDayMonth } from '../customer-dates.js';
 import { isIsoDate } from '../financial-year.js';
 import { isStateCode } from '../india.js';
 import { DUE_BASES } from '../payment-terms.js';
@@ -103,6 +105,32 @@ export type UpdateSupplierGroupInput = z.infer<typeof updateSupplierGroupSchema>
 
 // ---- Customers ----
 
+/** Plan 11 C10: a birthday or anniversary is a day and month ("MM-DD"); the year is optional. */
+const dayMonth = z.string().trim().refine(isDayMonth, 'Not a real day and month (MM-DD)');
+const year = z.number().int().min(EARLIEST_CUSTOMER_YEAR, `The year must be ${EARLIEST_CUSTOMER_YEAR} or later`).max(9999);
+const customerDates = {
+  birthday: dayMonth.optional().nullable(),
+  birthYear: year.optional().nullable(),
+  anniversary: dayMonth.optional().nullable(),
+  anniversaryYear: year.optional().nullable(),
+};
+type CustomerDates = { birthday?: string | null; birthYear?: number | null; anniversary?: string | null; anniversaryYear?: number | null };
+
+/**
+ * The year must go with a day and month, may not be in the future, and 29 February needs a leap year.
+ * When only the year is sent (a change), the API checks it against the saved day and month.
+ */
+function checkCustomerDates(v: CustomerDates, ctx: z.RefinementCtx) {
+  for (const [dm, yr] of [
+    ['birthday', 'birthYear'],
+    ['anniversary', 'anniversaryYear'],
+  ] as const) {
+    if (v[dm] === undefined) continue;
+    const problem = dayMonthYearProblem(v[dm], v[yr] ?? null, businessDate());
+    if (problem) ctx.addIssue({ code: 'custom', path: [problem.startsWith('Give') || problem.startsWith('Not') ? dm : yr], message: problem });
+  }
+}
+
 const customerBody = z.object({
   code: itemCode.optional(),
   name: trimmed(120),
@@ -117,24 +145,31 @@ const customerBody = z.object({
   paymentTermsId: z.string().uuid().optional().nullable(),
   creditCheckAtDelivery: z.boolean().optional(),
   linkedSupplierId: z.string().uuid().optional().nullable(),
+  ...customerDates,
   /** Decision 20: a duplicate mobile is refused unless the user confirms. */
   confirmDuplicate: z.boolean().optional(),
 });
 
-export const createCustomerSchema = customerBody.extend({
-  address: addressSchema.optional().nullable(),
-});
+export const createCustomerSchema = customerBody
+  .extend({
+    address: addressSchema.optional().nullable(),
+  })
+  .superRefine(checkCustomerDates);
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
-export const quickAddCustomerSchema = z.object({
-  name: trimmed(120),
-  mobile,
-  email: email.optional().nullable(),
-  confirmDuplicate: z.boolean().optional(),
-});
+export const quickAddCustomerSchema = z
+  .object({
+    name: trimmed(120),
+    mobile,
+    email: email.optional().nullable(),
+    /** Plan 11 C10: optional at the till's quick add. */
+    ...customerDates,
+    confirmDuplicate: z.boolean().optional(),
+  })
+  .superRefine(checkCustomerDates);
 export type QuickAddCustomerInput = z.infer<typeof quickAddCustomerSchema>;
 
-export const updateCustomerSchema = customerBody.omit({ code: true }).partial();
+export const updateCustomerSchema = customerBody.omit({ code: true }).partial().superRefine(checkCustomerDates);
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 
 /** Credit controller only (customers.credit). */

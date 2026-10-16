@@ -84,8 +84,8 @@ model GstRegistration {
 }
 
 model Store {
-  id                String  @id @default(uuid()) @db.Uuid
-  companyId         String  @db.Uuid
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @db.Uuid
   code              String
   name              String
   addressLine1      String?
@@ -93,10 +93,13 @@ model Store {
   city              String?
   pincode           String?
   stateCode         String?
+  /// Plan 11 B4 (decision 47): delivery charge on a home-delivery bill; none at or above deliveryFreeAbove.
+  deliveryCharge    Decimal  @default(0) @db.Decimal(16, 2)
+  deliveryFreeAbove Decimal? @db.Decimal(16, 2)
   phone             String?
   email             String?
-  gstRegistrationId String? @db.Uuid
-  active            Boolean @default(true)
+  gstRegistrationId String?  @db.Uuid
+  active            Boolean  @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -478,6 +481,8 @@ model Item {
   imageMimeType       String?
   itemGroupId         String    @db.Uuid
   brandId             String?   @db.Uuid
+  /// Plan 11 C4: the season or collection the item belongs to.
+  seasonId            String?   @db.Uuid
   baseUnitId          String    @db.Uuid
   hsnCode             String?
   /// Per basic unit (decision 76). Pack MRPs are on ItemUnit.
@@ -532,6 +537,7 @@ model Item {
 
   @@unique([parentItemId, variantKey])
   @@index([name])
+  @@index([seasonId])
   @@index([itemGroupId])
 }
 
@@ -632,6 +638,8 @@ model Price {
   customerId  String?   @db.Uuid
   supplierId  String?   @db.Uuid
   batchId     String?   @db.Uuid
+  /// Plan 11 C5: the markdown that made this price.
+  markdownId  String?   @db.Uuid
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -808,6 +816,11 @@ model Customer {
   name                  String
   isBusiness            Boolean     @default(false)
   mobile                String?
+  /// Plan 11 C10: "MM-DD", with the year when known.
+  birthday              String?
+  birthYear             Int?
+  anniversary           String?
+  anniversaryYear       Int?
   email                 String?
   notes                 String?
   customerGroupId       String      @db.Uuid
@@ -1621,6 +1634,9 @@ model PurchaseSettings {
   companyId              String  @id @db.Uuid
   /// Decision 31: receipts without an order are allowed (with a reason) unless this is on.
   requireOrderForReceipt Boolean @default(false)
+  /// Plan 11 A8: a supplier bill for goods needs a purchase order / a goods receipt, unless the supplier's exception allows it.
+  billNeedsOrder         Boolean @default(false)
+  billNeedsReceipt       Boolean @default(false)
   overOrderPercent       Decimal @default(0) @db.Decimal(5, 2)
   overReceiptPercent     Decimal @default(0) @db.Decimal(5, 2)
   overBillingPercent     Decimal @default(0) @db.Decimal(5, 2)
@@ -1892,6 +1908,8 @@ model PosBill {
   exchangeId         String?       @db.Uuid
   customerId         String        @db.Uuid
   cashierId          String        @db.Uuid
+  /// Plan 11 C1: the salesperson for the bill (each line may name its own).
+  salesStaffId       String?       @db.Uuid
   soldAt             DateTime
   businessDate       DateTime      @db.Date
   status             PosBillStatus @default(completed)
@@ -1955,6 +1973,8 @@ model PosBillLine {
   discountAmount   Decimal  @default(0) @db.Decimal(16, 2)
   offerDiscount    Decimal  @default(0) @db.Decimal(16, 2)
   offerId          String?  @db.Uuid
+  /// Plan 11 C1: who sold this line; returns keep the original line's salesperson.
+  salesStaffId     String?  @db.Uuid
   isFree           Boolean  @default(false)
   gstRate          Decimal  @db.Decimal(5, 2)
   taxableAmount    Decimal  @db.Decimal(16, 2)
@@ -2001,6 +2021,11 @@ model Offer {
   value           Decimal?  @db.Decimal(16, 4)
   buyQuantity     Decimal?  @db.Decimal(18, 3)
   freeQuantity    Decimal?  @db.Decimal(18, 3)
+  /// Plan 11 B3: buy_get gives this item free; mix_match counts setQuantity items for setPrice, or the cheapest free.
+  freeItemId      String?   @db.Uuid
+  setQuantity     Int?
+  setPrice        Decimal?  @db.Decimal(16, 2)
+  cheapestFree    Boolean   @default(false)
   minQuantity     Decimal?  @db.Decimal(18, 3)
   minAmount       Decimal?  @db.Decimal(16, 2)
   storeIds        String[]  @db.Uuid
@@ -2049,6 +2074,8 @@ model PosSettings {
   printReceiptCopies           Int     @default(1)
   /// Plan 06 answer 1: tills bill for real only after the CA approves the rates and the Owner switches this on.
   liveAllowed                  Boolean @default(false)
+  /// Plan 11 B4: the service item the delivery charge is billed as.
+  deliveryItemId               String? @db.Uuid
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2479,9 +2506,9 @@ model SummaryEmailRun {
   recipients   String[]
   error        String?
 
-  @@index([companyId, startedAt])
   /// The scheduled email goes at most once per business day.
   @@unique([companyId, businessDate], where: raw("\"kind\" = 'scheduled'"), map: "SummaryEmailRun_once_per_day")
+  @@index([companyId, startedAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -2592,4 +2619,94 @@ model TrialClearing {
   requestedAt   DateTime  @default(now())
   requestedById String?   @db.Uuid
   finishedAt    DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Plan 11: fixes and extras for clothing and fancy stores
+// (docs/plans/11-shop-extras.md).
+// ---------------------------------------------------------------------------
+
+/// C1: floor staff credited with sales; they need no login.
+model SalesStaff {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  storeId   String  @db.Uuid
+  code      String
+  name      String
+  active    Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([storeId, code])
+  @@index([companyId])
+}
+
+/// C4: a season or collection; items carry one.
+model Season {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @db.Uuid
+  code      String
+  name      String
+  startsOn  DateTime? @db.Date
+  endsOn    DateTime? @db.Date
+  active    Boolean   @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([companyId, code])
+}
+
+/// C5: one markdown run; the dated prices it added point back to it.
+model Markdown {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  priceListId String    @db.Uuid
+  /// percent (value = % off) or price (value = new price).
+  rule        String
+  value       Decimal   @db.Decimal(16, 4)
+  startDate   DateTime  @db.Date
+  endDate     DateTime? @db.Date
+  /// How the items were chosen (season, groups, brands, items), for the history.
+  chosenBy    Json
+  itemCount   Int
+  remark      String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([companyId, startDate])
+}
+
+/// B4 (decision 46): simple home-delivery details of a till bill.
+model PosDelivery {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @db.Uuid
+  storeId       String    @db.Uuid
+  billId        String    @unique @db.Uuid
+  customerId    String?   @db.Uuid
+  name          String?
+  address       String
+  phone         String?
+  deliverOn     DateTime? @db.Date
+  /// pending, delivered or cancelled.
+  status        String    @default("pending")
+  chargeAmount  Decimal   @default(0) @db.Decimal(16, 2)
+  deliveredAt   DateTime?
+  deliveredById String?   @db.Uuid
+  remarks       String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([storeId, status])
 }

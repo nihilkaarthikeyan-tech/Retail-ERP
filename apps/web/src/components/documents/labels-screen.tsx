@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Price and barcode labels (plan 10 §1.B): choose what to print (items with
 // copies, everything on a goods receipt, or items whose price changed since a
-// date), a template, a store and a price list; see every label laid out as it
+// date, or the items of a markdown with the old and new price), a template, a store and a price list; see every label laid out as it
 // will print; then print through the browser.
 "use client";
 
@@ -18,12 +18,13 @@ import { type LabelDataDto, type LabelTemplatesDto, sheetLayout, sheetsOf } from
 import { formatDate } from "@/lib/format";
 import type { GoodsReceiptHeader, Page } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
+import type { MarkdownDto } from "@/lib/styles-seasons";
 import type { ItemDto, ItemPage, PriceListDto, ScanResult } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { LabelPageStyle, LabelSheets } from "./label-view";
 import { sizeText } from "./label-templates";
 
-type Source = "items" | "receipt" | "changed";
+type Source = "items" | "receipt" | "changed" | "markdown";
 
 interface Chosen {
   item: ItemDto;
@@ -42,6 +43,7 @@ export function LabelsScreen() {
   const allowed = hasPermission(user, "labels.print");
   const canSeeReceipts = hasPermission(user, "purchase.view");
   const startReceipt = params.get("receiptId") ?? "";
+  const startMarkdown = params.get("markdownId") ?? "";
   const today = useBusinessToday();
 
   const templates = useLoad<LabelTemplatesDto | null>(() => (allowed ? api.get<LabelTemplatesDto>("/labels/templates") : Promise.resolve(null)), [allowed]);
@@ -51,8 +53,11 @@ export function LabelsScreen() {
     [allowed, canSeeReceipts],
   );
   const { stores } = useOrderStores();
+  // Plan 11 C5: markdowns, to print "was ₹X, now ₹Y" labels.
+  const markdowns = useLoad<MarkdownDto[]>(() => (allowed ? api.get<MarkdownDto[]>("/markdowns").catch(() => []) : Promise.resolve([])), [allowed]);
 
-  const [source, setSource] = useState<Source>(startReceipt ? "receipt" : "items");
+  const [source, setSource] = useState<Source>(startMarkdown ? "markdown" : startReceipt ? "receipt" : "items");
+  const [markdownId, setMarkdownId] = useState(startMarkdown);
   const [chosen, setChosen] = useState<Chosen[]>([]);
   const [search, setSearch] = useState("");
   const [receiptId, setReceiptId] = useState(startReceipt);
@@ -117,6 +122,9 @@ export function LabelsScreen() {
     } else if (source === "receipt") {
       if (!receiptId) return setProblem("Choose a goods receipt.");
       body = { ...base, receiptId };
+    } else if (source === "markdown") {
+      if (!markdownId) return setProblem("Choose a markdown.");
+      body = { templateId: base.templateId, storeId: base.storeId, markdownId };
     } else {
       if (!sinceDate) return setProblem("Choose a date.");
       body = { ...base, priceChangedSince: sinceDate };
@@ -196,6 +204,7 @@ export function LabelsScreen() {
             <div className="check-row">
               <RadioInput id="src-items" name="label-source" label="Items I choose" checked={source === "items"} onChange={() => changed(setSource)("items")} />
               {canSeeReceipts || startReceipt ? <RadioInput id="src-receipt" name="label-source" label="Everything on a goods receipt" description="One label for each piece received" checked={source === "receipt"} onChange={() => changed(setSource)("receipt")} /> : null}
+              {startMarkdown || (markdowns.data ?? []).length ? <RadioInput id="src-markdown" name="label-source" label="A markdown" description="The old price struck through and the new price" checked={source === "markdown"} onChange={() => changed(setSource)("markdown")} /> : null}
               <RadioInput id="src-changed" name="label-source" label="Items whose price changed" description="Since a date, to re-label the shelf" checked={source === "changed"} onChange={() => changed(setSource)("changed")} />
             </div>
           </fieldset>
@@ -225,6 +234,18 @@ export function LabelsScreen() {
               {(receipts.data ?? []).map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.number} · {formatDate(r.postingDate)} · {r.supplier.name}
+                </option>
+              ))}
+            </SelectInput>
+          ) : null}
+
+          {source === "markdown" ? (
+            <SelectInput id="label-markdown" label="Markdown" value={markdownId} onChange={(e) => changed(setMarkdownId)(e.target.value)} hint="One label per item, with the price list of the markdown.">
+              <option value="">Choose…</option>
+              {startMarkdown && !(markdowns.data ?? []).some((m) => m.id === startMarkdown) ? <option value={startMarkdown}>The markdown you came from</option> : null}
+              {(markdowns.data ?? []).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.rule === "percent" ? `${m.value}% off` : `₹${m.value}`} from {formatDate(m.startDate)} · {m.itemCount} items{m.remark ? ` · ${m.remark}` : ""}
                 </option>
               ))}
             </SelectInput>

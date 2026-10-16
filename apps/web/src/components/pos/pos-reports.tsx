@@ -50,6 +50,19 @@ export interface CashierRow {
   total: string;
 }
 
+/** Plan 11 C1: sales by salesperson, net of returns. */
+export interface SalespersonRow {
+  period: string;
+  salesStaffId: string | null;
+  code: string;
+  name: string;
+  bills: number;
+  returns: number;
+  sales: string;
+  returnsAmount: string;
+  net: string;
+}
+
 export interface ShiftRow {
   id: string;
   till: string;
@@ -119,13 +132,14 @@ interface ReportColumn<T> {
   align?: "left" | "right";
 }
 
-type Tab = "register" | "payments" | "hourly" | "by-cashier" | "shifts" | "offline-check" | "sync-problems";
+type Tab = "register" | "payments" | "hourly" | "by-cashier" | "by-salesperson" | "shifts" | "offline-check" | "sync-problems";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "register", label: "Till register" },
   { id: "payments", label: "Payments by method" },
   { id: "hourly", label: "Hourly sales" },
   { id: "by-cashier", label: "Sales per cashier" },
+  { id: "by-salesperson", label: "Sales by salesperson" },
   { id: "shifts", label: "Shifts" },
   { id: "offline-check", label: "Offline bills to check" },
   { id: "sync-problems", label: "Sync problems" },
@@ -168,6 +182,17 @@ const BY_CASHIER: ReportColumn<CashierRow>[] = [
   { key: "total", header: "Net sales", align: "right", value: (r) => r.total, render: (r) => rupees(r.total) },
 ];
 
+const BY_SALESPERSON: ReportColumn<SalespersonRow>[] = [
+  { key: "period", header: "Day or month", value: (r) => r.period, render: (r) => (r.period.length === 7 ? r.period : formatDate(r.period)) },
+  { key: "name", header: "Salesperson", value: (r) => r.name },
+  { key: "code", header: "Code", value: (r) => r.code, render: (r) => <span className="mono">{r.code}</span> },
+  { key: "bills", header: "Bills", align: "right", value: (r) => r.bills },
+  { key: "returns", header: "Returns", align: "right", value: (r) => r.returns },
+  { key: "sales", header: "Sales", align: "right", value: (r) => r.sales, render: (r) => rupees(r.sales) },
+  { key: "returnsAmount", header: "Returned", align: "right", value: (r) => r.returnsAmount, render: (r) => rupees(r.returnsAmount) },
+  { key: "net", header: "Net sales", align: "right", value: (r) => r.net, render: (r) => rupees(r.net) },
+];
+
 const OFFLINE: ReportColumn<OfflineRow>[] = [
   { key: "number", header: "Bill", value: (r) => r.number, render: (r) => <Link href={`/pos/bills/${r.id}`} className="mono">{r.number}</Link> },
   { key: "soldAt", header: "Sold", value: (r) => formatDateTime(r.soldAt) },
@@ -177,13 +202,13 @@ const OFFLINE: ReportColumn<OfflineRow>[] = [
   { key: "total", header: "Total", align: "right", value: (r) => r.total, render: (r) => rupees(r.total) },
 ];
 
-/** The seven till reports. */
+/** The eight till reports. */
 export function PosReports() {
   const tills = useTills();
   const params = useSearchParams();
   // The report centre links straight to a tab (?tab=hourly).
   const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === params.get("tab"))?.id ?? "register");
-  const [filters, setFilters] = useState({ from: "", to: "", tillId: "" });
+  const [filters, setFilters] = useState({ from: "", to: "", tillId: "", groupBy: "day" });
 
   return (
     <>
@@ -208,9 +233,15 @@ export function PosReports() {
                 </option>
               ))}
             </SelectInput>
+            {tab === "by-salesperson" ? (
+              <SelectInput id="pr-group" label="By" value={filters.groupBy} onChange={(e) => setFilters({ ...filters, groupBy: e.target.value })}>
+                <option value="day">Day</option>
+                <option value="month">Month</option>
+              </SelectInput>
+            ) : null}
           </div>
         ) : null}
-        {tab === "sync-problems" ? <SyncProblems /> : <ReportBody key={tab} tab={tab} params={query(filters)} />}
+        {tab === "sync-problems" ? <SyncProblems /> : <ReportBody key={tab} tab={tab} params={query({ ...filters, groupBy: tab === "by-salesperson" ? filters.groupBy : undefined })} />}
       </div>
     </>
   );
@@ -229,6 +260,8 @@ function ReportBody({ tab, params }: { tab: Exclude<Tab, "sync-problems">; param
       return <ReportTable {...common} columns={HOURLY} rows={rows.data as HourlyRow[] | null} rowKey={(r) => String(r.hour)} empty="No sales in this period." />;
     case "by-cashier":
       return <ReportTable {...common} columns={BY_CASHIER} rows={rows.data as CashierRow[] | null} rowKey={(r) => r.cashierId} empty="No sales in this period." />;
+    case "by-salesperson":
+      return <ReportTable {...common} columns={BY_SALESPERSON} rows={rows.data as SalespersonRow[] | null} rowKey={(r) => `${r.period}-${r.salesStaffId ?? "none"}`} empty="No sales in this period." />;
     case "offline-check":
       return <ReportTable {...common} columns={OFFLINE} rows={rows.data as OfflineRow[] | null} rowKey={(r) => r.id} empty="Nothing to check." />;
     case "shifts": {

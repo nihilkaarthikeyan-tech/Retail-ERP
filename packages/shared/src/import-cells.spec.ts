@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { describe, expect, it } from 'vitest';
-import { excelSerialToIso, readDate, readNumber, readText, readYesNo } from './import-cells.js';
+import { excelSerialToIso, readDate, readDayMonth, readNumber, readText, readYesNo } from './import-cells.js';
 
 describe('reading numbers (scenario 10.6)', () => {
   it('reads Indian and international grouping, rupee signs and spreadsheet numbers', () => {
@@ -42,5 +42,23 @@ describe('reading text', () => {
     expect(readYesNo('Yes')).toEqual({ ok: true, value: true });
     expect(readYesNo('')).toEqual({ ok: true, value: false });
     expect(readYesNo('maybe')).toMatchObject({ ok: false });
+  });
+});
+
+describe('reading birthdays and anniversaries (plan 11 C10)', () => {
+  const today = '2026-10-16';
+  it('reads a full date into the year and day-month, or a day and month alone', () => {
+    for (const t of ['15-08-1990', '15/08/1990', '15 Aug 1990', '1990-08-15', '15/08/90']) expect(readDayMonth(t, today)).toEqual({ ok: true, value: '1990-08-15' });
+    for (const t of ['15-08', '15/8', '15.08', '15 Aug', '15-August']) expect(readDayMonth(t, today)).toEqual({ ok: true, value: '08-15' });
+    expect(readDayMonth('29-02', today)).toEqual({ ok: true, value: '02-29' });
+    expect(readDayMonth(33100, today)).toEqual({ ok: true, value: excelSerialToIso(33100) });
+  });
+  it('refuses what is not a real day, a future date, or a year before 1900', () => {
+    expect(readDayMonth('31-02', today)).toMatchObject({ ok: false, problem: '"31-02": not a real day and month' });
+    expect(readDayMonth('08-15', today)).toMatchObject({ ok: false });
+    expect(readDayMonth('15-08-2030', today)).toMatchObject({ ok: false, problem: '"15-08-2030": the year must be between 1900 and 2026' });
+    expect(readDayMonth('20-10-2026', today)).toMatchObject({ ok: false, problem: '"20-10-2026": the date is in the future' });
+    expect(readDayMonth('01-01-1850', today)).toMatchObject({ ok: false });
+    expect(readDayMonth('someday', today)).toMatchObject({ ok: false, problem: '"someday" is not a date; write it as 15/08/1990 or 15/08' });
   });
 });

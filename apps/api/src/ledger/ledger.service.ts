@@ -91,9 +91,16 @@ export class LedgerService {
 
     // Resolve roles to accounts and check each line.
     const resolved: { account: Account; line: LedgerLineInput }[] = [];
+    // Lines naming the same account or role and store resolve to the same account: look each up once (plan 11 A5).
+    const lookedUp = new Map<string, Account>();
     for (const l of input.lines) {
       if (D(l.debit ?? 0).isZero() && D(l.credit ?? 0).isZero()) continue;
-      const account = await this.accountFor(tx, input.companyId, l);
+      const k = [l.accountId ?? '', l.role ?? '', l.storeId ?? ''].join('|');
+      let account = lookedUp.get(k);
+      if (!account) {
+        account = await this.accountFor(tx, input.companyId, l);
+        lookedUp.set(k, account);
+      }
       resolved.push({ account, line: l });
     }
     const accounts = new Map(resolved.map((r) => [r.account.id, r.account]));
@@ -233,7 +240,9 @@ export class LedgerService {
     for (const e of pending) {
       const isNew = opts.newIds?.has(e.id) ?? false;
       const k = `${e.documentType}|${e.documentId}|${iso(e.postingDate)}|${isNew ? 'new' : 'fix'}`;
-      groups.set(k, [...(groups.get(k) ?? []), e]);
+      const group = groups.get(k);
+      if (group) group.push(e);
+      else groups.set(k, [e]);
     }
     for (const [k, group] of groups) {
       const [documentType, documentId, date, mode] = k.split('|');
@@ -286,6 +295,19 @@ export class LedgerService {
   // ---- Open items and settlement links (decision 51: balances come from the ledger) ----
 
   /** What is still open on an item (a bill, payment or credit note): its ledger amount less its links. */
+  /** What is still open on each of several items of one kind (bills on a list screen), in one go. */
+  async openAmounts(tx: Db, itemType: string, itemIds: string[]): Promise<Map<string, Decimal>> {
+    const out = new Map<string, Decimal>();
+    if (!itemIds.length) return out;
+    const sums = await tx.ledgerLine.groupBy({ by: ['itemId'], where: { itemType, itemId: { in: itemIds } }, _sum: { debit: true, credit: true } });
+    for (const r of sums) out.set(r.itemId!, D(r._sum.credit ?? 0).sub(D(r._sum.debit ?? 0)).abs());
+    const asBill = await tx.settlement.groupBy({ by: ['billId'], where: { undone: false, billType: itemType, billId: { in: itemIds } }, _sum: { amount: true } });
+    const asBy = await tx.settlement.groupBy({ by: ['byId'], where: { undone: false, byType: itemType, byId: { in: itemIds } }, _sum: { amount: true } });
+    for (const r of asBill) out.set(r.billId, (out.get(r.billId) ?? ZERO).sub(D(r._sum.amount ?? 0)));
+    for (const r of asBy) out.set(r.byId, (out.get(r.byId) ?? ZERO).sub(D(r._sum.amount ?? 0)));
+    return out;
+  }
+
   async openAmount(tx: Db, itemType: string, itemId: string): Promise<Decimal> {
     const sum = await tx.ledgerLine.aggregate({ where: { itemType, itemId }, _sum: { debit: true, credit: true } });
     const amount = D(sum._sum.credit ?? 0).sub(D(sum._sum.debit ?? 0)).abs();

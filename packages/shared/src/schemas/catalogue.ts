@@ -146,6 +146,8 @@ export const itemBodySchema = z.object({
   shelfLifeDays: z.number().int().min(0).optional().nullable(),
   trackSerials: z.boolean().optional(),
   warrantyDays: z.number().int().min(0).optional().nullable(),
+  /** Plan 11 C4: the season or collection. */
+  seasonId: z.string().uuid().optional().nullable(),
   /** Creates a style that varies by these attributes (no stock or prices on it). */
   variantAttributeIds: z.array(z.string().uuid()).optional(),
 });
@@ -158,7 +160,14 @@ export const createItemSchema = itemBodySchema.extend({
 });
 export type CreateItemInput = z.infer<typeof createItemSchema>;
 
-export const updateItemSchema = itemBodySchema.omit({ code: true, variantAttributeIds: true }).extend({ active: z.boolean() }).partial();
+export const updateItemSchema = itemBodySchema
+  .omit({ code: true, variantAttributeIds: true })
+  .extend({
+    active: z.boolean(),
+    /** Plan 11 B2: on a style, also copy the changed style fields to all its sizes and colours. */
+    applyToVariants: z.boolean(),
+  })
+  .partial();
 export type UpdateItemInput = z.infer<typeof updateItemSchema>;
 
 export const setItemUnitsSchema = z.object({ units: z.array(itemUnit) });
@@ -184,12 +193,60 @@ export const itemQuerySchema = z.object({
   search: z.string().trim().max(80).optional(),
   groupId: z.string().uuid().optional(),
   brandId: z.string().uuid().optional(),
+  seasonId: z.string().uuid().optional(),
   kind: z.enum(['stock', 'service', 'style']).optional(),
   active: z.enum(['true', 'false']).optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
 });
 export type ItemQuery = z.infer<typeof itemQuerySchema>;
+
+/** Plan 11 B2: the style fields "also change all its sizes and colours" copies (never codes, barcodes or prices). */
+export const STYLE_FIELDS_FOR_VARIANTS = ['mrp', 'hsnCode', 'brandId', 'itemGroupId', 'maxDiscountPercent', 'description', 'seasonId'] as const;
+
+// ---- Seasons (plan 11 C4) ----
+
+export const createSeasonSchema = z
+  .object({
+    code: itemCode,
+    name: trimmed(80),
+    startsOn: isoDate.optional().nullable(),
+    endsOn: isoDate.optional().nullable(),
+  })
+  .refine((s) => !s.startsOn || !s.endsOn || s.endsOn >= s.startsOn, { message: 'The season cannot end before it starts' });
+export type CreateSeasonInput = z.infer<typeof createSeasonSchema>;
+
+export const updateSeasonSchema = z
+  .object({ name: trimmed(80), startsOn: isoDate.nullable(), endsOn: isoDate.nullable(), active: z.boolean() })
+  .partial()
+  .refine((s) => !s.startsOn || !s.endsOn || s.endsOn >= s.startsOn, { message: 'The season cannot end before it starts' });
+export type UpdateSeasonInput = z.infer<typeof updateSeasonSchema>;
+
+// ---- Markdowns (plan 11 C5) ----
+
+export const MARKDOWN_RULES = ['percent', 'price'] as const;
+export type MarkdownRule = (typeof MARKDOWN_RULES)[number];
+
+export const markdownSchema = z
+  .object({
+    /** Empty = the default selling list. */
+    priceListId: z.string().uuid().optional().nullable(),
+    seasonId: z.string().uuid().optional().nullable(),
+    itemGroupIds: z.array(z.string().uuid()).max(200).optional(),
+    brandIds: z.array(z.string().uuid()).max(200).optional(),
+    /** Chosen items; a style stands for all its sizes and colours. */
+    itemIds: z.array(z.string().uuid()).max(2000).optional(),
+    rule: z.enum(MARKDOWN_RULES),
+    /** Percent off (rule "percent") or the new price per basic unit (rule "price"). */
+    value: positiveDecimalString,
+    startDate: isoDate,
+    endDate: isoDate.optional().nullable(),
+    remark: optionalText(200),
+  })
+  .refine((m) => !!m.seasonId || !!m.itemGroupIds?.length || !!m.brandIds?.length || !!m.itemIds?.length, { message: 'Choose a season, groups, brands or items' })
+  .refine((m) => m.rule !== 'percent' || Number(m.value) < 100, { message: 'The percentage off must be below 100' })
+  .refine((m) => !m.endDate || m.endDate >= m.startDate, { message: 'End date cannot be before start date' });
+export type MarkdownInput = z.infer<typeof markdownSchema>;
 
 // ---- Price lists and prices ----
 

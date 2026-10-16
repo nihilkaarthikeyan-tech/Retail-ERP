@@ -8,9 +8,12 @@
 import Link from "next/link";
 import { addDays, Decimal, hasPermission, type PermissionKey } from "shared";
 import { SelectInput } from "@/components/ui";
-import { query } from "@/lib/api";
+import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import type { SeasonDto } from "@/lib/styles-seasons";
+import type { AttributeDto } from "@/lib/types";
+import { useLoad } from "@/lib/use-load";
 import type {
   DailySalesDto,
   DailySalesRow,
@@ -51,7 +54,7 @@ const COST: PermissionKey[] = ["cost_price.view", "stock.cost.view"];
 const monthStart = (today: string) => `${today.slice(0, 7)}-01`;
 const NET_NOTE = "Net sales are before GST (taxable value). Returns count on the day they happen; cancelled bills are left out.";
 
-const GROUP_LABELS: Record<GroupBy, string> = { item: "Item", group: "Item group", brand: "Brand", customer: "Customer", store: "Store", cashier: "Cashier" };
+const GROUP_LABELS: Record<GroupBy, string> = { item: "Item", group: "Item group", brand: "Brand", customer: "Customer", store: "Store", cashier: "Cashier", style: "Style", season: "Season", attribute: "Size or colour" };
 
 /** The sales figures every grouped sales report shares; cost columns only when the API sent them. */
 function salesFigures<T extends SalesTotals>(totals: SalesTotals, opts: { bills?: boolean; returns?: boolean } = {}): ReportColumn<T>[] {
@@ -75,8 +78,8 @@ function salesFigures<T extends SalesTotals>(totals: SalesTotals, opts: { bills?
   ];
 }
 
-function nameColumns(by: GroupBy): ReportColumn<GroupedRow>[] {
-  return [{ ...col.text<GroupedRow>("code", "Code", (r) => r.code, (r) => (r.code ? <span className="mono">{r.code}</span> : "—")), nowrap: true }, { ...col.text<GroupedRow>("name", GROUP_LABELS[by], (r) => r.name), wide: true }];
+function nameColumns(by: GroupBy, label?: string): ReportColumn<GroupedRow>[] {
+  return [{ ...col.text<GroupedRow>("code", "Code", (r) => r.code, (r) => (r.code ? <span className="mono">{r.code}</span> : "—")), nowrap: true }, { ...col.text<GroupedRow>("name", label ?? GROUP_LABELS[by], (r) => r.name), wide: true }];
 }
 
 function GroupBySelect({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: GroupBy[] }) {
@@ -135,17 +138,30 @@ export function DailySalesReport() {
 // ---- Item-wise sales ----
 
 export function ItemSalesReport() {
-  const f = useUrlFilters({ from: monthStart, to: (t) => t, storeId: "", groupBy: "item", itemGroupId: "", brandId: "" });
+  const f = useUrlFilters({ from: monthStart, to: (t) => t, storeId: "", groupBy: "item", attributeId: "", itemGroupId: "", brandId: "", seasonId: "" });
   const v = f.values;
-  const by = (v.groupBy in GROUP_LABELS ? v.groupBy : "item") as GroupBy;
+  const { user } = useAuth();
+  const canSeeCatalogue = hasPermission(user, "catalogue.view");
+  // Plan 11 C3, C4: by style, by each size or colour attribute, by season, and only one season.
+  const attributes = useLoad<AttributeDto[]>(() => (canSeeCatalogue ? api.get<AttributeDto[]>("/catalogue/attributes").catch(() => []) : Promise.resolve([])), [canSeeCatalogue]);
+  const seasons = useLoad<SeasonDto[]>(() => (canSeeCatalogue ? api.get<SeasonDto[]>("/seasons").catch(() => []) : Promise.resolve([])), [canSeeCatalogue]);
+  const attribute = (attributes.data ?? []).find((a) => a.id === v.attributeId) ?? null;
+  const by = (v.groupBy in GROUP_LABELS && (v.groupBy !== "attribute" || v.attributeId) ? v.groupBy : "item") as GroupBy;
+  const byLabel = by === "attribute" ? (attribute?.name ?? GROUP_LABELS.attribute) : GROUP_LABELS[by];
   const stores = useReportStores();
   const groups = useItemGroupOptions();
   const brands = useBrandOptions();
+  const seasonOptions = (seasons.data ?? []).map((s) => ({ id: s.id, label: s.name }));
   const access = useAllowed(SALES);
-  const r = useReport<GroupedSalesDto>(`/reports/item-sales${query({ from: v.from, to: v.to, storeId: v.storeId, groupBy: by, itemGroupId: v.itemGroupId, brandId: v.brandId })}`, f.ready && access.allowed);
-  const columns = (d: GroupedSalesDto): ReportColumn<GroupedRow>[] => [...nameColumns(d.groupBy), ...salesFigures<GroupedRow>(d.totals)];
+  const r = useReport<GroupedSalesDto>(
+    `/reports/item-sales${query({ from: v.from, to: v.to, storeId: v.storeId, groupBy: by, attributeId: by === "attribute" ? v.attributeId : "", itemGroupId: v.itemGroupId, brandId: v.brandId, seasonId: v.seasonId })}`,
+    f.ready && access.allowed,
+  );
+  const columns = (d: GroupedSalesDto): ReportColumn<GroupedRow>[] => [...nameColumns(d.groupBy, byLabel), ...salesFigures<GroupedRow>(d.totals)];
   const group = optionLabel(groups, v.itemGroupId, "All item groups");
   const brand = optionLabel(brands, v.brandId, "All brands");
+  const season = optionLabel(seasonOptions, v.seasonId, "All seasons");
+  const showByValue = by === "attribute" ? `attribute:${v.attributeId}` : by;
   return (
     <ReportPage
       id="item-sales"
@@ -158,14 +174,39 @@ export function ItemSalesReport() {
         <>
           <DateFilter id="rf-from" label="From" value={v.from} onChange={(x) => f.set({ from: x })} />
           <DateFilter id="rf-to" label="To" value={v.to} onChange={(x) => f.set({ to: x })} />
-          <GroupBySelect value={by} onChange={(x) => f.set({ groupBy: x })} options={["item", "group", "brand", "customer", "store", "cashier"]} />
+          <SelectInput
+            id="rf-group-by"
+            label="Show by"
+            value={showByValue}
+            onChange={(e) => {
+              const x = e.target.value;
+              f.set(x.startsWith("attribute:") ? { groupBy: "attribute", attributeId: x.slice("attribute:".length) } : { groupBy: x, attributeId: "" });
+            }}
+          >
+            {(["item", "style"] as GroupBy[]).map((o) => (
+              <option key={o} value={o}>
+                {GROUP_LABELS[o]}
+              </option>
+            ))}
+            {(attributes.data ?? []).map((a) => (
+              <option key={a.id} value={`attribute:${a.id}`}>
+                {a.name}
+              </option>
+            ))}
+            {(["season", "group", "brand", "customer", "store", "cashier"] as GroupBy[]).map((o) => (
+              <option key={o} value={o}>
+                {GROUP_LABELS[o]}
+              </option>
+            ))}
+          </SelectInput>
           <StoreFilter stores={stores} value={v.storeId} onChange={(x) => f.set({ storeId: x })} />
           <OptionFilter id="rf-group" label="Item group" all="All item groups" options={groups} value={v.itemGroupId} onChange={(x) => f.set({ itemGroupId: x })} />
           <OptionFilter id="rf-brand" label="Brand" all="All brands" options={brands} value={v.brandId} onChange={(x) => f.set({ brandId: x })} />
+          <OptionFilter id="rf-season" label="Season" all="All seasons" options={seasonOptions} value={v.seasonId} onChange={(x) => f.set({ seasonId: x })} />
         </>
       }
-      summary={`${periodText(v.from, v.to)} · by ${GROUP_LABELS[by].toLowerCase()} · ${storeName(stores, v.storeId)} · ${group} · ${brand}`}
-      logFilters={{ from: v.from, to: v.to, showBy: GROUP_LABELS[by], store: storeName(stores, v.storeId), itemGroup: group, brand }}
+      summary={`${periodText(v.from, v.to)} · by ${byLabel.toLowerCase()} · ${storeName(stores, v.storeId)} · ${group} · ${brand} · ${season}`}
+      logFilters={{ from: v.from, to: v.to, showBy: byLabel, store: storeName(stores, v.storeId), itemGroup: group, brand, season }}
       csv={(d) => tableCsv(columns(d), d.rows, true)}
       fileName={csvName("item-sales", v.from, "to", v.to)}
     >

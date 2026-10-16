@@ -63,6 +63,8 @@ export class StockEngine {
    */
   async post(tx: Db, movements: Movement[], opts: PostOptions): Promise<StockLedgerEntry[]> {
     if (movements.length === 0) return [];
+    const fast = await this.postNewest(tx, movements, opts);
+    if (fast) return fast;
     await this.lockPositions(tx, movements);
     await tx.$executeRaw`SELECT set_config('app.stock_recost', 'on', true)`;
 
@@ -109,6 +111,133 @@ export class StockEngine {
     await this.ledger.syncStock(tx, [...new Set([...newIds, ...touched])], { actorId: opts.actorId, newIds, remark: opts.ledgerRemark });
     return created;
   }
+
+  /**
+   * Plan 11 A5: the common case in bulk. When every movement is the newest for its
+   * item and location (opening stock, counts and sales done now), nothing later needs
+   * replaying, so the entries are worked out in memory from the latest state and
+   * written in a few statements instead of about ten round trips each. Gives the same
+   * result as the step-by-step path; returns null when it does not apply.
+   */
+  private async postNewest(tx: Db, movements: Movement[], opts: PostOptions): Promise<StockLedgerEntry[] | null> {
+    const keys = new Set(movements.map((m) => `${m.itemId}|${m.locationId}`));
+    const simple = movements.every((m) => m.kind !== 'reverse' && !m.batchId && m.costSourceId == null && m.costSourceIndex === undefined && m.reversesId === undefined);
+    if (!simple || keys.size !== movements.length) return null;
+
+    const items = movements.map((m) => m.itemId);
+    const locations = movements.map((m) => m.locationId);
+    // Lock every position first (adding missing ones), in one fixed order so two transactions never wait on each other in a circle.
+    await tx.$executeRawUnsafe(
+      `INSERT INTO "StockPosition" ("itemId", "locationId", "companyId", "updatedAt")
+       SELECT i, l, c, now() FROM unnest($1::uuid[], $2::uuid[], $3::uuid[]) AS t(i, l, c)
+       ON CONFLICT ("itemId", "locationId") DO NOTHING`,
+      items,
+      locations,
+      movements.map((m) => m.companyId),
+    );
+    await tx.$queryRawUnsafe(
+      `SELECT 1 FROM "StockPosition" p JOIN unnest($1::uuid[], $2::uuid[]) AS t(i, l) ON p."itemId" = t.i AND p."locationId" = t.l
+       ORDER BY p."itemId", p."locationId" FOR UPDATE OF p`,
+      items,
+      locations,
+    );
+    const latest = await tx.$queryRawUnsafe<{ itemId: string; locationId: string; postingAt: Date; quantityAfter: DbDecimal; unitCostAfter: DbDecimal; valueAfter: DbDecimal }[]>(
+      `SELECT DISTINCT ON (e."itemId", e."locationId") e."itemId", e."locationId", e."postingAt", e."quantityAfter", e."unitCostAfter", e."valueAfter"
+       FROM "StockLedgerEntry" e JOIN unnest($1::uuid[], $2::uuid[]) AS t(i, l) ON e."itemId" = t.i AND e."locationId" = t.l
+       ORDER BY e."itemId", e."locationId", e."postingAt" DESC, e."id" DESC`,
+      items,
+      locations,
+    );
+    const before = new Map(latest.map((r) => [`${r.itemId}|${r.locationId}`, r]));
+    if (movements.some((m) => (before.get(`${m.itemId}|${m.locationId}`)?.postingAt ?? m.postingAt) > m.postingAt)) return null;
+
+    const rows: Prisma.StockLedgerEntryCreateManyInput[] = [];
+    const positions: { itemId: string; locationId: string; quantity: string; unitCost: string; value: string; at: Date }[] = [];
+    for (const m of movements) {
+      const prev = before.get(`${m.itemId}|${m.locationId}`);
+      const state: StockState = prev ? { quantity: D(prev.quantityAfter), unitCost: D(prev.unitCostAfter), value: D(prev.valueAfter) } : EMPTY_STATE;
+      // The fallback cost is only used when stock leaves, or is counted without a cost, at no known cost.
+      const needsCost = m.kind === 'out' || (m.kind === 'set' && m.targetCost == null);
+      const fallback = state.unitCost.gt(0) || !needsCost ? null : await this.fallbackCost(tx, m.itemId, m.locationId);
+      const intent: StockIntent =
+        m.kind === 'in'
+          ? { kind: 'in', quantity: m.quantity ?? '0', incomingCost: m.incomingCost ?? '0' }
+          : m.kind === 'out'
+            ? { kind: 'out', quantity: m.quantity ?? '0', fixedCost: null }
+            : { kind: 'set', targetQuantity: m.quantity ?? '0', targetCost: m.targetCost ?? null };
+      let applied;
+      try {
+        applied = apply(state, intent, fallback);
+      } catch (err) {
+        if (err instanceof Error && err.message === 'MISSING_COST') {
+          throw new BadRequestException(`No cost is known for ${opts.describe?.(m.itemId, m.locationId) ?? 'this item'}; record a stock-in with a cost first`);
+        }
+        throw new BadRequestException(err instanceof Error ? err.message : String(err));
+      }
+      // Decision 32: in the back office a movement may not take stock below zero.
+      const after = applied.after.quantity;
+      if (!opts.allowNegative && after.lt(QUANTITY_TOLERANCE.neg()) && after.lt(state.quantity.sub(QUANTITY_TOLERANCE))) {
+        throw new BadRequestException(
+          `Not enough stock of ${opts.describe?.(m.itemId, m.locationId) ?? 'this item'}: ${Decimal.max(new Decimal(0), state.quantity).toString()} available, ${after.neg().toString()} more needed`,
+        );
+      }
+      rows.push({
+        companyId: m.companyId,
+        itemId: m.itemId,
+        locationId: m.locationId,
+        batchId: null,
+        documentType: m.documentType ?? 'stock_document',
+        documentId: m.documentId,
+        documentLineId: m.documentLineId,
+        postingDate: new Date(`${m.postingDate}T00:00:00Z`),
+        postingAt: m.postingAt,
+        kind: m.kind,
+        intentQuantity: m.quantity ?? '0',
+        incomingCost: m.incomingCost ?? null,
+        targetCost: m.targetCost ?? null,
+        costSourceId: null,
+        reversesId: null,
+        quantityChange: applied.quantityChange.toString(),
+        valueChange: applied.valueChange.toFixed(2),
+        unitCost: applied.unitCost.toFixed(4),
+        quantityAfter: after.toString(),
+        unitCostAfter: applied.after.unitCost.toFixed(4),
+        valueAfter: applied.after.value.toFixed(2),
+        wentNegative: after.lt(QUANTITY_TOLERANCE.neg()),
+        accountRole: m.accountRole,
+        isCancellation: m.isCancellation ?? false,
+        ledgerHeld: m.ledger === 'held',
+        createdById: opts.actorId,
+      });
+      positions.push({ itemId: m.itemId, locationId: m.locationId, quantity: after.toString(), unitCost: applied.after.unitCost.toFixed(4), value: applied.after.value.toFixed(2), at: m.postingAt });
+    }
+
+    const created: StockLedgerEntry[] = [];
+    for (let i = 0; i < rows.length; i += 1000) created.push(...(await tx.stockLedgerEntry.createManyAndReturn({ data: rows.slice(i, i + 1000) })));
+    // Back in the movements' order, matched on document line, item and location (unique here).
+    const byKey = new Map(created.map((e) => [`${e.documentLineId}|${e.itemId}|${e.locationId}`, e]));
+    const ordered = movements.map((m) => byKey.get(`${m.documentLineId}|${m.itemId}|${m.locationId}`));
+    if (byKey.size !== movements.length || ordered.some((e) => !e)) throw new Error('Stock entries could not be matched to their movements');
+    for (let i = 0; i < positions.length; i += 5000) {
+      const chunk = positions.slice(i, i + 5000);
+      await tx.$executeRawUnsafe(
+        `UPDATE "StockPosition" p SET "quantity" = t.q::numeric, "unitCost" = t.c::numeric, "value" = t.v::numeric, "lastPostingAt" = t.at::timestamp(3), "updatedAt" = now()
+         FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[]) AS t(i, l, q, c, v, at)
+         WHERE p."itemId" = t.i AND p."locationId" = t.l`,
+        chunk.map((p) => p.itemId),
+        chunk.map((p) => p.locationId),
+        chunk.map((p) => p.quantity),
+        chunk.map((p) => p.unitCost),
+        chunk.map((p) => p.value),
+        chunk.map((p) => p.at.toISOString().replace('Z', '')),
+      );
+    }
+    const result = ordered as StockLedgerEntry[];
+    const newIds = new Set(result.map((e) => e.id));
+    await this.ledger.syncStock(tx, [...newIds], { actorId: opts.actorId, newIds, remark: opts.ledgerRemark });
+    return result;
+  }
+
 
   /** Cancels a document: one reversing entry per original entry, at the original's time. */
   async reverseDocument(tx: Db, documentId: string, cancelDocumentLine: (e: StockLedgerEntry) => string, opts: PostOptions & { ledger?: 'auto' | 'held' }): Promise<StockLedgerEntry[]> {

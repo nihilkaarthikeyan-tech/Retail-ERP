@@ -9,15 +9,17 @@ import { ItemImage } from "@/components/items/item-image";
 import { ItemPrices } from "@/components/items/item-prices";
 import { ItemUnitsBarcodes } from "@/components/items/item-units-barcodes";
 import { ItemVariants } from "@/components/items/item-variants";
+import { StyleStockGrid } from "@/components/items/style-stock-grid";
 import { AuditTable } from "@/components/audit-table";
 import { ActiveBadge, Alert, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { itemKindLabel } from "@/lib/catalogue";
+import type { SeasonDto } from "@/lib/styles-seasons";
 import type { AttributeDto, BrandDto, CatalogueSettingsDto, ItemDto, ItemGroupNode, UnitDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
-type Tab = "details" | "units" | "variants" | "prices" | "history";
+type Tab = "details" | "units" | "variants" | "stock" | "prices" | "history";
 
 export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -26,6 +28,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
   const canSeePrices = hasPermission(user, "prices.view");
   const canManagePrices = hasPermission(user, "prices.manage");
   const canSeeHistory = hasPermission(user, "audit.view");
+  const canSeeStock = hasPermission(user, "stock.view");
 
   const item = useLoad(() => api.get<ItemDto>(`/items/${id}`), [id]);
   const groups = useLoad(() => api.get<ItemGroupNode[]>("/catalogue/item-groups"));
@@ -33,6 +36,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
   const units = useLoad(() => api.get<UnitDto[]>("/catalogue/units"));
   const attributes = useLoad(() => api.get<AttributeDto[]>("/catalogue/attributes"));
   const settings = useLoad(() => api.get<CatalogueSettingsDto>("/catalogue/settings"));
+  const seasons = useLoad(() => api.get<SeasonDto[]>("/seasons"));
   const [tab, setTab] = useState<Tab>("details");
   const [saved, setSaved] = useState(false);
 
@@ -59,6 +63,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
     { key: "details", label: "Details" },
     // Units, barcodes and prices belong to variants, never to the style itself.
     ...(it.isParentStyle ? [{ key: "variants" as const, label: `Variants (${it.variantCount})` }] : [{ key: "units" as const, label: "Units & barcodes" }]),
+    ...(it.isParentStyle && canSeeStock ? [{ key: "stock" as const, label: "Stock by size and colour" }] : []),
     ...(canSeePrices && !it.isParentStyle ? [{ key: "prices" as const, label: "Prices" }] : []),
     ...(canSeeHistory ? [{ key: "history" as const, label: "History" }] : []),
   ];
@@ -103,6 +108,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
                 units={units.data}
                 attributes={attributes.data}
                 settings={settings.data}
+                seasons={seasons.data ?? []}
                 readOnly={!canManage}
                 onSaved={(s) => {
                   item.setData(s);
@@ -133,6 +139,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
         ) : null}
         {tab === "units" ? <ItemUnitsBarcodes key={it.id + it.updatedAt} item={it} units={units.data} readOnly={!canManage} onChanged={(s) => item.setData(s)} /> : null}
         {tab === "variants" ? <ItemVariants item={it} attributes={attributes.data} readOnly={!canManage} onChanged={() => item.reload()} /> : null}
+        {tab === "stock" ? <StyleStockGrid styleId={it.id} /> : null}
         {tab === "prices" ? <ItemPrices item={it} canManage={canManagePrices} /> : null}
         {tab === "history" ? (
           <>

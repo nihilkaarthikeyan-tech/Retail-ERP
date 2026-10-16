@@ -8,6 +8,7 @@ import { PartyBalance } from "@/components/accounts/party-balance";
 import { AuditTable } from "@/components/audit-table";
 import { CustomerCredit } from "@/components/parties/customer-credit";
 import { CustomerForm } from "@/components/parties/customer-form";
+import { CustomerPurchases } from "@/components/parties/customer-purchases";
 import { PartyAddresses } from "@/components/parties/party-addresses";
 import { PartyContacts } from "@/components/parties/party-contacts";
 import { PartyStatusBadge } from "@/components/parties/status-badge";
@@ -17,7 +18,7 @@ import { useAuth } from "@/lib/auth-context";
 import type { CustomerDetailDto, CustomerDto, PartyGroupNode, PaymentTermsDto, PriceListDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
-type Tab = "details" | "addresses" | "contacts" | "credit" | "history";
+type Tab = "details" | "addresses" | "contacts" | "credit" | "purchases" | "history";
 
 export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -61,6 +62,7 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
     { key: "addresses", label: `Addresses (${c.addresses.filter((a) => a.active).length})` },
     { key: "contacts", label: `Contacts (${c.contacts.filter((x) => x.active).length})` },
     { key: "credit", label: "Credit" },
+    { key: "purchases", label: "Purchases" },
     ...(canSeeHistory ? [{ key: "history" as const, label: "History" }] : []),
   ];
 
@@ -117,6 +119,7 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
         {tab === "addresses" ? <PartyAddresses basePath={`/customers/${c.id}`} addresses={c.addresses} readOnly={!canManage || c.isWalkIn} withGstin={!c.isWalkIn} onChanged={() => customer.reload()} /> : null}
         {tab === "contacts" ? <PartyContacts basePath={`/customers/${c.id}`} contacts={c.contacts} readOnly={!canManage} onChanged={() => customer.reload()} /> : null}
         {tab === "credit" ? <CustomerCredit key={c.id + c.updatedAt} customer={c} canEdit={canCredit} onSaved={merge} /> : null}
+        {tab === "purchases" ? <CustomerPurchases customerId={c.id} /> : null}
         {tab === "history" ? (
           <>
             <p className="muted">Changes to this customer, including credit limits and status with their reasons. Addresses and contacts are listed under Change history as their own records.</p>

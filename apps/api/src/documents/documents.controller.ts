@@ -115,8 +115,8 @@ export class DocumentsController {
   @Get('imports/kinds') @RequireAnyPermission('import.masters', 'import.opening') importKinds(@ReqUser() user: AuthUser) {
     return this.imports.kindsFor(user);
   }
-  @Get('imports/templates/:kind') @RequireAnyPermission('import.masters', 'import.opening') template(@Param('kind') kind: string, @ReqUser() user: AuthUser, @Res() res: Response) {
-    sendFile(res, this.imports.template(kind, user));
+  @Get('imports/templates/:kind') @RequireAnyPermission('import.masters', 'import.opening') async template(@Param('kind') kind: string, @ReqUser() user: AuthUser, @Res() res: Response) {
+    sendFile(res, await this.imports.template(kind, user));
   }
   @Post('imports/preview') @HttpCode(200) @RequireAnyPermission('import.masters', 'import.opening') @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD } })) preview(
     @UploadedFile() file: UploadedFileLike | undefined,

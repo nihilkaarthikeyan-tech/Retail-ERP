@@ -43,6 +43,12 @@ export async function ensurePosDefaults(db: Db, companyId: string): Promise<PosS
 
 export type TillWithRefs = Till & { store: { id: string; code: string; name: string; stateCode: string | null; companyId: string }; paymentMethods: { paymentMethodId: string; isDefault: boolean; paymentMethod: { id: string; code: string; name: string; kind: string; allowRefund: boolean; needsReference: boolean; active: boolean } }[] };
 
+/** A manager's approval checked while a bill is built, marked used when the bill is saved. */
+export interface PendingApproval {
+  id: string;
+  usedFor: string;
+}
+
 @Injectable()
 export class PosCommon {
   constructor(
@@ -97,14 +103,28 @@ export class PosCommon {
   }
 
   /** Uses an approval once; returns the manager who gave it. */
-  async useApproval(db: Db, token: string | undefined, tillId: string, actions: ApprovalAction[], usedFor: string): Promise<string> {
+  /**
+   * Checks a manager's approval and marks it used. With `pending`, it is only checked
+   * and noted; the caller marks it used with markApprovalsUsed inside the transaction that
+   * saves the bill, so an approval is never used up by a bill that is then refused.
+   */
+  async useApproval(db: Db, token: string | undefined, tillId: string, actions: ApprovalAction[], usedFor: string, pending?: PendingApproval[]): Promise<string> {
     if (!token) throw new ForbiddenException('A manager must approve this');
     const a = await db.posApproval.findUnique({ where: { tokenHash: sha256(token) } });
     if (!a || a.tillId !== tillId || !actions.includes(a.action as ApprovalAction)) throw new ForbiddenException('The manager approval is not valid for this');
-    if (a.usedAt) throw new ForbiddenException('The manager approval was already used');
+    if (a.usedAt || pending?.some((p) => p.id === a.id)) throw new ForbiddenException('The manager approval was already used');
     if (a.expiresAt < new Date()) throw new ForbiddenException('The manager approval has expired; ask again');
-    await db.posApproval.update({ where: { id: a.id }, data: { usedAt: new Date(), usedFor } });
+    if (pending) pending.push({ id: a.id, usedFor });
+    else await db.posApproval.update({ where: { id: a.id }, data: { usedAt: new Date(), usedFor } });
     return a.managerId;
+  }
+
+  /** Marks approvals noted by useApproval(…, pending) as used; refuses if another bill used one first. */
+  async markApprovalsUsed(tx: Db, pending: PendingApproval[]): Promise<void> {
+    for (const p of pending) {
+      const r = await tx.posApproval.updateMany({ where: { id: p.id, usedAt: null }, data: { usedAt: new Date(), usedFor: p.usedFor } });
+      if (r.count !== 1) throw new ForbiddenException('The manager approval was already used');
+    }
   }
 
   async createCashierToken(db: Db, tillId: string, userId: string): Promise<string> {

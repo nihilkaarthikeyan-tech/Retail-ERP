@@ -9,14 +9,15 @@ import {
   type PaymentMethodInput,
   type PosSettingsInput,
   type RegisterDeviceInput,
+  type StoreDeliveryChargesInput,
   type TillInput,
   type UpdatePaymentMethodInput,
   type UpdateTillInput,
 } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
-import { assertStoreAccess } from '../auth/store-access.js';
+import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
-import type { GstRate, PaymentMethod } from '../generated/prisma/client.js';
+import type { GstRate, PaymentMethod, Store } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ensurePosDefaults, fromIso, iso, newToken, PosCommon, sha256 } from './pos-common.service.js';
 
@@ -227,11 +228,38 @@ export class PosSetupService {
         throw new BadRequestException('No GST rate has been approved yet; the accountant approves the rates first');
       }
     }
+    // Plan 11 B4: the delivery charge is billed as a sellable service item (no stock).
+    if (input.deliveryItemId) {
+      const item = await this.prisma.item.findUnique({ where: { id: input.deliveryItemId } });
+      if (!item || !item.active || !item.canSell) throw new BadRequestException('The delivery charge item must be an item in use that can be sold');
+      if (item.isStockItem) throw new BadRequestException(`${item.code} is a stock item; the delivery charge needs a service item`);
+      if (!item.hsnCode) throw new BadRequestException(`${item.code} needs an HSN (SAC) code so its GST rate is known`);
+    }
     return this.prisma.$transaction(async (tx) => {
       const before = await ensurePosDefaults(tx, company.id);
       const after = await tx.posSettings.update({ where: { companyId: company.id }, data: { ...input, updatedById: actor.userId } });
       await this.audit.recordUpdate(tx, actor, 'pos_settings', company.id, settingsDto(before), settingsDto(after));
       return settingsDto(after);
+    });
+  }
+
+  // ---- Delivery charges per store (plan 11 B4, decision 47) ----
+
+  async deliveryCharges(user: CurrentUser) {
+    const company = await this.common.currentCompany();
+    const own = allowedStoreIds(user);
+    const stores = await this.prisma.store.findMany({ where: { companyId: company.id, active: true, ...(own ? { id: { in: own } } : {}) }, orderBy: { code: 'asc' } });
+    return stores.map(chargesDto);
+  }
+
+  async updateDeliveryCharges(storeId: string, input: StoreDeliveryChargesInput, actor: Actor, user: CurrentUser) {
+    assertStoreAccess(user, storeId);
+    const before = await this.prisma.store.findUnique({ where: { id: storeId } });
+    if (!before) throw new NotFoundException('Store not found');
+    return this.prisma.$transaction(async (tx) => {
+      const after = await tx.store.update({ where: { id: storeId }, data: { deliveryCharge: input.deliveryCharge, deliveryFreeAbove: input.deliveryFreeAbove ?? null, updatedById: actor.userId } });
+      await this.audit.recordUpdate(tx, actor, 'store', storeId, chargesDto(before), chargesDto(after));
+      return chargesDto(after);
     });
   }
 
@@ -283,6 +311,10 @@ function tillDto(t: {
   };
 }
 
-function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean }) {
-  return { cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2), printReceiptCopies: s.printReceiptCopies, liveAllowed: s.liveAllowed };
+function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean; deliveryItemId: string | null }) {
+  return { cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2), printReceiptCopies: s.printReceiptCopies, liveAllowed: s.liveAllowed, deliveryItemId: s.deliveryItemId };
+}
+
+function chargesDto(s: Store) {
+  return { storeId: s.id, code: s.code, name: s.name, deliveryCharge: s.deliveryCharge.toFixed(2), deliveryFreeAbove: s.deliveryFreeAbove?.toFixed(2) ?? null };
 }

@@ -10,7 +10,7 @@ import { reportCsv, type ReportColumn } from "@/components/purchasing/reports-ta
 import { useOrderStores } from "@/components/purchasing/orders-shared";
 import { Alert, Badge, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
 import { api, query } from "@/lib/api";
-import { accountRights, documentHref, documentLabel, fyStart, type PartyKind } from "@/lib/accounts";
+import { type AccountDto, accountRights, type CashBookDto, documentHref, documentLabel, fyStart, type PartyKind } from "@/lib/accounts";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
 import { downloadCsv, rupees } from "@/lib/purchasing";
@@ -41,6 +41,11 @@ export interface LedgerRow {
 
 export interface GeneralLedgerDto {
   opening: string;
+  /** Balance just before this page's first line. */
+  pageOpening?: string;
+  page?: number;
+  pageSize?: number;
+  total?: number;
   rows: LedgerRow[];
   totals: { debit: string; credit: string; closing: string };
 }
@@ -136,11 +141,13 @@ interface BookHealthDto {
 
 // ---- Tabs ----
 
-export type AccountsReportTab = "general-ledger" | "day-book" | "trial-balance" | "profit-and-loss" | "balance-sheet" | "statement" | "ageing" | "stock-vs-accounts" | "book-health";
+export type AccountsReportTab = "general-ledger" | "day-book" | "cash-book" | "bank-book" | "trial-balance" | "profit-and-loss" | "balance-sheet" | "statement" | "ageing" | "stock-vs-accounts" | "book-health";
 
 export const ACCOUNTS_REPORT_TABS: { id: AccountsReportTab; label: string; viewOnly: boolean }[] = [
   { id: "general-ledger", label: "General ledger", viewOnly: true },
   { id: "day-book", label: "Day book", viewOnly: true },
+  { id: "cash-book", label: "Cash book", viewOnly: true },
+  { id: "bank-book", label: "Bank book", viewOnly: true },
   { id: "trial-balance", label: "Trial balance", viewOnly: true },
   { id: "profit-and-loss", label: "Profit and loss", viewOnly: true },
   { id: "balance-sheet", label: "Balance sheet", viewOnly: true },
@@ -223,12 +230,36 @@ interface Filters {
   showZero: boolean;
   byMonth: boolean;
   includeCancelled: boolean;
+  /** Cash book and bank book: the account chosen (blank = the first one). */
+  cashAccountId: string;
+  bankAccountId: string;
   partyType: PartyKind;
   /** undefined: the party named in the link (if any); null: none chosen. */
   party: PartyRef | null | undefined;
 }
 
 // ---- Each report ----
+
+/** "Lines 1,001–2,000 of 6,000" with Previous / Next; ledgers are long, so they come a page at a time. */
+function Pages({ page, pageSize, total, noun, onPage }: { page: number; pageSize: number; total: number; noun: string; onPage: (p: number) => void }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (pageCount <= 1) return null;
+  const fmt = (n: number) => n.toLocaleString("en-IN");
+  return (
+    <div className="toolbar">
+      <span className="muted">
+        {noun} {fmt((page - 1) * pageSize + 1)}–{fmt(Math.min(total, page * pageSize))} of {fmt(total)}
+      </span>
+      <span className="spacer" />
+      <Button size="small" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        Previous
+      </Button>
+      <Button size="small" disabled={page >= pageCount} onClick={() => onPage(page + 1)}>
+        Next
+      </Button>
+    </div>
+  );
+}
 
 const ledgerColumns = (withAccount: boolean, withParty: boolean): ReportColumn<LedgerRow>[] => [
   { key: "date", header: "Date", value: (r) => r.date, render: (r) => formatDate(r.date) },
@@ -243,7 +274,10 @@ const ledgerColumns = (withAccount: boolean, withParty: boolean): ReportColumn<L
 ];
 
 function GeneralLedger({ f }: { f: Filters }) {
-  const q = query({ from: f.from, to: f.to, storeId: f.storeId, accountId: f.accountId, includeCancelled: f.includeCancelled ? "true" : undefined });
+  const filters = query({ from: f.from, to: f.to, storeId: f.storeId, accountId: f.accountId, includeCancelled: f.includeCancelled ? "true" : undefined });
+  const [paging, setPaging] = useState({ filters, page: 1 });
+  const page = paging.filters === filters ? paging.page : 1;
+  const q = query({ from: f.from, to: f.to, storeId: f.storeId, accountId: f.accountId, includeCancelled: f.includeCancelled ? "true" : undefined, page: page > 1 ? String(page) : undefined });
   const gl = useLoad(() => api.get<GeneralLedgerDto>(`/reports/general-ledger${q}`), [q]);
   return (
     <Loaded state={gl}>
@@ -251,7 +285,14 @@ function GeneralLedger({ f }: { f: Filters }) {
         <>
           <p>
             Balance before {formatDate(f.from)}: <strong className={neg(d.opening)}>{rupees(d.opening)}</strong> (debit minus credit)
+            {d.pageOpening && page > 1 ? (
+              <>
+                {" "}
+                · balance before this page: <strong className={neg(d.pageOpening)}>{rupees(d.pageOpening)}</strong>
+              </>
+            ) : null}
           </p>
+          <Pages page={page} pageSize={d.pageSize ?? d.rows.length} total={d.total ?? d.rows.length} noun="Lines" onPage={(p) => setPaging({ filters, page: p })} />
           <ReportTable
             name="general-ledger"
             columns={ledgerColumns(true, true)}
@@ -279,8 +320,11 @@ function GeneralLedger({ f }: { f: Filters }) {
 type DayBookRow = DayBookEntry["lines"][number] & { entry: DayBookEntry; first: boolean; key: string };
 
 function DayBook({ f }: { f: Filters }) {
-  const q = query({ from: f.from, to: f.to, storeId: f.storeId });
-  const book = useLoad(() => api.get<DayBookEntry[]>(`/reports/day-book${q}`), [q]);
+  const filters = query({ from: f.from, to: f.to, storeId: f.storeId });
+  const [paging, setPaging] = useState({ filters, page: 1 });
+  const page = paging.filters === filters ? paging.page : 1;
+  const q = query({ from: f.from, to: f.to, storeId: f.storeId, page: page > 1 ? String(page) : undefined });
+  const book = useLoad(() => api.get<{ rows: DayBookEntry[]; total: number; page: number; pageSize: number }>(`/reports/day-book${q}`), [q]);
   const columns: ReportColumn<DayBookRow>[] = [
     { key: "date", header: "Date", value: (r) => r.entry.date, render: (r) => (r.first ? formatDate(r.entry.date) : "") },
     {
@@ -303,7 +347,90 @@ function DayBook({ f }: { f: Filters }) {
     { key: "credit", header: "Credit", align: "right", value: (r) => r.credit, render: (r) => amt(r.credit) },
     { key: "remark", header: "Remark", value: (r) => r.remark ?? (r.first ? (r.entry.remark ?? "") : "") },
   ];
-  return <Loaded state={book}>{(entries) => <ReportTable name="day-book" columns={columns} rows={entries.flatMap((e) => e.lines.map((l, i) => ({ ...l, entry: e, first: i === 0, key: `${e.id}-${i}` })))} rowKey={(r) => r.key} empty="Nothing posted in this period." />}</Loaded>;
+  return (
+    <Loaded state={book}>
+      {(d) => (
+        <>
+          <Pages page={page} pageSize={d.pageSize} total={d.total} noun="Entries" onPage={(p) => setPaging({ filters, page: p })} />
+          <ReportTable name="day-book" columns={columns} rows={d.rows.flatMap((e) => e.lines.map((l, i) => ({ ...l, entry: e, first: i === 0, key: `${e.id}-${i}` })))} rowKey={(r) => r.key} empty="Nothing posted in this period." />
+        </>
+      )}
+    </Loaded>
+  );
+}
+
+/**
+ * Cash book or bank book (plan 11 C8): day by day, opening, money in, money out
+ * and closing, then every entry with its running balance, a page at a time.
+ * The closing balance is checked against the ledger.
+ */
+function CashBook({ f, accountId, book }: { f: Filters; accountId: string; book: "cash" | "bank" }) {
+  const filters = query({ from: f.from, to: f.to, accountId, includeCancelled: f.includeCancelled ? "true" : undefined });
+  const [paging, setPaging] = useState({ filters, page: 1 });
+  const page = paging.filters === filters ? paging.page : 1;
+  const q = query({ from: f.from, to: f.to, accountId, includeCancelled: f.includeCancelled ? "true" : undefined, page: page > 1 ? String(page) : undefined });
+  const cb = useLoad(() => api.get<CashBookDto>(`/reports/cash-book${q}`), [q]);
+  const name = book === "bank" ? "bank-book" : "cash-book";
+  type Day = CashBookDto["days"][number];
+  type Row = CashBookDto["rows"][number];
+  const dayColumns: ReportColumn<Day>[] = [
+    { key: "date", header: "Date", value: (r) => r.date, render: (r) => formatDate(r.date) },
+    { key: "opening", header: "Opening", align: "right", value: (r) => r.opening, render: (r) => <span className={neg(r.opening)}>{rupees(r.opening)}</span> },
+    { key: "in", header: "Money in", align: "right", value: (r) => r.moneyIn, render: (r) => amt(r.moneyIn) },
+    { key: "out", header: "Money out", align: "right", value: (r) => r.moneyOut, render: (r) => amt(r.moneyOut) },
+    { key: "closing", header: "Closing", align: "right", value: (r) => r.closing, render: (r) => <span className={neg(r.closing)}>{rupees(r.closing)}</span> },
+  ];
+  const rowColumns: ReportColumn<Row>[] = [
+    { key: "date", header: "Date", value: (r) => r.date, render: (r) => formatDate(r.date) },
+    { key: "doc", header: "Document", value: (r) => `${documentLabel(r.documentType)} ${r.documentNumber ?? ""}`.trim(), render: (r) => <DocLink type={r.documentType} id={r.documentId} number={r.documentNumber} /> },
+    { key: "against", header: "Against", value: (r) => r.against },
+    { key: "store", header: "Store", value: (r) => r.store ?? "" },
+    { key: "remark", header: "Remark", value: (r) => r.remark ?? "" },
+    { key: "in", header: "Money in", align: "right", value: (r) => r.moneyIn, render: (r) => amt(r.moneyIn) },
+    { key: "out", header: "Money out", align: "right", value: (r) => r.moneyOut, render: (r) => amt(r.moneyOut) },
+    { key: "balance", header: "Balance", align: "right", value: (r) => r.balance, render: (r) => <span className={neg(r.balance)}>{rupees(r.balance)}</span> },
+  ];
+  return (
+    <Loaded state={cb}>
+      {(d) => (
+        <>
+          <dl className="kv" aria-label={book === "bank" ? "Bank book totals" : "Cash book totals"}>
+            <dt>Opening on {formatDate(d.from)}</dt>
+            <dd className={neg(d.opening)}>{rupees(d.opening)}</dd>
+            <dt>Money in</dt>
+            <dd>{rupees(d.moneyIn)}</dd>
+            <dt>Money out</dt>
+            <dd>{rupees(d.moneyOut)}</dd>
+            <dt>Closing on {formatDate(d.to)}</dt>
+            <dd className={neg(d.closing)}>
+              <strong>{rupees(d.closing)}</strong>
+            </dd>
+          </dl>
+          <p>
+            {d.matchesLedger ? <Badge kind="ok">Closing balance matches the ledger</Badge> : <Badge kind="off">{`The ledger shows ${rupees(d.ledgerClosing)}: tell the Accountant`}</Badge>}
+            {d.limitedToStores ? <span className="muted"> Only your stores&apos; entries are shown.</span> : null}
+          </p>
+          <h3>Day by day</h3>
+          <ReportTable name={`${name}-days`} columns={dayColumns} rows={d.days} rowKey={(r) => r.date} empty="No money in or out in this period." />
+          <h3>Entries</h3>
+          <Pages page={page} pageSize={d.pageSize} total={d.total} noun="Entries" onPage={(p) => setPaging({ filters, page: p })} />
+          {page > 1 ? (
+            <p className="muted">
+              Balance before this page: <strong className={neg(d.pageOpening)}>{rupees(d.pageOpening)}</strong>
+            </p>
+          ) : null}
+          <ReportTable name={name} columns={rowColumns} rows={d.rows} rowKey={(r) => r.id} empty="No entries in this period." rowClassName={(r) => (r.cancelled ? "row-muted" : undefined)} />
+        </>
+      )}
+    </Loaded>
+  );
+}
+
+/** The cash account a user would look at first: the cash in hand of one of their stores. */
+function firstCashAccount(accounts: AccountDto[], storeIds: string[] | null): string {
+  const cash = accounts.filter((a) => !a.isGroup && a.kind === "cash");
+  const mine = (a: AccountDto) => !a.storeId || !storeIds || storeIds.includes(a.storeId);
+  return (cash.find((a) => a.systemKey?.startsWith("cash_in_hand:") && mine(a)) ?? cash.find(mine) ?? cash[0])?.id ?? "";
 }
 
 function TrialBalance({ f }: { f: Filters }) {
@@ -584,9 +711,11 @@ function BookHealth() {
 
 // ---- The page ----
 
-const TAB_FILTERS: Record<AccountsReportTab, ("period" | "asOf" | "store" | "account" | "showZero" | "byMonth" | "cancelled" | "partyType" | "party")[]> = {
+const TAB_FILTERS: Record<AccountsReportTab, ("period" | "asOf" | "store" | "account" | "cashAccount" | "bankAccount" | "showZero" | "byMonth" | "cancelled" | "partyType" | "party")[]> = {
   "general-ledger": ["period", "store", "account", "cancelled"],
   "day-book": ["period", "store"],
+  "cash-book": ["period", "cashAccount", "cancelled"],
+  "bank-book": ["period", "bankAccount", "cancelled"],
   "trial-balance": ["period", "store", "showZero"],
   "profit-and-loss": ["period", "store", "byMonth"],
   "balance-sheet": ["asOf", "store"],
@@ -612,12 +741,17 @@ export function AccountsReports() {
   const startPartyId = params.get("partyId");
   const names = usePartyNames([{ type: startPartyType, id: startPartyId }]);
   const today = useBusinessToday();
-  const [f, setF] = useState<Filters>({ from: "", to: "", asOf: "", storeId: "", accountId: "", showZero: false, byMonth: true, includeCancelled: false, partyType: startPartyType, party: undefined });
+  const [f, setF] = useState<Filters>({ from: "", to: "", asOf: "", storeId: "", accountId: "", showZero: false, byMonth: true, includeCancelled: false, cashAccountId: "", bankAccountId: "", partyType: startPartyType, party: undefined });
   // A statement link from a customer or supplier page names the party by id only.
   const party = f.party !== undefined ? f.party : startPartyId ? (names[startPartyId] ?? null) : null;
   // Blank dates mean: from the start of this financial year, up to today (Indian business dates).
   const filters = { ...f, party, from: f.from || fyStart(today), to: f.to || today, asOf: f.asOf || today };
   const show = new Set(TAB_FILTERS[tab]);
+  const accounts = chart.data?.accounts ?? [];
+  const cashAccounts = accounts.filter((a) => !a.isGroup && a.kind === "cash");
+  const bankAccounts = accounts.filter((a) => !a.isGroup && a.kind === "bank");
+  const cashAccountId = f.cashAccountId || firstCashAccount(accounts, user && !user.allStores && !user.isOwnerAdmin ? user.stores.map((s) => s.id) : null);
+  const bankAccountId = f.bankAccountId || (bankAccounts[0]?.id ?? "");
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((x) => ({ ...x, [k]: v }));
 
   if (loading) return <p className="muted">Loading…</p>;
@@ -660,6 +794,26 @@ export function AccountsReports() {
                 ))}
               </SelectInput>
             ) : null}
+            {show.has("cashAccount") ? (
+              <SelectInput id="acr-cash-account" label="Cash account" value={cashAccountId} onChange={(e) => set("cashAccountId", e.target.value)} hint="Each store's cash in hand, or its till drawer.">
+                {cashAccounts.length === 0 ? <option value="">No cash accounts yet</option> : null}
+                {cashAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </SelectInput>
+            ) : null}
+            {show.has("bankAccount") ? (
+              <SelectInput id="acr-bank-account" label="Bank account" value={bankAccountId} onChange={(e) => set("bankAccountId", e.target.value)}>
+                {bankAccounts.length === 0 ? <option value="">No bank accounts yet</option> : null}
+                {bankAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.number ? `${a.number} ${a.name}` : a.name}
+                  </option>
+                ))}
+              </SelectInput>
+            ) : null}
             {show.has("account") ? <AccountSelect id="acr-account" label="Account or folder" accounts={chart.data?.accounts ?? []} value={f.accountId} onChange={(v) => set("accountId", v)} placeholder="All accounts" /> : null}
             {show.has("showZero") ? <CheckInput id="acr-zero" label="Show accounts with nothing on them" checked={f.showZero} onChange={(e) => set("showZero", e.target.checked)} /> : null}
             {show.has("byMonth") ? <CheckInput id="acr-month" label="Month by month" checked={f.byMonth} onChange={(e) => set("byMonth", e.target.checked)} /> : null}
@@ -669,6 +823,8 @@ export function AccountsReports() {
         {!today ? <p className="muted">Loading…</p> : null}
         {today && tab === "general-ledger" ? <GeneralLedger f={filters} /> : null}
         {today && tab === "day-book" ? <DayBook f={filters} /> : null}
+        {today && tab === "cash-book" ? cashAccountId ? <CashBook f={filters} accountId={cashAccountId} book="cash" /> : <p className="muted">{chart.data ? "No cash accounts yet." : "Loading…"}</p> : null}
+        {today && tab === "bank-book" ? bankAccountId ? <CashBook f={filters} accountId={bankAccountId} book="bank" /> : <p className="muted">{chart.data ? "No bank accounts yet. Add one under Bank accounts." : "Loading…"}</p> : null}
         {today && tab === "trial-balance" ? <TrialBalance f={filters} /> : null}
         {today && tab === "profit-and-loss" ? <ProfitAndLoss f={filters} /> : null}
         {today && tab === "balance-sheet" ? <BalanceSheet f={filters} /> : null}

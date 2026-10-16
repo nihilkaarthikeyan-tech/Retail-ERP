@@ -147,7 +147,8 @@ export const updateBankAccountSchema = bankAccountSchema.omit({ accountId: true 
 
 // ---- Journals ----
 
-export const JOURNAL_KINDS = ['general', 'cash', 'bank', 'contra', 'credit_note', 'debit_note', 'write_off', 'opening'] as const;
+/** "expense" journals are made only by the simple expense entry (plan 11 C8), never on the journal form. */
+export const JOURNAL_KINDS = ['general', 'cash', 'bank', 'contra', 'credit_note', 'debit_note', 'write_off', 'opening', 'expense'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export const journalLineSchema = z
@@ -169,7 +170,10 @@ export const journalLineSchema = z
 export type JournalLineInput = z.infer<typeof journalLineSchema>;
 
 export const journalSchema = z.object({
-  kind: z.enum(JOURNAL_KINDS).default('general'),
+  kind: z
+    .enum(JOURNAL_KINDS)
+    .default('general')
+    .refine((k) => k !== 'expense', 'Expenses are entered on the Add expense screen'),
   journalDate: isoDate,
   reference: optionalText(60),
   referenceDate: isoDate.optional().nullable(),
@@ -179,6 +183,35 @@ export const journalSchema = z.object({
 export type JournalInput = z.infer<typeof journalSchema>;
 
 export const cancelSchema = z.object({ reason: trimmed(300) });
+
+// ---- Simple expenses (plan 11 C8) ----
+
+/** Rupees and paise only: an expense is paid in whole paise. */
+const moneyAmount = positiveDecimalString.refine((v) => !/\.\d{3,}$/.test(v), 'At most two digits after the point (paise)');
+
+export const expenseSchema = z.object({
+  expenseDate: isoDate,
+  storeId: uuid,
+  /** A bottom-level expense account (rent, salaries, electricity…). */
+  expenseAccountId: uuid,
+  /** The store's cash in hand account, or a bank account. */
+  paidFromAccountId: uuid,
+  amount: moneyAmount,
+  reference: optionalText(60),
+  remark: optionalText(300),
+});
+export type ExpenseInput = z.infer<typeof expenseSchema>;
+
+export const expenseListQuerySchema = z.object({
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  storeId: uuid.optional(),
+  expenseAccountId: uuid.optional(),
+  status: z.enum(['posted', 'cancelled']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(500).optional(),
+});
+export type ExpenseListQuery = z.infer<typeof expenseListQuerySchema>;
 
 // ---- Payments ----
 
@@ -254,6 +287,8 @@ export const ledgerQuerySchema = z.object({
   documentType: z.string().max(40).optional(),
   documentId: uuid.optional(),
   includeCancelled: queryBoolean.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(2000).optional(),
 });
 export type LedgerQuery = z.infer<typeof ledgerQuerySchema>;
 
@@ -263,8 +298,25 @@ export const periodQuerySchema = z.object({
   storeId: uuid.optional(),
   showZero: queryBoolean.optional(),
   groupBy: z.enum(['month', 'year']).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(2000).optional(),
 });
 export type PeriodQuery = z.infer<typeof periodQuerySchema>;
+
+/** Cash book or bank book (plan 11 C8): one cash or bank account, or a store's cash in hand. */
+export const cashBookQuerySchema = z
+  .object({
+    from: isoDate,
+    to: isoDate,
+    accountId: uuid.optional(),
+    storeId: uuid.optional(),
+    includeCancelled: queryBoolean.optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    pageSize: z.coerce.number().int().min(1).max(2000).optional(),
+  })
+  .refine((q) => !!q.accountId || !!q.storeId, 'Choose a cash or bank account, or a store')
+  .refine((q) => q.from <= q.to, 'The start date is after the end date');
+export type CashBookQuery = z.infer<typeof cashBookQuerySchema>;
 
 export const asOfQuerySchema = z.object({ asOf: isoDate, storeId: uuid.optional(), partyType: z.enum(PARTY_TYPES).optional() });
 export type AsOfQuery = z.infer<typeof asOfQuerySchema>;

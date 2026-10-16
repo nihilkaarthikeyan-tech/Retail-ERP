@@ -22,6 +22,10 @@ function offerValue(o: OfferDto): string {
       return `at ${rupees(o.value)}`;
     case "free_goods":
       return `buy ${showQuantity(o.buyQuantity)} get ${showQuantity(o.freeQuantity)} free`;
+    case "buy_get":
+      return `buy ${showQuantity(o.buyQuantity)}, get ${showQuantity(o.freeQuantity)} of another item free`;
+    case "mix_match":
+      return o.cheapestFree ? `buy ${o.setQuantity}, the cheapest free` : `any ${o.setQuantity} for ${rupees(o.setPrice ?? null)}`;
   }
 }
 

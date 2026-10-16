@@ -117,7 +117,12 @@ export function shareByWeight(total: DecimalInput, weights: DecimalInput[]): Dec
   });
 }
 
-export type OfferKind = 'percent' | 'amount' | 'special_price' | 'free_goods';
+export type OfferKind = 'percent' | 'amount' | 'special_price' | 'free_goods' | 'buy_get' | 'mix_match';
+
+/** Plan 11 B3: offers counted across the bill's lines, not on one line. */
+export function isCountedOffer(kind: string): boolean {
+  return kind === 'buy_get' || kind === 'mix_match';
+}
 
 export interface LineOfferInput {
   kind: OfferKind;
@@ -160,7 +165,212 @@ export function lineOfferSaving(offer: LineOfferInput, line: { quantity: Decimal
     }
     case 'free_goods':
       return roundMoney(freeUnits(qty, offer.buyQuantity ?? 0, offer.freeQuantity ?? 0).mul(price));
+    default:
+      // buy_get and mix_match are counted over the whole bill (planOffers).
+      return ZERO;
   }
+}
+
+// ---- Offers over the whole bill (plan 11 B3) ----
+
+export interface PlanOffer extends LineOfferInput {
+  id: string;
+  code: string;
+  priority?: number | null;
+  /** mix_match: how many items make a set … */
+  setQuantity?: number | null;
+  /** … sold together for this price (any 3 for ₹999) … */
+  setPrice?: DecimalInput | null;
+  /** … or the cheapest one of each set free. */
+  cheapestFree?: boolean | null;
+  /** buy_get: what one free unit of the other item is worth (its price); null when it cannot be given. */
+  freeUnitValue?: DecimalInput | null;
+}
+
+export interface PlanLine<O extends PlanOffer> {
+  lineNo: number;
+  /** Line units (whole units count towards sets). */
+  quantity: DecimalInput;
+  /** Price per line unit, including GST. */
+  price: DecimalInput;
+  /** Offers covering the line's item; empty when a typed price switches offers off. */
+  offers: O[];
+  /** Whether the line may count towards a set or a "buy" (list price, no manual discount). */
+  countable: boolean;
+}
+
+export interface PlannedLineOffer<O extends PlanOffer> {
+  offer: O;
+  /** Rupees off the line (zero for free_goods and buy_get: their saving is a free line). */
+  discount: Decimal;
+  /** free_goods: units of the same item given free on a separate line. */
+  freeQuantity: Decimal;
+}
+
+export interface PlannedFreeItem<O extends PlanOffer> {
+  offer: O;
+  /** buy_get: units of the offer's free item. */
+  quantity: Decimal;
+  /** The first line that counted towards it (the free line follows it). */
+  ofLineNo: number;
+  /** The free units' worth, for the saving shown on the bill. */
+  saving: Decimal;
+}
+
+export interface OfferPlan<O extends PlanOffer> {
+  lines: Map<number, PlannedLineOffer<O>>;
+  freeItems: PlannedFreeItem<O>[];
+}
+
+interface CountedResult {
+  saving: Decimal;
+  /** Lines with units in a full set or "buy" block. */
+  used: number[];
+  /** mix_match: rupees off each line. */
+  discounts: Map<number, Decimal>;
+  /** buy_get: free units. */
+  freeQuantity: Decimal;
+}
+
+/**
+ * Works out a counted offer on the given lines. Units are taken most expensive
+ * first, so the customer gets the most: sets are made of consecutive units in
+ * that order; for "cheapest free" the last unit of each set is free; for a set
+ * price a set is used only while it costs more than the set price.
+ */
+function countedOffer(offer: PlanOffer, lines: PlanLine<PlanOffer>[]): CountedResult | null {
+  const buckets = lines
+    .map((l) => ({ lineNo: l.lineNo, price: D(l.price), left: D(l.quantity).floor() }))
+    .filter((b) => b.left.gt(0) && b.price.gt(0))
+    .sort((a, b) => b.price.cmp(a.price) || a.lineNo - b.lineNo);
+  const units = buckets.reduce((s, b) => s.add(b.left), ZERO);
+  const size = offer.kind === 'mix_match' ? D(offer.setQuantity ?? 0) : D(offer.buyQuantity ?? 0);
+  if (!size.isInteger() || size.lte(0) || units.lt(size)) return null;
+  const used = new Map<number, Decimal>();
+  const valueUsed = new Map<number, Decimal>();
+  const discounts = new Map<number, Decimal>();
+  let saving = ZERO;
+  let sets = 0;
+  let i = 0;
+  // Takes one set (or "buy" block) of units; returns its value and its cheapest unit, or null when too few are left.
+  const takeSet = (commit: boolean) => {
+    let need = size;
+    let value = ZERO;
+    let last: { lineNo: number; price: Decimal } | null = null;
+    const taken: { lineNo: number; count: Decimal; price: Decimal }[] = [];
+    for (let j = i; j < buckets.length && need.gt(0); j++) {
+      const b = buckets[j];
+      const take = Decimal.min(b.left, need);
+      if (take.lte(0)) continue;
+      taken.push({ lineNo: b.lineNo, count: take, price: b.price });
+      value = value.add(b.price.mul(take));
+      need = need.sub(take);
+      last = { lineNo: b.lineNo, price: b.price };
+    }
+    if (need.gt(0) || !last) return null;
+    if (commit) {
+      for (const t of taken) {
+        const b = buckets.find((x) => x.lineNo === t.lineNo)!;
+        b.left = b.left.sub(t.count);
+        used.set(t.lineNo, (used.get(t.lineNo) ?? ZERO).add(t.count));
+        valueUsed.set(t.lineNo, (valueUsed.get(t.lineNo) ?? ZERO).add(t.price.mul(t.count)));
+      }
+      while (i < buckets.length && buckets[i].left.lte(0)) i++;
+    }
+    return { value, last };
+  };
+  for (;;) {
+    const peek = takeSet(false);
+    if (!peek) break;
+    if (offer.kind === 'mix_match' && !offer.cheapestFree) {
+      const setPrice = D(offer.setPrice ?? 0);
+      if (peek.value.lte(setPrice)) break;
+      saving = saving.add(peek.value.sub(setPrice));
+    } else if (offer.kind === 'mix_match') {
+      discounts.set(peek.last.lineNo, (discounts.get(peek.last.lineNo) ?? ZERO).add(peek.last.price));
+      saving = saving.add(peek.last.price);
+    }
+    takeSet(true);
+    sets++;
+  }
+  if (sets === 0) return null;
+  const usedLines = [...used.keys()].sort((a, b) => a - b);
+  if (offer.kind === 'buy_get') {
+    const worth = offer.freeUnitValue == null ? ZERO : D(offer.freeUnitValue);
+    const freeQuantity = D(offer.freeQuantity ?? 0).mul(sets);
+    if (worth.lte(0) || freeQuantity.lte(0)) return null;
+    return { saving: roundMoney(worth.mul(freeQuantity)), used: usedLines, discounts, freeQuantity };
+  }
+  saving = roundMoney(saving);
+  if (saving.lte(0)) return null;
+  if (!offer.cheapestFree) {
+    // The saving is spread over the lines in the sets by their value; the last line takes the remainder.
+    const shares = shareByWeight(saving, usedLines.map((n) => valueUsed.get(n)!));
+    usedLines.forEach((n, k) => discounts.set(n, shares[k]));
+  }
+  return { saving, used: usedLines, discounts, freeQuantity: ZERO };
+}
+
+/**
+ * Decision 17 with plan 11 B3: chooses the offers of a bill. Each line gets at
+ * most one offer. A counted offer (mix and match, buy X get Y) is used when
+ * it saves more than the line offers of the lines it needs; the biggest gain
+ * goes first (equal: higher priority, then the earlier code), then the next
+ * one on the lines left. The other lines keep their best line offer.
+ * The till and the server both use this, so their totals agree.
+ */
+export function planOffers<O extends PlanOffer>(lines: PlanLine<O>[]): OfferPlan<O> {
+  const bestOnLine = new Map<number, { offer: O; saving: Decimal }>();
+  for (const l of lines) {
+    const candidates = l.offers.filter((o) => !isCountedOffer(o.kind)).map((o) => ({ offer: o, code: o.code, priority: o.priority, saving: lineOfferSaving(o, l) }));
+    const best = bestOffer(candidates);
+    if (best) bestOnLine.set(l.lineNo, { offer: best.offer, saving: D(best.saving) });
+  }
+  const counted: O[] = [];
+  for (const l of lines) for (const o of l.offers) if (isCountedOffer(o.kind) && !counted.some((c) => c.id === o.id)) counted.push(o);
+
+  const plan: OfferPlan<O> = { lines: new Map(), freeItems: [] };
+  const taken = new Set<number>();
+  for (;;) {
+    let pick: { offer: O; gain: Decimal; result: CountedResult } | null = null;
+    for (const o of counted) {
+      const pool = lines.filter((l) => l.countable && !taken.has(l.lineNo) && l.offers.some((x) => x.id === o.id));
+      const result = countedOffer(o, pool);
+      if (!result) continue;
+      const displaced = result.used.reduce((s, n) => s.add(bestOnLine.get(n)?.saving ?? ZERO), ZERO);
+      const gain = result.saving.sub(displaced);
+      if (gain.lte(0)) continue;
+      const better = !pick || gain.gt(pick.gain) || (gain.eq(pick.gain) && ((o.priority ?? 0) > (pick.offer.priority ?? 0) || ((o.priority ?? 0) === (pick.offer.priority ?? 0) && o.code.localeCompare(pick.offer.code) < 0)));
+      if (better) pick = { offer: o, gain, result };
+    }
+    if (!pick) break;
+    for (const n of pick.result.used) {
+      taken.add(n);
+      plan.lines.set(n, { offer: pick.offer, discount: pick.result.discounts.get(n) ?? ZERO, freeQuantity: ZERO });
+    }
+    if (pick.offer.kind === 'buy_get') plan.freeItems.push({ offer: pick.offer, quantity: pick.result.freeQuantity, ofLineNo: pick.result.used[0], saving: pick.result.saving });
+    counted.splice(counted.indexOf(pick.offer), 1);
+  }
+  for (const l of lines) {
+    if (taken.has(l.lineNo)) continue;
+    const best = bestOnLine.get(l.lineNo);
+    if (!best) continue;
+    const free = best.offer.kind === 'free_goods';
+    plan.lines.set(l.lineNo, {
+      offer: best.offer,
+      discount: free ? ZERO : best.saving,
+      freeQuantity: free ? freeUnits(l.quantity, best.offer.buyQuantity ?? 0, best.offer.freeQuantity ?? 0) : ZERO,
+    });
+  }
+  return plan;
+}
+
+/** Decision 47: the store's delivery charge, none when the bill is at or above the "free above" amount. */
+export function deliveryChargeFor(goodsTotal: DecimalInput, charge: DecimalInput | null | undefined, freeAbove: DecimalInput | null | undefined): Decimal {
+  const c = D(charge ?? 0);
+  if (c.lte(0)) return ZERO;
+  if (freeAbove != null && D(goodsTotal).gte(D(freeAbove))) return ZERO;
+  return roundMoney(c);
 }
 
 /**

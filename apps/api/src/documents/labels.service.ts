@@ -9,6 +9,7 @@ import { canAccessStore } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { LabelTemplate } from '../generated/prisma/client.js';
+import { MarkdownsService } from '../pricing/markdowns.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -27,6 +28,7 @@ export class LabelsService {
     private readonly audit: AuditService,
     private readonly company: CompanyService,
     private readonly pricing: PricingService,
+    private readonly markdowns: MarkdownsService,
   ) {}
 
   private size(input: LabelTemplateInput) {
@@ -74,6 +76,8 @@ export class LabelsService {
     const settings = await this.prisma.catalogueSettings.findFirst({ where: { companyId: company.id } });
     const priceListId = req.priceListId ?? settings?.defaultSellingPriceListId ?? null;
     const store = req.storeId ? await this.prisma.store.findUnique({ where: { id: req.storeId } }) : null;
+    // Plan 11 C5: a markdown's labels show its new price and the price it replaced.
+    const markedDown = new Map<string, { was: string | null; now: string }>();
     const wanted: { itemId: string; unitId?: string; copies: number; batch?: string | null; expiry?: string | null; packed?: string | null }[] = [];
     if (req.items?.length) wanted.push(...req.items.map((i) => ({ itemId: i.itemId, unitId: i.unitId, copies: i.copies })));
     else if (req.receiptId) {
@@ -87,6 +91,12 @@ export class LabelsService {
         if (copies < 1) continue;
         const b = l.batchId ? batches.get(l.batchId) : null;
         wanted.push({ itemId: l.itemId, copies, batch: b?.batchNumber ?? l.newBatchNumber, expiry: iso(b?.expiryDate ?? l.newExpiryOn), packed: iso(b?.manufactureDate ?? l.newManufactureOn) });
+      }
+    } else if (req.markdownId) {
+      const md = await this.markdowns.get(req.markdownId, user);
+      for (const l of md.lines) {
+        markedDown.set(l.itemId, { was: l.oldPrice, now: l.newPrice });
+        wanted.push({ itemId: l.itemId, copies: 1 });
       }
     } else if (req.priceChangedSince) {
       if (!priceListId) throw new BadRequestException('Choose a price list');
@@ -113,6 +123,8 @@ export class LabelsService {
         const found = await this.pricing.lookup({ itemId: item.id, unitId, priceListId, date: today }, user).catch(() => null);
         if (found?.found && found.rate) price = new Decimal(found.rate).toFixed(2);
       }
+      const md = unitId === item.baseUnitId ? markedDown.get(item.id) : undefined;
+      if (md) price = md.now;
       const barcode = item.barcodes.find((b) => b.unitId === unitId) ?? item.barcodes.find((b) => !b.unitId && unitId === item.baseUnitId);
       let bars: ReturnType<typeof barcodeModules> | null = null;
       try {
@@ -133,6 +145,7 @@ export class LabelsService {
         expiry: w.expiry ?? null,
         packed: w.packed ?? null,
         store: store?.name ?? null,
+        wasPrice: md?.was && md.was !== price ? md.was : null,
       };
       for (let n = 0; n < w.copies; n++) labels.push(label);
     }

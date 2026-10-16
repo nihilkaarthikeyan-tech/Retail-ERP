@@ -3,11 +3,12 @@
 // goes through the same service a person typing it in would use, so every
 // business rule of that record applies (blueprint 17). A row is saved or
 // refused on its own; nothing is half-made.
-import { type CurrentUser, type ImportKind, type ImportMode, type PermissionKey, readDate, readNumber, readText, readYesNo } from 'shared';
+import { businessDate, type CurrentUser, type ImportKind, type ImportMode, type PermissionKey, readDate, readDayMonth, readNumber, readText, readYesNo } from 'shared';
 import type { Actor } from '../common/request-context.js';
 import type { Cell } from './spreadsheet.js';
 
-export type FieldType = 'text' | 'code' | 'number' | 'date' | 'yesno';
+/** daymonth: a birthday or anniversary, a full date or only the day and month (plan 11 C10). */
+export type FieldType = 'text' | 'code' | 'number' | 'date' | 'daymonth' | 'yesno';
 
 export interface Field {
   key: string;
@@ -44,6 +45,8 @@ export interface Importer {
   rights: PermissionKey[];
   importRight: PermissionKey;
   example: (string | number | null)[];
+  /** Kinds whose columns depend on the masters (styles and variants: one column per size, colour or other attribute). */
+  columns?(): Promise<{ fields: Field[]; example: (string | number | null)[] }>;
   /** A key that names the record, so a rerun finds rows already done. */
   keyOf(v: ParsedRow['values']): string | null;
   apply(v: ParsedRow['values'], mode: ImportMode, ctx: ImportContext): Promise<RowOutcome>;
@@ -82,13 +85,14 @@ export function matchColumns(headings: Cell[], fields: Field[], overrides: Recor
 export function parseRow(cells: Cell[], columns: (string | null)[], fields: Field[]): ParsedRow {
   const values: ParsedRow['values'] = {};
   const problems: string[] = [];
+  const today = businessDate();
   for (const f of fields) values[f.key] = null;
   columns.forEach((key, i) => {
     if (!key) return;
     const f = fields.find((x) => x.key === key)!;
     const raw = cells[i];
     if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) return;
-    const r = f.type === 'number' ? readNumber(raw) : f.type === 'date' ? readDate(raw) : f.type === 'yesno' ? readYesNo(raw) : readText(raw, { digitsLength: f.digitsLength });
+    const r = f.type === 'number' ? readNumber(raw) : f.type === 'date' ? readDate(raw) : f.type === 'daymonth' ? readDayMonth(raw, today) : f.type === 'yesno' ? readYesNo(raw) : readText(raw, { digitsLength: f.digitsLength });
     if (r.ok) values[f.key] = r.value;
     else problems.push(`${f.label} ${r.problem}`);
   });

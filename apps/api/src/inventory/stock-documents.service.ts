@@ -219,21 +219,42 @@ export class StockDocumentsService {
           storeId: input.storeId,
           toLocationId: location.id,
           remarks: input.remarks ?? null,
-          lines: { create: lines.map(lineData) },
           createdById: actor.userId,
           updatedById: actor.userId,
         },
-        include: documentInclude,
       });
+      for (let i = 0; i < lines.length; i += 2000) await tx.stockDocumentLine.createMany({ data: lines.slice(i, i + 2000).map((l) => ({ ...lineData(l), documentId: doc.id })) });
       await this.audit.record(tx, actor, { action: 'create', entityType: 'stock_document', entityId: doc.id, changes: { number, kind: 'count', countType: input.countType, lines: lines.length } });
-      return this.fillExpected(tx, doc);
-    });
+      return this.fillExpected(tx, await this.getRow(tx, doc.id));
+    }, { timeout: 120_000, maxWait: 30_000 });
     return this.toDto(created, user);
   }
 
   /** Draft counts show what the system expects at the count's time (hidden from counters on a blind count). */
   private async fillExpected(tx: Db, doc: DocumentRow): Promise<DocumentRow> {
-    for (const l of doc.lines) {
+    // Lines without a batch in bulk (plan 11 A5); batch lines one by one.
+    const plain = doc.lines.filter((l) => !l.batchId);
+    const latest = new Map(
+      (
+        await tx.$queryRawUnsafe<{ itemId: string; quantityAfter: Prisma.Decimal }[]>(
+          `SELECT DISTINCT ON ("itemId") "itemId", "quantityAfter" FROM "StockLedgerEntry"
+           WHERE "locationId" = $1::uuid AND "itemId" = ANY($2::uuid[]) AND "postingAt" <= $3::timestamp(3)
+           ORDER BY "itemId", "postingAt" DESC, "id" DESC`,
+          doc.toLocationId!,
+          plain.map((l) => l.itemId),
+          doc.postingAt.toISOString().replace('Z', ''),
+        )
+      ).map((r) => [r.itemId, D(r.quantityAfter).toString()]),
+    );
+    for (let i = 0; i < plain.length; i += 5000) {
+      const chunk = plain.slice(i, i + 5000);
+      await tx.$executeRawUnsafe(
+        `UPDATE "StockDocumentLine" d SET "expectedQuantity" = t.q::numeric FROM unnest($1::uuid[], $2::text[]) AS t(i, q) WHERE d."id" = t.i`,
+        chunk.map((l) => l.id),
+        chunk.map((l) => latest.get(l.itemId) ?? '0'),
+      );
+    }
+    for (const l of doc.lines.filter((x) => x.batchId)) {
       const expected = await this.quantityAt(tx, l.itemId, doc.toLocationId!, l.batchId, doc.postingAt);
       await tx.stockDocumentLine.update({ where: { id: l.id }, data: { expectedQuantity: expected.toString() } });
     }
@@ -520,20 +541,44 @@ export class StockDocumentsService {
     const role = doc.countType === 'opening' ? 'temporary_opening' : 'stock_adjustment';
     const movements: Movement[] = [];
     const seen = new Set<string>();
+    // Plan 11 A5: plain items (no batches or serials) are looked up and noted in bulk, so a count of any size finishes in time.
+    const plain = doc.lines.filter((l) => !l.batchId && !l.newBatchNumber && !l.item.trackBatches && !l.item.trackSerials);
+    const plainIds = plain.map((l) => l.itemId);
+    const expectedPlain = new Map(
+      (
+        await tx.$queryRawUnsafe<{ itemId: string; quantityAfter: Prisma.Decimal }[]>(
+          `SELECT DISTINCT ON ("itemId") "itemId", "quantityAfter" FROM "StockLedgerEntry"
+           WHERE "locationId" = $1::uuid AND "itemId" = ANY($2::uuid[]) AND "postingAt" <= $3::timestamp(3)
+           ORDER BY "itemId", "postingAt" DESC, "id" DESC`,
+          locationId,
+          plainIds,
+          doc.postingAt.toISOString().replace('Z', ''),
+        )
+      ).map((r) => [r.itemId, D(r.quantityAfter)]),
+    );
+    const positionsPlain = new Map((await tx.stockPosition.findMany({ where: { locationId, itemId: { in: plainIds } } })).map((p) => [p.itemId, p]));
+    const plainLineIds = new Set(plain.map((l) => l.id));
+    const noted: { id: string; expected: string }[] = [];
     for (const l of doc.lines) {
       const key = `${l.itemId}|${l.batchId ?? l.newBatchNumber ?? ''}`;
       if (seen.has(key)) throw new BadRequestException(`${l.item.code} is listed twice`);
       seen.add(key);
       let batchId = l.batchId;
-      if (!batchId && l.newBatchNumber) batchId = (await this.ensureBatch(tx, l.itemId, l.newBatchNumber, iso(l.newManufactureOn), iso(l.newExpiryOn), actor)).id;
-      const expected = await this.quantityAt(tx, l.itemId, locationId, batchId, doc.postingAt);
+      let expected: Decimal;
+      if (plainLineIds.has(l.id)) {
+        expected = expectedPlain.get(l.itemId) ?? new Decimal(0);
+        noted.push({ id: l.id, expected: expected.toString() });
+      } else {
+        if (!batchId && l.newBatchNumber) batchId = (await this.ensureBatch(tx, l.itemId, l.newBatchNumber, iso(l.newManufactureOn), iso(l.newExpiryOn), actor)).id;
+        expected = await this.quantityAt(tx, l.itemId, locationId, batchId, doc.postingAt);
+        await tx.stockDocumentLine.update({ where: { id: l.id }, data: { expectedQuantity: expected.toString(), batchId } });
+      }
       const counted = D(l.countedQuantity ?? '0');
-      await tx.stockDocumentLine.update({ where: { id: l.id }, data: { expectedQuantity: expected.toString(), batchId } });
       const diff = counted.sub(expected);
       const base = { companyId: doc.companyId, documentId: doc.id, documentLineId: l.id, itemId: l.itemId, locationId, postingDate: iso(doc.postingDate)!, postingAt: doc.postingAt, accountRole: role };
       if (doc.countType === 'opening' && counted.gt(0) && l.unitCost === null) throw new BadRequestException(`${l.item.code}: opening stock needs a cost`);
       if (!l.item.trackBatches && !l.item.trackSerials) {
-        const position = await tx.stockPosition.findUnique({ where: { itemId_locationId: { itemId: l.itemId, locationId } } });
+        const position = plainLineIds.has(l.id) ? positionsPlain.get(l.itemId) : await tx.stockPosition.findUnique({ where: { itemId_locationId: { itemId: l.itemId, locationId } } });
         const costChanges = l.unitCost !== null && !(position && D(position.unitCost).eq(D(l.unitCost)));
         if (diff.abs().lte(QUANTITY_TOLERANCE) && !costChanges) continue; // nothing to change on this line
         movements.push({ ...base, kind: 'set', quantity: counted.toString(), targetCost: l.unitCost?.toString() ?? null });
@@ -545,6 +590,14 @@ export class StockDocumentsService {
             : { ...base, batchId, kind: 'out', quantity: diff.neg().toString() },
         );
       }
+    }
+    for (let i = 0; i < noted.length; i += 5000) {
+      const chunk = noted.slice(i, i + 5000);
+      await tx.$executeRawUnsafe(
+        `UPDATE "StockDocumentLine" d SET "expectedQuantity" = t.q::numeric FROM unnest($1::uuid[], $2::text[]) AS t(i, q) WHERE d."id" = t.i`,
+        chunk.map((n) => n.id),
+        chunk.map((n) => n.expected),
+      );
     }
     if (!movements.length) throw new BadRequestException('Nothing to change: every counted quantity matches the stock');
     const entries = await this.engine.post(tx, movements, { allowNegative: false, actorId: actor.userId, describe });
@@ -690,9 +743,12 @@ export class StockDocumentsService {
 
   private async resolveCountLines(db: Db, lines: CountLineInput[]): Promise<ResolvedLine[]> {
     const out: ResolvedLine[] = [];
+    // In bulk (plan 11 A5): a count can list a whole shop.
+    const items = await this.items.assertItemsUsable(db, lines.map((l) => l.itemId), 'stock');
+    const units = new Map((await db.unit.findMany({ where: { id: { in: [...new Set([...items.values()].map((i) => i.baseUnitId))] } } })).map((u) => [u.id, u]));
     for (const [i, l] of lines.entries()) {
-      const item = await this.items.assertItemUsable(db, l.itemId, 'stock');
-      const unit = await db.unit.findUniqueOrThrow({ where: { id: item.baseUnitId } });
+      const item = items.get(l.itemId)!;
+      const unit = units.get(item.baseUnitId)!;
       const problem = quantityProblem(l.countedQuantity, unit);
       if (problem) throw new BadRequestException(`${item.code}: ${problem}`);
       const serials = (l.serialNumbers ?? []).map((s) => s.trim());
@@ -917,7 +973,16 @@ export class StockDocumentsService {
       const key = e.documentLineId;
       if (!byLine.has(key)) byLine.set(key, D(e.valueChange).abs());
     }
-    for (const [lineId, value] of byLine) await tx.stockDocumentLine.update({ where: { id: lineId }, data: { valueChange: value.toFixed(2) } });
+    // In bulk (plan 11 A5): a count can have tens of thousands of lines.
+    const rows = [...byLine];
+    for (let i = 0; i < rows.length; i += 5000) {
+      const chunk = rows.slice(i, i + 5000);
+      await tx.$executeRawUnsafe(
+        `UPDATE "StockDocumentLine" d SET "valueChange" = t.v::numeric FROM unnest($1::uuid[], $2::text[]) AS t(i, v) WHERE d."id" = t.i`,
+        chunk.map(([id]) => id),
+        chunk.map(([, value]) => value.toFixed(2)),
+      );
+    }
   }
 
   // ---- Output ----

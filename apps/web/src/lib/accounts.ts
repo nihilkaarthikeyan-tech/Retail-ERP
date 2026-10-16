@@ -3,7 +3,7 @@
 // The shapes mirror the API's DTOs (apps/api/src/accounting/*.service.ts).
 // Money is always a decimal string and every sum here uses Decimal (rule 1);
 // the figures are previews only, the API's answer is what counts.
-import { type AccountKind, type CurrentUser, Decimal, hasPermission, type JournalKind, settleOldestFirst } from "shared";
+import { type AccountKind, type CurrentUser, Decimal, hasPermission, JOURNAL_KINDS, type JournalKind, settleOldestFirst } from "shared";
 
 export type AccountFamily = "asset" | "liability" | "equity" | "income" | "expense";
 export type DocStatus = "draft" | "posted" | "cancelled";
@@ -182,6 +182,94 @@ export interface LedgerEntryDto {
   lines: EntryLineDto[];
 }
 
+// ---- Simple expenses and the cash book (plan 11 C8) ----
+
+export interface ExpenseAccountRef {
+  id: string;
+  number: string | null;
+  name: string;
+  kind: AccountKind | null;
+  storeId: string | null;
+  locked: boolean;
+}
+
+/** GET /expenses/options: the user's stores with their cash in hand, the expense heads and the banks. */
+export interface ExpenseOptionsDto {
+  stores: { id: string; code: string; name: string }[];
+  cashInHand: { storeId: string; account: ExpenseAccountRef }[];
+  heads: ExpenseAccountRef[];
+  banks: ExpenseAccountRef[];
+}
+
+export interface ExpenseDto {
+  id: string;
+  number: string | null;
+  expenseDate: string;
+  store: { id: string; code: string; name: string } | null;
+  expenseAccount: ExpenseAccountRef | null;
+  paidFrom: ExpenseAccountRef | null;
+  paidFromKind: "cash" | "bank";
+  amount: string;
+  reference: string | null;
+  remark: string | null;
+  status: "posted" | "cancelled";
+  ledgerEntryId: string | null;
+  createdAt: string;
+  createdBy: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+}
+
+export interface ExpensePage {
+  rows: ExpenseDto[];
+  total: number;
+  page: number;
+  pageSize: number;
+  /** Every posted expense that matches the filters, not only this page. */
+  postedTotal: string;
+}
+
+/** GET /reports/cash-book: one cash or bank account, day by day, with the entries a page at a time. */
+export interface CashBookDto {
+  book: "cash" | "bank";
+  account: { id: string; number: string | null; name: string; kind: AccountKind | null; storeId: string | null };
+  from: string;
+  to: string;
+  limitedToStores: boolean;
+  opening: string;
+  moneyIn: string;
+  moneyOut: string;
+  closing: string;
+  ledgerClosing: string;
+  matchesLedger: boolean;
+  days: { date: string; entries: number; opening: string; moneyIn: string; moneyOut: string; closing: string }[];
+  page: number;
+  pageSize: number;
+  total: number;
+  pageOpening: string;
+  rows: {
+    id: string;
+    date: string;
+    documentType: string;
+    documentId: string;
+    documentNumber: string | null;
+    against: string;
+    store: string | null;
+    remark: string | null;
+    moneyIn: string;
+    moneyOut: string;
+    balance: string;
+    cancelled: boolean;
+  }[];
+}
+
+/** The accounts an expense can be paid from in a store: its cash in hand first, then the banks. */
+export function payFromChoices(options: ExpenseOptionsDto | null, storeId: string): ExpenseAccountRef[] {
+  if (!options) return [];
+  const cash = options.cashInHand.find((c) => c.storeId === storeId)?.account;
+  return [...(cash ? [cash] : []), ...options.banks];
+}
+
 // ---- Labels ----
 
 export const FAMILY_LABELS: Record<AccountFamily, string> = {
@@ -201,7 +289,11 @@ export const JOURNAL_KIND_LABELS: Record<JournalKind, string> = {
   debit_note: "Debit note to a supplier (no goods)",
   write_off: "Writing off a small balance",
   opening: "Opening balances (going live)",
+  expense: "Expense (from Add expense)",
 };
+
+/** Kinds offered on the journal form: expenses have their own screen (plan 11 C8). */
+export const JOURNAL_FORM_KINDS: JournalKind[] = JOURNAL_KINDS.filter((k) => k !== "expense");
 
 export const PAYMENT_KIND_LABELS: Record<PaymentKind, string> = {
   receipt: "Money received from a customer",

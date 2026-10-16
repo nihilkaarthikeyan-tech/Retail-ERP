@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bestOffer,
   changeDue,
+  deliveryChargeFor,
   checkDiscount,
   denominationTotal,
   effectiveDiscountPercent,
@@ -10,6 +11,8 @@ import {
   freeUnits,
   inclusiveTax,
   lineOfferSaving,
+  planOffers,
+  type PlanOffer,
   roundBill,
   saleLineAmount,
   shareByWeight,
@@ -87,6 +90,76 @@ describe('offers (decision 17)', () => {
 
   it('a bill discount is shared by amount; the last line takes the remainder', () => {
     expect(shareByWeight('10', ['100', '100', '100']).map((x) => x.toFixed(2))).toEqual(['3.33', '3.33', '3.34']);
+  });
+});
+
+describe('offers over the whole bill (plan 11 B3, scenario 11.12)', () => {
+  const any3: PlanOffer = { id: 'o1', code: 'ANY3', kind: 'mix_match', setQuantity: 3, setPrice: '999' };
+  const cheapest: PlanOffer = { id: 'o2', code: 'B2CF', kind: 'mix_match', setQuantity: 2, cheapestFree: true };
+  const belt: PlanOffer = { id: 'o3', code: 'BELT', kind: 'buy_get', buyQuantity: '1', freeQuantity: '1', freeUnitValue: '299' };
+  const line = (lineNo: number, quantity: string, price: string, offers: PlanOffer[], countable = true) => ({ lineNo, quantity, price, offers, countable });
+  const discounts = (plan: ReturnType<typeof planOffers>) => [...plan.lines.entries()].sort((a, b) => a[0] - b[0]).map(([n, p]) => [n, p.offer.code, p.discount.toFixed(2)]);
+
+  it('any 3 for ₹999: ₹198 spread over three ₹399 lines; a fourth pays full price', () => {
+    expect(discounts(planOffers([line(1, '1', '399', [any3]), line(2, '1', '399', [any3]), line(3, '1', '399', [any3])]))).toEqual([
+      [1, 'ANY3', '66.00'],
+      [2, 'ANY3', '66.00'],
+      [3, 'ANY3', '66.00'],
+    ]);
+    expect(discounts(planOffers([line(1, '4', '399', [any3])]))).toEqual([[1, 'ANY3', '198.00']]);
+    // Uneven prices: ₹1,150 for ₹999 saves ₹151, shared by value; the last line takes the remainder.
+    expect(discounts(planOffers([line(1, '2', '400', [any3]), line(2, '1', '350', [any3])]))).toEqual([
+      [1, 'ANY3', '105.04'],
+      [2, 'ANY3', '45.96'],
+    ]);
+    // Six make two sets.
+    expect(discounts(planOffers([line(1, '6', '399', [any3])]))).toEqual([[1, 'ANY3', '396.00']]);
+    // Not worth it: three for more than they cost apart.
+    expect(planOffers([line(1, '3', '300', [any3])]).lines.size).toBe(0);
+  });
+
+  it('buy 2, cheapest free: the ₹499 top is free; sets take the dearest first', () => {
+    expect(discounts(planOffers([line(1, '1', '599', [cheapest]), line(2, '1', '499', [cheapest])]))).toEqual([
+      [1, 'B2CF', '0.00'],
+      [2, 'B2CF', '499.00'],
+    ]);
+    const four = planOffers([line(1, '1', '299', [cheapest]), line(2, '1', '599', [cheapest]), line(3, '1', '399', [cheapest]), line(4, '1', '499', [cheapest])]);
+    expect(discounts(four).filter((d) => d[2] !== '0.00')).toEqual([
+      [1, 'B2CF', '299.00'],
+      [4, 'B2CF', '499.00'],
+    ]);
+  });
+
+  it('buy a shirt, get a belt: a free line of the other item', () => {
+    const plan = planOffers([line(1, '2', '1299', [belt])]);
+    expect(plan.freeItems.map((f) => [f.offer.code, f.quantity.toString(), f.ofLineNo, f.saving.toFixed(2)])).toEqual([['BELT', '2', 1, '598.00']]);
+    expect(plan.lines.get(1)?.discount.toFixed(2)).toBe('0.00');
+    // Nothing to give when the free item has no price.
+    expect(planOffers([line(1, '1', '1299', [{ ...belt, freeUnitValue: null }])]).freeItems).toEqual([]);
+  });
+
+  it('the bill gets the offers that save the most; lines with a manual discount do not count', () => {
+    const tenPct: PlanOffer = { id: 'o4', code: 'TEN', kind: 'percent', value: '10' };
+    const quarter: PlanOffer = { id: 'o5', code: 'QUARTER', kind: 'percent', value: '25' };
+    const three = [1, 2, 3].map((n) => line(n, '1', '399', [tenPct, any3]));
+    expect(discounts(planOffers(three)).map((d) => d[1])).toEqual(['ANY3', 'ANY3', 'ANY3']);
+    const better = [1, 2, 3].map((n) => line(n, '1', '399', [quarter, any3]));
+    expect(discounts(planOffers(better))).toEqual([
+      [1, 'QUARTER', '99.75'],
+      [2, 'QUARTER', '99.75'],
+      [3, 'QUARTER', '99.75'],
+    ]);
+    const manual = [line(1, '1', '399', [any3]), line(2, '1', '399', [any3]), line(3, '1', '399', [any3], false)];
+    expect(planOffers(manual).lines.size).toBe(0);
+  });
+});
+
+describe('home delivery charge (decision 47)', () => {
+  it('₹50 below ₹2,000; nothing at or above it, or with no charge set', () => {
+    expect(deliveryChargeFor('1500', '50', '2000').toFixed(2)).toBe('50.00');
+    expect(deliveryChargeFor('2000', '50', '2000').toFixed(2)).toBe('0.00');
+    expect(deliveryChargeFor('2500', '50', null).toFixed(2)).toBe('50.00');
+    expect(deliveryChargeFor('100', '0', null).toFixed(2)).toBe('0.00');
   });
 });
 

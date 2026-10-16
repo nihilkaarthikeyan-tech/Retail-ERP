@@ -146,6 +146,8 @@ export interface LabelDto {
   name: string;
   unit: string | null;
   price: string | null;
+  /** Plan 11 C5: on a markdown's labels, the price before the markdown. */
+  wasPrice?: string | null;
   mrp: string | null;
   barcode: BarcodeDto | null;
   batch: string | null;
@@ -265,7 +267,7 @@ export function eanDigits(b: BarcodeDto): { x: number; ch: string }[] | null {
 export interface ImportFieldDto {
   key: string;
   label: string;
-  type: "text" | "code" | "number" | "date" | "yesno";
+  type: "text" | "code" | "number" | "date" | "daymonth" | "yesno";
   required?: boolean;
   aliases?: string[];
   digitsLength?: number[];
