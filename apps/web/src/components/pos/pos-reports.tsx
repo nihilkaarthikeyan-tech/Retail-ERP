@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
+import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { Alert, Badge, Button, CheckInput, DataTable, Dialog, SelectInput, TextareaInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -372,6 +373,12 @@ function ShiftDetails({ id }: { id: string }) {
               </li>
             ))}
           </ul>
+        </>
+      ) : null}
+      {s.status === "closed" ? (
+        <>
+          <h3>In the accounts</h3>
+          <LedgerEntryButton documentType="pos_shift" documentId={s.id} inline />
         </>
       ) : null}
     </>

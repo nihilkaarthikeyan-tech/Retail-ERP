@@ -98,7 +98,15 @@ export interface DraftBill {
   couponCode: string | null;
   billDiscount: { percent?: string; amount?: string; approvalToken?: string; approvedBy?: string } | null;
   lines: DraftLine[];
-  ret: { originalBillId: string; originalNumber: string; customerId: string; lines: DraftReturnLine[]; reason: string | null } | null;
+  ret: {
+    originalBillId: string;
+    originalNumber: string;
+    customerId: string;
+    lines: DraftReturnLine[];
+    reason: string | null;
+    /** The original bill was paid (partly) on account, so the refund may go back on account (plan 07 §1a). */
+    paidOnAccount?: boolean;
+  } | null;
   payments: DraftPayment[];
   /** Given once when the cashier first presses Finish; the idempotency key (pos-offline §4). */
   clientId: string | null;
@@ -595,6 +603,25 @@ export function checkPayments(net: Decimal, payments: DraftPayment[], methods: S
   const left = net.neg().sub(paid.neg());
   if (left.lt(0)) problem = problem ?? `The refund must be exactly ₹${net.neg().toFixed(2)}`;
   return { paid, change: ZERO, short: left.gt(0) ? left : ZERO, problem };
+}
+
+/** True when a non-zero payment uses an on-account method (customer pays later, plan 07 §1a). */
+export function usesOnAccount(payments: DraftPayment[], methods: SnapPaymentMethod[]): boolean {
+  const kinds = new Map(methods.map((m) => [m.id, m.kind]));
+  return payments.some((p) => {
+    if (kinds.get(p.methodId) !== "on_account" || p.amount.trim() === "") return false;
+    try {
+      return !D(p.amount).isZero();
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Whether the bill is for a named customer (not walk-in): on account needs one. */
+export function hasNamedCustomer(draft: DraftBill, walkInCustomerId: string | null): boolean {
+  if (draft.ret) return draft.ret.customerId !== walkInCustomerId;
+  return !!draft.customer;
 }
 
 /** Payments as sent: signed (refunds minus), zero rows dropped, at least one row. */

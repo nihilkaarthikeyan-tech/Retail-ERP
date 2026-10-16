@@ -3,7 +3,8 @@
 // The original bill is found on the server by its number (any till) or, when
 // offline, among this till's own recent bills. The cashier picks the lines and
 // quantities; new items added afterwards make it an exchange, netted on one
-// payment. Refunds go back only by refund methods (pay screen).
+// payment. Refunds go back only by refund methods (pay screen); a bill paid
+// on account may be refunded on account for its named customer (plan 07 §1a).
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
@@ -104,7 +105,8 @@ export function ReturnDialog({ open, engine, onClose, onChosen }: ReturnDialogPr
       });
     }
     if (!lines.length) return setError("Choose what comes back");
-    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null }, bill);
+    const paidOnAccount = bill.payments.some((p) => p.paymentMethod.kind === "on_account");
+    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null, paidOnAccount }, bill);
     setBill(null);
     setNumber("");
     setCounts({});

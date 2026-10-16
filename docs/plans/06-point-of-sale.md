@@ -5,7 +5,7 @@ Status: **approved by the project owner on 15 October 2026** with these answers 
 2. Offers: simple offers and coupons. The best one is applied automatically. Cumulative, slab and stacking offers come later.
 3. Cashier discount: up to 5% without a manager PIN, never above the item's maximum.
 4. One shift per till, with PIN switching between cashiers.
-5. No credit sales at the till until module 7.
+5. No credit sales at the till until module 7. (Module 7's plan, answer 2, adds them: see `07-accounting.md` §1a.)
 6. A cash difference above ₹100 at closing needs a manager PIN and a remark.
 7. Companion plan answers: the offline queue on every till; printer and cash drawer now, display and scale later; manager approvals need the connection.
 

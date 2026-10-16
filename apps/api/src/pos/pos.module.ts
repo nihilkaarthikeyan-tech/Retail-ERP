@@ -12,6 +12,7 @@ import { PinService } from './pin.service.js';
 import { PosBillsService } from './pos-bills.service.js';
 import { PosCommon } from './pos-common.service.js';
 import { PosController } from './pos.controller.js';
+import { PosPostings } from './pos-postings.service.js';
 import { PosReportsService } from './pos-reports.service.js';
 import { PosSetupService } from './pos-setup.service.js';
 import { PosSnapshotService } from './pos-snapshot.service.js';
@@ -20,7 +21,7 @@ import { ShiftsService } from './shifts.service.js';
 @Module({
   imports: [CatalogueModule, CompanyModule, FinancialYearsModule, ItemsModule, InventoryModule, PartiesModule, PricingModule],
   controllers: [PosController],
-  providers: [PosCommon, PosSetupService, PinService, OffersService, ShiftsService, PosBillsService, PosSnapshotService, PosReportsService],
-  exports: [PosBillsService],
+  providers: [PosCommon, PosPostings, PosSetupService, PinService, OffersService, ShiftsService, PosBillsService, PosSnapshotService, PosReportsService],
+  exports: [PosBillsService, PosPostings],
 })
 export class PosModule {}

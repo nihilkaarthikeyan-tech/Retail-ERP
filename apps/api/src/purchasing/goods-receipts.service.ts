@@ -33,6 +33,7 @@ import { type Movement, StockEngine } from '../inventory/stock-engine.service.js
 import { NumberingService } from '../numbering/numbering.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
+import { PurchasePostings } from './purchase-postings.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
 
 export const receiptInclude = {
@@ -96,6 +97,7 @@ export class GoodsReceiptsService {
     private readonly orders: PurchaseOrdersService,
     private readonly engine: StockEngine,
     private readonly stockDocs: StockDocumentsService,
+    private readonly postings: PurchasePostings,
   ) {}
 
   // ---- Reading ----
@@ -428,7 +430,8 @@ export class GoodsReceiptsService {
       const basicReceived = D(l.basicAcceptedQuantity).add(D(l.basicRejectedQuantity));
       const cost = unitCostPerBasicUnit({ taxable: l.taxableAmount.toString(), extraCharges: l.extraCharges.toString(), basicQuantity: basicReceived });
       costs.set(l.id, cost);
-      const base = { companyId: r.companyId, documentType: 'goods_receipt', documentId: r.id, documentLineId: l.id, itemId: l.itemId, batchId: l.batchId, postingDate, postingAt: r.postingAt, accountRole: ROLE };
+      // The receipt posts its own ledger entry (freight is credited separately), so the engine holds the value.
+      const base = { companyId: r.companyId, documentType: 'goods_receipt', documentId: r.id, documentLineId: l.id, itemId: l.itemId, batchId: l.batchId, postingDate, postingAt: r.postingAt, accountRole: ROLE, ledger: 'held' as const };
       if (D(l.basicAcceptedQuantity).gt(0)) movements.push({ ...base, locationId: l.shelfLocationId, kind: 'in', quantity: l.basicAcceptedQuantity.toString(), incomingCost: cost.toString() });
       if (D(l.basicRejectedQuantity).gt(0)) movements.push({ ...base, locationId: l.rejectedLocationId!, kind: 'in', quantity: l.basicRejectedQuantity.toString(), incomingCost: cost.toString() });
     }
@@ -441,6 +444,7 @@ export class GoodsReceiptsService {
       const basicCharged = this.common.basic(D(l.receivedQuantity).sub(D(l.freeQuantity)), D(l.factor));
       if (basicCharged.gt(0)) await tx.item.update({ where: { id: l.itemId }, data: { lastPurchasePrice: roundTo(D(l.taxableAmount).div(basicCharged), 4).toString() } });
     }
+    await this.postings.goodsReceipt(tx, r.id, entries.map((e) => e.id), actor.userId);
     const stockValue = entries.reduce((s, e) => s.add(D(e.valueChange)), new Decimal(0));
     await tx.goodsReceipt.update({
       where: { id },
@@ -678,7 +682,13 @@ export class GoodsReceiptsService {
       throw new ForbiddenException('Only the Accountant may cancel a goods receipt from an earlier month');
     }
     await this.common.checkStockDate(tx, r.companyId, iso(r.postingDate)!, 'The cancellation');
-    await this.engine.reverseDocument(tx, id, (e) => e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, r) });
+    if (r.isReturn) {
+      // A return to the supplier posted itself through the engine (goods received not billed against stock).
+      await this.engine.reverseDocument(tx, id, (e) => e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, r) });
+    } else {
+      const reversals = await this.engine.reverseDocument(tx, id, (e) => e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, r), ledger: 'held' });
+      await this.postings.cancelGoodsReceipt(tx, id, reversals.map((e) => e.id), actor.userId);
+    }
     await this.applySerials(tx, r, 'cancel', actor);
 
     for (const l of r.lines) {

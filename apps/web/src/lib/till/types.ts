@@ -6,7 +6,7 @@ export interface SnapPaymentMethod {
   id: string;
   code: string;
   name: string;
-  kind: "cash" | "card" | "upi" | "other";
+  kind: "cash" | "card" | "upi" | "other" | "on_account";
   allowRefund: boolean;
   needsReference: boolean;
   isDefault: boolean;

@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { use, useState } from "react";
 import { businessDate, hasPermission } from "shared";
+import { PartyBalance } from "@/components/accounts/party-balance";
 import { AuditTable } from "@/components/audit-table";
 import { PartyAddresses } from "@/components/parties/party-addresses";
 import { PartyContacts } from "@/components/parties/party-contacts";
@@ -81,6 +82,8 @@ export function SupplierEditor({ params }: { params: Promise<{ id: string }> }) 
         {s.isTransporter ? <Badge kind="neutral">Transporter</Badge> : null}
         <PartyStatusBadge status={s.status} />
         <HoldBadge hold={effectiveHold(s, businessDate())} until={s.holdUntil} />
+        <span className="spacer" />
+        <PartyBalance partyType="supplier" partyId={s.id} />
       </div>
       <div className="tabs" role="tablist" aria-label="Supplier sections">
         {tabs.map((t) => (

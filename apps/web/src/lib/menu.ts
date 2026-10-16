@@ -26,6 +26,7 @@ const SECTION_AREA: Record<string, MenuArea> = {
   Purchases: "purchase",
   "Billing counter": "sales",
   Inventory: "stock",
+  Accounts: "accounts",
   Administration: "admin",
 };
 
@@ -81,6 +82,15 @@ export const MENU: MenuEntry[] = [
   { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
   { href: "/pos/settings", label: "Till settings", permissions: ["pos.setup"], section: "Billing counter", icon: "settings" },
   { href: "/pos/my-pin", label: "My till PIN", permissions: ["pos.sell", "pos.approve"], section: "Billing counter", icon: "key" },
+  // Module 7
+  { href: "/accounts", label: "Chart of accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", exact: true, icon: "book" },
+  { href: "/accounts/journals", label: "Journals", permissions: ["accounts.view", "journals.post", "cash.deposit"], section: "Accounts", icon: "file" },
+  { href: "/accounts/payments", label: "Receipts and payments", permissions: ["accounts.view", "payments.post", "cash.deposit"], section: "Accounts", icon: "rupee" },
+  { href: "/accounts/banks", label: "Bank accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "bank" },
+  { href: "/accounts/opening", label: "Opening balances", permissions: ["accounts.view", "journals.post"], section: "Accounts", icon: "calendar" },
+  { href: "/accounts/reports", label: "Accounts reports", permissions: ["accounts.view", "payments.post"], section: "Accounts", icon: "list" },
+  { href: "/accounts/closing", label: "Closing the books", permissions: ["accounts.view", "books.lock"], section: "Accounts", icon: "lock" },
+  { href: "/accounts/defaults", label: "Default accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "settings" },
   // Module 1 set-up pages, kept at the bottom of the menu
   { href: "/company", label: "Company", permissions: ["company.view"], section: "Administration", icon: "building" },
   { href: "/stores", label: "Stores", permissions: ["stores.view"], section: "Administration", icon: "store" },

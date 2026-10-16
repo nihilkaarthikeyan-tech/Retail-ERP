@@ -5,8 +5,8 @@
 import { Decimal, type PosTransactionInput } from "shared";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api";
-import { TillEngine } from "./engine";
-import { ASHA, BASMATI, CARD, CASH, fakeApi, PARLE, PREFIX, sampleOffers, sampleSnapshot, sampleUser, SURF, TILL_ID, UPI } from "./fixtures";
+import { CreditApprovalError, ON_ACCOUNT_NAMED, TillEngine } from "./engine";
+import { ACCOUNT, ASHA, BASMATI, CARD, CASH, fakeApi, PARLE, PREFIX, sampleOffers, sampleSnapshot, sampleUser, snapshotWithOnAccount, SURF, TILL_ID, UPI } from "./fixtures";
 import { formatNumber, NumberCounter, prefixFor } from "./numbers";
 import { buildTransaction, checkPayments, type DraftBill, type DraftLine, emptyDraft, gstRateFor, listPriceFor, priceBill } from "./pricing";
 import { SendQueue } from "./queue";
@@ -357,5 +357,128 @@ describe("the till engine", () => {
     await e.openShift("2000", "Ravi");
     await e.cashMovement("out", "200", "Tea");
     await expect(e.closingInfo()).rejects.toThrow(/2 entries are still waiting to be sent/);
+  });
+});
+
+describe("on account at the till (plan 07 §1a, scenario 7.12)", () => {
+  const asha = { id: ASHA, name: "Asha", mobile: "9876543210", gstin: null, stateCode: null, customerGroupId: null };
+  const onAccount = [{ methodId: ACCOUNT, amount: "120", reference: "" }];
+  const serverShift = { id: "s1", clientId: "sc", businessDate: DATE, openedById: "u", openedAt: at.toISOString(), status: "open", openingCash: [], cashMovements: [] };
+
+  function onlineApi(postBill: (b: PosTransactionInput) => Promise<TransactionResult>) {
+    return fakeApi({ me: async () => sampleUser, snapshot: async () => snapshotWithOnAccount(), currentShift: async () => serverShift, postBill: vi.fn(postBill) });
+  }
+
+  function engine(api = fakeApi()) {
+    return new TillEngine({ store: new MemoryStore(), api, device, now: () => at, uuid });
+  }
+
+  const ok = { repeated: false, sale: null, return: null, net: "120.00", change: "0.00", receipts: [] } satisfies TransactionResult;
+
+  it("is refused offline and never queued", async () => {
+    const e = engine();
+    await e.store.set("snapshot", snapshotWithOnAccount());
+    await e.start();
+    await e.openShift("0", "Ravi");
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, customer: asha, lines: [line(BASMATI, "1")], payments: onAccount })).rejects.toThrow(/On account needs the connection/);
+    expect((await e.queue.items()).map((i) => i.kind)).toEqual(["shift_open"]);
+  });
+
+  it("is not queued when the connection drops while sending; the bill stays open", async () => {
+    const api = onlineApi(async () => {
+      throw new ApiError(0, "Cannot reach the server");
+    });
+    const e = engine(api);
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, customer: asha, lines: [line(BASMATI, "1")], payments: onAccount })).rejects.toThrow(/connection dropped.*take another payment method/);
+    expect(await e.queue.items()).toEqual([]);
+    expect(e.getState().online).toBe(false);
+    const kept = (await e.loadDraft()).draft;
+    expect(kept.payments).toEqual(onAccount);
+    expect(kept.clientId).not.toBeNull();
+  });
+
+  it("over the limit: 403 asks for a manager, then the same bill is sent again with creditApprovalToken", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const e = engine(
+      onlineApi(async (b) => {
+        bodies.push(b);
+        if (!b.creditApprovalToken) throw new ApiError(403, "Over the credit limit: owes ₹4900.00, limit ₹5000.00, this bill ₹120.00. A manager must approve");
+        return ok;
+      }),
+    );
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const err = await e.finish({ ...d, customer: asha, lines: [line(BASMATI, "1")], payments: onAccount }).catch((x: unknown) => x);
+    expect(err).toBeInstanceOf(CreditApprovalError);
+    expect((err as CreditApprovalError).reason).toMatch(/^Over the credit limit/);
+    expect(await e.queue.items()).toEqual([]);
+
+    const kept = (await e.loadDraft()).draft;
+    const res = await e.finish(kept, { creditApprovalToken: "approval-1" });
+    expect(res.offline).toBe(false);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ clientId: bodies[0].clientId, creditApprovalToken: "approval-1", offline: false, customerId: ASHA });
+    expect(bodies[1].sale?.number).toBe(bodies[0].sale?.number);
+    expect(bodies[1].payments).toEqual([{ paymentMethodId: ACCOUNT, amount: "120.00", reference: null }]);
+  });
+
+  it("too much overdue is also a manager approval", async () => {
+    const e = engine(
+      onlineApi(async () => {
+        throw new ApiError(403, "₹800.00 is overdue (allowed ₹0.00). A manager must approve");
+      }),
+    );
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, customer: asha, lines: [line(BASMATI, "1")], payments: onAccount })).rejects.toBeInstanceOf(CreditApprovalError);
+  });
+
+  it("a customer not approved for credit is told plainly; the bill stays open and is not queued", async () => {
+    const e = engine(
+      onlineApi(async () => {
+        throw new ApiError(400, "This customer is not approved for credit");
+      }),
+    );
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const err = await e.finish({ ...d, customer: asha, lines: [line(BASMATI, "1")], payments: onAccount }).catch((x: unknown) => x);
+    expect(err).not.toBeInstanceOf(CreditApprovalError);
+    expect((err as Error).message).toBe("This customer is not approved for credit");
+    expect(await e.queue.items()).toEqual([]);
+    expect((await e.loadDraft()).restored).toBe(true);
+  });
+
+  it("a walk-in customer cannot pay on account", async () => {
+    const post = vi.fn(async () => ok);
+    const e = engine(onlineApi(post));
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    await expect(e.finish({ ...d, lines: [line(BASMATI, "1")], payments: onAccount })).rejects.toThrow(ON_ACCOUNT_NAMED);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("refunds on account for the named customer of a bill paid on account", async () => {
+    const bodies: PosTransactionInput[] = [];
+    const e = engine(
+      onlineApi(async (b) => {
+        bodies.push(b);
+        return { ...ok, net: "-120.00" };
+      }),
+    );
+    await e.start();
+    const { draft: d } = await e.loadDraft();
+    const ret = {
+      originalBillId: "b1",
+      originalNumber: `${PREFIX}000042`,
+      customerId: ASHA,
+      reason: null,
+      paidOnAccount: true,
+      lines: [{ key: "r1", originalLineId: "l1", itemId: BASMATI, unitId: "d0000000-0000-4000-8000-000000000001", code: "ITM-000001", name: "Basmati", quantity: "1", maxQuantity: "1", originalQuantity: "1", originalPrice: "120.00", originalDiscount: "0.00", originalLineTotal: "120.00", gstRate: "5", isFree: false }],
+    };
+    await e.finish({ ...d, ret, payments: onAccount });
+    expect(bodies[0]).toMatchObject({ customerId: ASHA, payments: [{ paymentMethodId: ACCOUNT, amount: "-120.00" }] });
   });
 });

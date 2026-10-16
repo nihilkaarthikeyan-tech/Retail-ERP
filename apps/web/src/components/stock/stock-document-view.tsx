@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Decimal } from "shared";
+import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { Alert, Button, DataTable, type Column } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -129,6 +130,8 @@ export function StockDocumentView({ doc, locations, stores, onChanged }: StockDo
         </h1>
         <StockStatusBadge status={doc.status} />
         <BackDatedBadge show={doc.isBackDated} />
+        <span className="spacer" />
+        {doc.status !== "draft" ? <LedgerEntryButton documentType="stock_document" documentId={doc.id} /> : null}
       </div>
       {doc.status === "cancelled" ? (
         <Alert kind="info">

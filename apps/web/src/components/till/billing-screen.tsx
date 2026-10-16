@@ -10,9 +10,9 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Decimal, hasPermission } from "shared";
 import { Alert, Button } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
-import { type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
+import { CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
-import { type ComputedLine, type DraftBill, type DraftLine, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems } from "@/lib/till/pricing";
+import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
 import type { Receipt, SnapItem, StoredSnapshot } from "@/lib/till/types";
 import { BillOptionsDialog, CustomerDialog, HelperDialog, ParkedDialog } from "./bill-dialogs";
@@ -64,6 +64,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const [scanError, setScanError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogName | null>(null);
   const [approval, setApproval] = useState<{ request: ApprovalRequest; need: NeededApproval } | null>(null);
+  /** An on-account bill over the credit limit waiting for a manager's PIN (plan 07 §1a). */
+  const [creditApproval, setCreditApproval] = useState<ApprovalRequest | null>(null);
   const [payBusy, setPayBusy] = useState(false);
   const [payError, setPayError] = useState<string | null>(null);
   const [priceChanged, setPriceChanged] = useState<{ serverTotal: string; tillTotal: string } | null>(null);
@@ -210,12 +212,14 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     return receipts.map((r) => withHeader(r, till, { cashier: cashierName, customer: draft?.customer?.name ?? null }));
   }
 
-  async function finish() {
+  async function finish(creditApprovalToken?: string) {
     if (!draft || !bill) return;
     setPayBusy(true);
     setPayError(null);
     try {
-      const res = await engine.finish(draft);
+      // After a manager's approval the saved bill is sent again: same identity and numbers.
+      const input = creditApprovalToken ? (await engine.loadDraft()).draft : draft;
+      const res = await engine.finish(input, { creditApprovalToken });
       const receipts = printable(res.receipts);
       setDialog(null);
       setDone({ receipts, change: res.change, offline: res.offline });
@@ -229,7 +233,15 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       if (err instanceof PriceChangedError) {
         setPriceChanged({ serverTotal: err.serverTotal, tillTotal: err.tillTotal });
         setDialog(null);
-      } else setPayError(errorMessage(err));
+      } else if (err instanceof CreditApprovalError) {
+        // Over the credit limit: a store manager's PIN, then the same bill is sent again.
+        const customer = draft.customer?.name ?? snapshot.customers.find((c) => c.id === draft.ret?.customerId)?.name ?? "customer";
+        setDialog(null);
+        setCreditApproval({ action: "credit_over_limit", details: `${customer} on account ${rupees(bill.net)}`, reason: err.reason });
+      } else {
+        setPayError(errorMessage(err));
+        setDialog("pay");
+      }
       // The bill keeps the identity and numbers it was given (sent again as the same bill).
       const kept = await engine.loadDraft();
       setDraft(kept.draft);
@@ -281,7 +293,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         searchRef.current?.focus();
         return;
       }
-      if (dialog || approval) return;
+      if (dialog || approval || creditApproval) return;
       const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       switch (e.key) {
         case "F2":
@@ -690,6 +702,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         methods={methods}
         busy={payBusy}
         error={payError}
+        online={state.online && !state.signedOut}
+        namedCustomer={hasNamedCustomer(draft, till.walkInCustomerId)}
+        refundOnAccount={!!draft.ret?.paidOnAccount}
         onChange={(payments) => change({ ...draft, payments })}
         onFinish={() => void finish()}
         onClose={() => setDialog(null)}
@@ -740,6 +755,20 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       />
       {dialog === "helper" ? <HelperDialog open onClose={() => setDialog(null)} /> : null}
       <ManagerApprovalDialog api={engine.api} online={state.online} request={approval?.request ?? null} onApproved={approved} onClose={() => setApproval(null)} />
+      <ManagerApprovalDialog
+        api={engine.api}
+        online={state.online}
+        request={creditApproval}
+        onApproved={(token) => {
+          setCreditApproval(null);
+          void finish(token);
+        }}
+        onClose={() => {
+          setPayError(creditApproval ? `${creditApproval.reason}. Not approved; take another payment method.` : null);
+          setCreditApproval(null);
+          setDialog("pay");
+        }}
+      />
       <PrintArea receipts={print.receipts} job={print.job} />
     </>
   );

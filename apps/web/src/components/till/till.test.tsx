@@ -6,11 +6,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState } from "react";
 import { Decimal } from "shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 import { TillEngine } from "@/lib/till/engine";
-import { fakeApi, sampleSnapshot, TILL_ID } from "@/lib/till/fixtures";
+import { ASHA, fakeApi, sampleSnapshot, sampleUser, snapshotWithOnAccount, TILL_ID } from "@/lib/till/fixtures";
 import { type DraftPayment, emptyDraft } from "@/lib/till/pricing";
 import { MemoryStore } from "@/lib/till/storage";
-import type { LocalShift } from "@/lib/till/types";
+import type { LocalShift, Receipt, TransactionResult } from "@/lib/till/types";
 import { PayDialog } from "./pay-dialog";
 import { NotATill, TillApp } from "./till-app";
 import { statusText } from "./till-status";
@@ -116,7 +117,7 @@ describe("the till offline", () => {
     expect(within(done).getByText(/Saved on the till/)).toBeTruthy();
     expect(within(done).getAllByText(/MAIN-T1-2026-27-000042/).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getByRole("button", { name: /Sync status: Offline, 1 waiting/ })).toBeTruthy());
-    expect(window.print).toHaveBeenCalled();
+    await waitFor(() => expect(window.print).toHaveBeenCalled());
 
     const [item] = await engine.queue.items();
     expect(item).toMatchObject({ kind: "bill", status: "waiting" });
@@ -139,5 +140,99 @@ describe("the till offline", () => {
     render(<TillApp device={device} engine={engine} />);
     expect(await screen.findByText("Bill restored.")).toBeTruthy();
     expect(screen.getByTestId("bill-total").textContent).toContain("₹132.00");
+  });
+});
+
+describe("on account at the till (plan 07 §1a)", () => {
+  function Harness({ online = true, namedCustomer = false }: { online?: boolean; namedCustomer?: boolean }) {
+    const [payments, setPayments] = useState<DraftPayment[]>([]);
+    const draft = { ...emptyDraft("d", at), payments };
+    return <PayDialog open net={new Decimal("120")} draft={draft} methods={snapshotWithOnAccount().till.paymentMethods} busy={false} error={null} online={online} namedCustomer={namedCustomer} onChange={setPayments} onFinish={() => {}} onClose={() => {}} />;
+  }
+
+  it("a walk-in customer cannot choose On account; the cashier is pointed to F6 Customer", () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "On account" }));
+    expect(screen.getByText(/only for a named customer.*F6 Customer/)).toBeTruthy();
+    expect(screen.queryByLabelText("On account amount")).toBeNull();
+    expect((screen.getByRole("button", { name: /Finish and print/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("for a named customer it takes what is still to pay and gives no change", () => {
+    render(<Harness namedCustomer />);
+    fireEvent.click(screen.getByRole("button", { name: "On account" }));
+    expect((screen.getByLabelText("On account amount") as HTMLInputElement).value).toBe("120.00");
+    expect(screen.getByTestId("pay-change").textContent).toContain("₹0.00");
+    expect((screen.getByRole("button", { name: /Finish and print/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("is switched off while the till is offline: needs the connection", () => {
+    render(<Harness online={false} namedCustomer />);
+    const button = screen.getByRole("button", { name: /On account \(needs the connection\)/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+  });
+
+  it("over the credit limit: manager PIN, then the same bill is sent again and finished", async () => {
+    const store = new MemoryStore();
+    await store.set("snapshot", snapshotWithOnAccount());
+    const basmati = sampleSnapshot().items[0];
+    await store.set("draft", {
+      ...emptyDraft("d1", at),
+      customer: { id: ASHA, name: "Asha", mobile: "9876543210", gstin: null, stateCode: null, customerGroupId: null },
+      lines: [{ key: "k1", itemId: basmati.id, unitId: basmati.baseUnitId, quantity: "1", barcode: null, priceOverride: null, discountPercent: "0" }],
+    });
+    const receipt: Receipt = {
+      billId: "b1",
+      number: "MAIN-T1-2026-27-000042",
+      kind: "sale",
+      duplicate: false,
+      provisional: true,
+      soldAt: at.toISOString(),
+      till: "T1",
+      footer: null,
+      lines: [{ name: basmati.name, code: basmati.code, hsn: "1006", quantity: "1", price: "120.00", discount: "0.00", amount: "120.00", free: false, serials: [] }],
+      gstTable: [],
+      totals: { gross: "120.00", discount: "0.00", taxable: "114.29", rounding: "0.00", total: "120.00" },
+      payments: [{ method: "On account", amount: "120.00", reference: null }],
+      change: "0.00",
+    };
+    const bodies: { clientId: string; creditApprovalToken?: string }[] = [];
+    const approve = vi.fn(async () => ({ token: "approval-1", manager: { id: "m1", name: "Meena" } }));
+    const api = fakeApi({
+      me: async () => sampleUser,
+      snapshot: async () => snapshotWithOnAccount(),
+      currentShift: async () => ({ id: "s1", clientId: "sc", businessDate: "2026-10-15", openedById: "u", openedAt: at.toISOString(), status: "open", openingCash: [], cashMovements: [] }),
+      people: async () => ({ managers: [{ id: "m1", name: "Meena" }], cashiers: [] }),
+      approve,
+      postBill: async (b) => {
+        bodies.push(b);
+        if (!b.creditApprovalToken) throw new ApiError(403, "Over the credit limit: owes ₹4900.00, limit ₹5000.00, this bill ₹120.00. A manager must approve");
+        return { repeated: false, sale: null, return: null, net: "120.00", change: "0.00", receipts: [receipt] } satisfies TransactionResult;
+      },
+    });
+    const engine = new TillEngine({ store, api, device, now: () => at, uuid });
+    render(<TillApp device={device} engine={engine} />);
+    await screen.findByRole("search");
+    await waitFor(() => expect(engine.getState().online).toBe(true));
+
+    fireEvent.keyDown(window, { key: "F4" });
+    fireEvent.click(await screen.findByRole("button", { name: "On account" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Finish and print/ }));
+    });
+
+    const box = await screen.findByRole("dialog", { name: "Manager approval" });
+    expect(within(box).getByText(/^Over the credit limit/)).toBeTruthy();
+    fireEvent.change(await within(box).findByLabelText("PIN"), { target: { value: "4321" } });
+    await act(async () => {
+      fireEvent.click(within(box).getByRole("button", { name: "Approve" }));
+    });
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({ managerId: "m1", pin: "4321", action: "credit_over_limit" }));
+
+    const done = await screen.findByRole("dialog", { name: "Bill finished" });
+    expect(within(done).getAllByText("On account").length).toBeGreaterThan(0);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatchObject({ clientId: bodies[0].clientId, creditApprovalToken: "approval-1" });
+    expect(await engine.queue.items()).toEqual([]);
   });
 });

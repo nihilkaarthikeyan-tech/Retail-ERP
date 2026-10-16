@@ -84,6 +84,15 @@ const PATHS = {
   ),
   moon: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />,
   percent: <path d="M19 5 5 19M7.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM16.5 18a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />,
+  // Module 7: an account book, a bank and a padlock.
+  book: <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5zM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6M9 11h6" />,
+  bank: <path d="M3 9.5 12 4l9 5.5zM5 10v7M9.5 10v7M14.5 10v7M19 10v7M3 20h18" />,
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2.5" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof PATHS;

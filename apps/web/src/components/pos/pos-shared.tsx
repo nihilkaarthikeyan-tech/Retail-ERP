@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import type { StoreRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
-export type PaymentKind = "cash" | "card" | "upi" | "other";
+export type PaymentKind = "cash" | "card" | "upi" | "other" | "on_account";
 
 export interface PaymentMethodDto {
   id: string;
@@ -184,6 +184,7 @@ export const PAYMENT_KIND_LABELS: Record<PaymentKind, string> = {
   card: "Card",
   upi: "UPI",
   other: "Other",
+  on_account: "On account",
 };
 
 export const OFFER_KIND_LABELS: Record<OfferKind, string> = {

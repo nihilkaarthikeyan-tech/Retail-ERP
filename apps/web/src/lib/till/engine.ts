@@ -8,7 +8,7 @@ import { businessDate, type CurrentUser, Decimal, type OpenShiftInput, type PosT
 import { ApiError, errorMessage } from "../api";
 import type { TillDeviceInfo } from "../till-device";
 import { NumberCounter, prefixFor } from "./numbers";
-import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, isDraftEmpty, priceBill } from "./pricing";
+import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, priceBill, usesOnAccount } from "./pricing";
 import { type QueueItem, type QueueResult, SendQueue } from "./queue";
 import { localReceipts } from "./receipt";
 import { isStale, loadSnapshot, REFRESH_MS, refreshSnapshot } from "./snapshot";
@@ -84,6 +84,36 @@ export class PriceChangedError extends Error {
     super(`The server total is ₹${serverTotal}, the till showed ₹${tillTotal}. Prices changed; check the bill again.`);
     this.name = "PriceChangedError";
   }
+}
+
+/** Plain messages for on-account bills (plan 07 §1a): they are never kept offline. */
+export const ON_ACCOUNT_OFFLINE = "On account needs the connection: the customer's balance is checked on the server. Take another payment method, or wait until the till is online.";
+export const ON_ACCOUNT_DROPPED = "The connection dropped while sending this bill. On account needs the connection, so the bill was not kept on the till: take another payment method, or try again when the till is online.";
+export const ON_ACCOUNT_NAMED = "On account is only for a named customer. Choose the customer first (F6 Customer).";
+
+/**
+ * The server refused an on-account bill over the customer's credit limit, or
+ * with too much overdue (403). A store manager's PIN can override it: the
+ * same bill is sent again with the approval token.
+ */
+export class CreditApprovalError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "CreditApprovalError";
+  }
+}
+
+/** The reason from a 403 credit check that a manager may override, or null. */
+export function creditOverride(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.statusCode !== 403) return null;
+  if (!/A manager must approve\.?$/.test(err.message)) return null;
+  if (!err.message.startsWith("Over the credit limit") && !/^₹[\d,.]+ is overdue/.test(err.message)) return null;
+  return err.message;
+}
+
+export interface FinishOptions {
+  /** A manager's single-use approval for a bill over the credit limit (action credit_over_limit). */
+  creditApprovalToken?: string;
 }
 
 export interface EngineDeps {
@@ -422,8 +452,9 @@ export class TillEngine {
    * Finishes a paid bill. Online it is saved at once and the server's receipt
    * printed; if the server cannot be reached it goes to the queue as an offline
    * bill with what was charged, and the till's own receipt is printed.
+   * A bill paid on account is never queued: it needs the server's credit check.
    */
-  async finish(input: DraftBill): Promise<FinishResult> {
+  async finish(input: DraftBill, options: FinishOptions = {}): Promise<FinishResult> {
     const snapshot = this.state.snapshot;
     const shift = this.state.shift;
     if (!snapshot) throw new Error("The till has no price list yet; connect once to download it");
@@ -439,6 +470,9 @@ export class TillEngine {
     const pay = checkPayments(bill.net, draft.payments, methods);
     if (pay.problem) throw new Error(pay.problem);
     if (pay.short.gt(0)) throw new Error(bill.net.gte(0) ? `₹${pay.short.toFixed(2)} is still to be paid` : `₹${pay.short.toFixed(2)} is still to be refunded`);
+    const onAccount = usesOnAccount(draft.payments, methods);
+    if (onAccount && !hasNamedCustomer(draft, snapshot.till.walkInCustomerId)) throw new Error(ON_ACCOUNT_NAMED);
+    if (onAccount && (!this.state.online || this.state.signedOut)) throw new Error(ON_ACCOUNT_OFFLINE);
 
     // The identity and the numbers are given once and saved before anything is sent (pos-offline §3–§4).
     draft.clientId = draft.clientId ?? this.uuid();
@@ -454,6 +488,7 @@ export class TillEngine {
 
     if (this.state.online && !this.state.signedOut) {
       const tx = buildTransaction(draft, bill, methods, { ...opts, offline: false, cashierToken: cashier?.token ?? undefined });
+      if (options.creditApprovalToken) tx.creditApprovalToken = options.creditApprovalToken;
       try {
         const result = await this.api.postBill(tx);
         await this.rememberResult(result);
@@ -463,11 +498,16 @@ export class TillEngine {
       } catch (err) {
         const serverTotal = priceChangedTotal(err);
         if (serverTotal !== null) throw new PriceChangedError(serverTotal, bill.net.toFixed(2));
+        const credit = creditOverride(err);
+        if (credit !== null) throw new CreditApprovalError(credit);
         if (err instanceof ApiError && err.statusCode === 401) this.set({ signedOut: true });
         else if (isOfflineError(err)) this.set({ online: false });
         else throw err;
+        // The bill keeps its identity and numbers; it is not queued.
+        if (onAccount) throw new Error(ON_ACCOUNT_DROPPED);
       }
     }
+    if (onAccount) throw new Error(ON_ACCOUNT_OFFLINE);
 
     // Offline: kept on the till and sent when the connection returns.
     const tx = buildTransaction(draft, bill, methods, { ...opts, offline: true });

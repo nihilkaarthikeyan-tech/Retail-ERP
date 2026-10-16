@@ -61,6 +61,14 @@ export const PERMISSIONS = {
   'offers.manage': 'Create and change offers and coupons',
   'gst_rates.manage': 'Enter GST rates per HSN code',
   'gst_rates.approve': 'Approve GST rates (after the Chartered Accountant signs off)',
+  // Module 7
+  'accounts.view': 'See the chart of accounts, ledgers, statements and financial reports',
+  'accounts.manage': 'Change the chart of accounts, default accounts and bank accounts',
+  'accounts.approve_chart': 'Record the Chartered Accountant’s approval of the chart of accounts',
+  'journals.post': 'Create, post and cancel journals and opening balances',
+  'payments.post': 'Create, post and cancel receipts, payments and transfers; link payments to bills',
+  'cash.deposit': 'Move cash between the till, cash in hand and the bank for own stores; petty-cash journals',
+  'books.lock': 'Lock the books up to a date, post before it, and close or reopen a financial year',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -114,6 +122,12 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'pos.setup',
     'gst_rates.manage',
     'gst_rates.approve',
+    'accounts.view',
+    'accounts.manage',
+    'journals.post',
+    'payments.post',
+    'cash.deposit',
+    'books.lock',
   ],
   store_manager: [
     'company.view',
@@ -144,6 +158,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'pos.shift.manage',
     'pos.reports',
     'offers.manage',
+    'accounts.view',
+    'cash.deposit',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
   cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close'],
@@ -163,6 +179,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'stock.cost.view',
     'purchase.view',
     'pos.reports',
+    'accounts.view',
   ],
 };
 

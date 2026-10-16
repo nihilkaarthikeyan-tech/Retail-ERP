@@ -332,3 +332,77 @@ Sample data: store MAIN, till T1, opening cash ₹2,000. Basmati Rice 1 kg sold 
 ### 6.11 Offline bill at an old price
 - **When** a bill is made offline at ₹120 after the price changed to ₹125
 - **Then** it is accepted as sold and appears on "Offline bills to check".
+
+## Module 7 — Accounting
+
+Every scenario ends with the same check: total debits equal total credits, and every ledger entry balances.
+
+### 7.1 Till shift posted at closing ★ (decision 39)
+- **Given** a shift with a ₹186 cash sale (3 kg rice), a ₹62 return of 1 kg and a ₹5 carry bag (₹200 paid, ₹14 change, ₹57 refunded), counted ₹9 short
+- **Then** closing the shift writes one ledger entry for the store:
+  - debits: cash in till ₹129.00, cost of goods sold ₹104.00, cash short ₹9.00;
+  - credits: sales ₹122.85, output CGST ₹3.07, output SGST ₹3.08, stock ₹104.00, cash in till ₹9.00.
+- The same entry moves the ₹2,000 starting float from the store's cash in hand into cash in till, and the ₹2,120 counted back to cash in hand, so cash in till is zero after every shift.
+- Nothing is posted to the accounts until the shift closes.
+
+### 7.2 Card and UPI ★
+- **When** a ₹899 bill is paid ₹500 by card and ₹399 by UPI and the shift closes
+- **Then** card settlement is debited ₹500 and UPI settlement ₹399; cash in till is not touched.
+- **When** a card payout of ₹500 arrives as ₹491 in the bank
+- **Then** the transfer credits card settlement ₹500 and debits the bank ₹491 and card commission ₹9.
+
+### 7.3 Purchase receipt and bill ★
+- **When** goods worth ₹1,000 are received with ₹100 freight added to stock
+- **Then** stock is debited ₹1,100, goods received not billed credited ₹1,000 and freight inward credited ₹100.
+- **When** the supplier's bill for ₹1,020 + ₹51 GST arrives against it
+- **Then** goods received not billed is debited ₹1,000 (back to zero), the price difference ₹20, input GST ₹51, and the supplier is credited ₹1,071.
+
+### 7.4 Paying a supplier
+- **When** one payment of ₹2,000 settles two bills of ₹1,071 and ₹800, oldest first
+- **Then** both bills owe ₹0 and ₹129 stays as an advance that the next bill uses. A supplier on hold for payments cannot be paid.
+
+### 7.5 Stock movements and transfers ★
+- **Then:**
+  - a transfer between shops credits the sending store's stock and debits goods in transit, and receiving debits the receiving store's stock;
+  - damage is debited to stock write-off;
+  - a count difference goes to stock adjustment.
+- "Stock against accounts" shows no difference for any store.
+
+### 7.6 Re-costing after a sale
+- **When** freight is added to a receipt after some of the goods were sold
+- **Then** only the difference is posted (to stock and cost of goods sold). Earlier ledger entries are unchanged and stock against accounts still shows no difference.
+
+### 7.7 Cancelling ★
+- **When** a posted supplier bill is cancelled
+- **Then** equal and opposite lines are written with the bill's date. The trial balance is as if it never happened, both entries stay in the ledger, and the database refuses any edit or delete of a ledger line.
+
+### 7.8 Locked books
+- **When** the books are locked up to 30 September
+- **Then** a store manager's posting dated 30 September is refused and the Accountant's is accepted.
+
+### 7.9 Journals
+- **Then:**
+  - an unbalanced journal is refused;
+  - a supplier-balance line without a supplier is refused;
+  - an income line without a store is refused;
+  - a line against a bill for more than it owes is refused.
+- A difference of a few paise is not "rounded away" on a journal above 5 paise.
+
+### 7.10 Opening balances
+- **When** an opening journal, two opening customer bills and opening stock are posted
+- **Then** the temporary opening account is at zero, and the customers' ageing shows the bills at their original dates.
+
+### 7.11 Year-end closing
+- **When** the year is closed to retained earnings
+- **Then** every income and expense account is zero in the new year and retained earnings moved by the year's profit, per store. Posting into the closed year is refused; cancelling the closing (with no later closing) allows it again.
+
+### 7.12 Credit sale at the till ★ (decision 22)
+- **Given** a customer approved for credit with a ₹5,000 limit who owes ₹4,500
+- **Then:**
+  - a ₹400 bill on account is accepted;
+  - a further ₹200 is refused unless a store manager approves, and the override is logged;
+  - a walk-in customer, or any offline bill, cannot use On account.
+- At shift close the customer's balance is debited. A receipt of ₹4,900 settles the bills oldest first, and the statement and ageing match the ledger.
+
+### 7.13 Book health
+- **Then** after all of the above, every party's ledger balance equals their unpaid bills minus advances, and the opening check shows zero.

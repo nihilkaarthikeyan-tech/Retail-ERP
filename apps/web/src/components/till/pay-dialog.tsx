@@ -2,13 +2,15 @@
 // Paying a bill (blueprint 09 process 3; plan 06 §6 "Pay"): cash, card and UPI
 // split from the till's own methods, references for methods that need them,
 // change shown big. Refunds only by methods allowed for refunds. The payments
-// are part of the saved bill, so they survive a crash too.
+// are part of the saved bill, so they survive a crash too. On account (the
+// customer pays later, plan 07 §1a) needs a named customer and the connection.
 "use client";
 
+import { useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { rupees } from "@/lib/till/format";
-import { checkPayments, type DraftBill, type DraftPayment } from "@/lib/till/pricing";
+import { checkPayments, type DraftBill, type DraftPayment, usesOnAccount } from "@/lib/till/pricing";
 import type { SnapPaymentMethod } from "@/lib/till/types";
 
 const QUICK_CASH = ["100", "200", "500", "2000"];
@@ -20,6 +22,12 @@ interface PayDialogProps {
   methods: SnapPaymentMethod[];
   busy: boolean;
   error: string | null;
+  /** The till can reach the server (on account needs it). */
+  online?: boolean;
+  /** The bill is for a named customer, not walk-in (on account needs one). */
+  namedCustomer?: boolean;
+  /** A refund may go back on account (the original bill was paid on account). */
+  refundOnAccount?: boolean;
   onChange: (payments: DraftPayment[]) => void;
   onFinish: () => void;
   onClose: () => void;
@@ -35,12 +43,17 @@ function sum(rows: DraftPayment[]): Decimal {
   }, new Decimal(0));
 }
 
-export function PayDialog({ open, net, draft, methods, busy, error, onChange, onFinish, onClose }: PayDialogProps) {
+export const ON_ACCOUNT_WALK_IN = "On account is only for a named customer. Close this and choose the customer with F6 Customer.";
+
+export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, onChange, onFinish, onClose }: PayDialogProps) {
   const refund = net.isNegative();
   const due = net.abs();
-  const usable = methods.filter((m) => m.active && (!refund || m.allowRefund));
+  const usable = methods.filter((m) => m.active && (!refund || m.allowRefund) && (m.kind !== "on_account" || !refund || (refundOnAccount && namedCustomer)));
   const rows = draft.payments;
   const check = checkPayments(net, rows, methods);
+  const [notice, setNotice] = useState<string | null>(null);
+  const onAccountUsed = usesOnAccount(rows, methods);
+  const onAccountProblem = !onAccountUsed ? null : !namedCustomer ? ON_ACCOUNT_WALK_IN : !online ? "On account needs the connection. Take another payment method, or wait until the till is online." : null;
   const cash = usable.find((m) => m.kind === "cash" && m.isDefault) ?? usable.find((m) => m.kind === "cash");
 
   function remainingFor(index: number): Decimal {
@@ -54,6 +67,11 @@ export function PayDialog({ open, net, draft, methods, busy, error, onChange, on
   }
 
   function addMethod(m: SnapPaymentMethod, amount?: string) {
+    setNotice(null);
+    if (m.kind === "on_account" && !namedCustomer) {
+      setNotice(ON_ACCOUNT_WALK_IN);
+      return;
+    }
     const at = rows.findIndex((r) => r.methodId === m.id);
     if (at >= 0) {
       setRow(at, { amount: amount ?? remainingFor(at).toFixed(2) });
@@ -70,9 +88,16 @@ export function PayDialog({ open, net, draft, methods, busy, error, onChange, on
     else addMethod(cash, amount);
   }
 
-  const ready = !check.problem && check.short.isZero() && (rows.length > 0 || net.isZero());
+  const ready = !check.problem && !onAccountProblem && check.short.isZero() && (rows.length > 0 || net.isZero());
   return (
-    <Dialog open={open} title={refund ? "Refund" : "Payment"} onClose={onClose}>
+    <Dialog
+      open={open}
+      title={refund ? "Refund" : "Payment"}
+      onClose={() => {
+        setNotice(null);
+        onClose();
+      }}
+    >
       <form
         className="till-pay"
         onSubmit={(e) => {
@@ -85,12 +110,17 @@ export function PayDialog({ open, net, draft, methods, busy, error, onChange, on
           <strong data-testid="pay-due">{rupees(due)}</strong>
         </div>
         <div className="till-pay-methods" role="group" aria-label="Payment methods">
-          {usable.map((m) => (
-            <button key={m.id} type="button" className="till-key till-method" onClick={() => addMethod(m)}>
-              {m.name}
-            </button>
-          ))}
+          {usable.map((m) => {
+            const offline = m.kind === "on_account" && !online;
+            return (
+              <button key={m.id} type="button" className="till-key till-method" disabled={offline} title={offline ? "Needs the connection" : undefined} onClick={() => addMethod(m)}>
+                {m.name}
+                {offline ? " (needs the connection)" : ""}
+              </button>
+            );
+          })}
         </div>
+        {notice ? <Alert kind="info">{notice}</Alert> : null}
         {refund ? <p className="muted">Only methods allowed for refunds are shown. The refund must be exactly the amount above.</p> : null}
         {rows.length ? (
           <table className="table till-pay-rows">
@@ -166,7 +196,7 @@ export function PayDialog({ open, net, draft, methods, busy, error, onChange, on
             </div>
           )}
         </div>
-        <Alert kind="error">{check.problem ?? error}</Alert>
+        <Alert kind="error">{check.problem ?? onAccountProblem ?? error}</Alert>
         <Button type="submit" variant="primary" className="till-big" busy={busy} disabled={!ready}>
           Finish and print (Enter)
         </Button>

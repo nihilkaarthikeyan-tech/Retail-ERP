@@ -11,6 +11,7 @@ export const TILL_ID = "a0000000-0000-4000-8000-000000000001";
 export const CASH = "c0000000-0000-4000-8000-000000000001";
 export const CARD = "c0000000-0000-4000-8000-000000000002";
 export const UPI = "c0000000-0000-4000-8000-000000000003";
+export const ACCOUNT = "c0000000-0000-4000-8000-000000000004";
 export const PCS = "d0000000-0000-4000-8000-000000000001";
 export const WALK_IN = "e0000000-0000-4000-8000-000000000001";
 export const ASHA = "e0000000-0000-4000-8000-000000000002";
@@ -97,6 +98,12 @@ export function sampleSnapshot(over: Partial<TillSnapshot> = {}): StoredSnapshot
     stock: [],
     ...over,
   };
+}
+
+/** The sample till with On account ticked (plan 07 §1a). */
+export function snapshotWithOnAccount(over: Partial<TillSnapshot> = {}): StoredSnapshot {
+  const s = sampleSnapshot(over);
+  return { ...s, till: { ...s.till, paymentMethods: [...s.till.paymentMethods, { id: ACCOUNT, code: "ACCOUNT", name: "On account", kind: "on_account", allowRefund: true, needsReference: false, isDefault: false, active: true }] } };
 }
 
 export const sampleOffers = [

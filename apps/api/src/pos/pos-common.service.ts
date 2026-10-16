@@ -27,6 +27,8 @@ export const DEFAULT_PAYMENT_METHODS = [
   { code: 'CASH', name: 'Cash', kind: 'cash', allowRefund: true, needsReference: false },
   { code: 'CARD', name: 'Card', kind: 'card', allowRefund: true, needsReference: true },
   { code: 'UPI', name: 'UPI', kind: 'upi', allowRefund: true, needsReference: true },
+  // Plan 07 §1a: customer pays later; a till takes it only when ticked for that till.
+  { code: 'ACCOUNT', name: 'On account', kind: 'on_account', allowRefund: true, needsReference: false },
 ] as const;
 
 /**

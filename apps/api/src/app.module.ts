@@ -8,6 +8,8 @@ import { CompanyModule } from './company/company.module.js';
 import { FinancialYearsModule } from './financial-years/financial-years.module.js';
 import { HealthModule } from './health/health.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
+import { AccountingModule } from './accounting/accounting.module.js';
+import { LedgerModule } from './ledger/ledger.module.js';
 import { PosModule } from './pos/pos.module.js';
 import { PurchasingModule } from './purchasing/purchasing.module.js';
 import { ItemsModule } from './items/items.module.js';
@@ -25,6 +27,7 @@ import { UsersModule } from './users/users.module.js';
     ScheduleModule.forRoot(),
     PrismaModule,
     AuditModule,
+    LedgerModule,
     AuthModule,
     HealthModule,
     SetupModule,
@@ -41,6 +44,7 @@ import { UsersModule } from './users/users.module.js';
     InventoryModule,
     PurchasingModule,
     PosModule,
+    AccountingModule,
   ],
 })
 export class AppModule {}

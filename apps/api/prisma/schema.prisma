@@ -1089,6 +1089,10 @@ model StockLedgerEntry {
   valueAfter     Decimal        @db.Decimal(16, 2)
   /// What module 7 posts the value against (stock account on the other side).
   accountRole    String
+  /// Module 7: stock value already posted to the ledger; differences are posted as corrections.
+  postedValue    Decimal        @default(0) @db.Decimal(16, 2)
+  /// Till sales wait for the shift close before they reach the ledger (decision 39).
+  ledgerHeld     Boolean        @default(false)
   isCancellation Boolean        @default(false)
   /// Quantity went below zero (only the till may do this; reported daily).
   wentNegative   Boolean        @default(false)
@@ -1637,6 +1641,8 @@ enum PaymentKind {
   card
   upi
   other
+  /// Customer pays later (module 7 plan section 1a, decision 22).
+  on_account
 }
 
 enum ShiftStatus {
@@ -1769,19 +1775,21 @@ model UserPin {
 }
 
 model Shift {
-  id           String      @id @default(uuid()) @db.Uuid
-  companyId    String      @db.Uuid
-  tillId       String      @db.Uuid
-  clientId     String      @db.Uuid
+  id            String      @id @default(uuid()) @db.Uuid
+  companyId     String      @db.Uuid
+  tillId        String      @db.Uuid
+  clientId      String      @db.Uuid
   /// The Indian business date the shift was opened (rule 15).
-  businessDate DateTime    @db.Date
-  openedById   String      @db.Uuid
-  openedAt     DateTime
-  status       ShiftStatus @default(open)
-  closedAt     DateTime?
-  closedById   String?     @db.Uuid
-  cancelledAt  DateTime?
-  cancelReason String?
+  businessDate  DateTime    @db.Date
+  openedById    String      @db.Uuid
+  openedAt      DateTime
+  status        ShiftStatus @default(open)
+  closedAt      DateTime?
+  closedById    String?     @db.Uuid
+  cancelledAt   DateTime?
+  cancelReason  String?
+  /// Module 7: the shift day-end ledger entry.
+  ledgerEntryId String?     @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2082,4 +2090,351 @@ model PosSyncProblem {
   updatedAt DateTime @updatedAt
 
   @@unique([tillId, clientId, kind])
+}
+
+// ---------------------------------------------------------------------------
+// Module 7: accounting (docs/plans/07-accounting.md). The ledger is the single
+// source of truth (decision 51); posted lines are never changed (decision 50).
+// ---------------------------------------------------------------------------
+
+enum AccountFamily {
+  asset
+  liability
+  equity
+  income
+  expense
+}
+
+enum AccountingDocStatus {
+  draft
+  posted
+  cancelled
+}
+
+/// The chart of accounts: folders and bottom-level accounts in five families.
+model Account {
+  id            String        @id @default(uuid()) @db.Uuid
+  companyId     String        @db.Uuid
+  parentId      String?       @db.Uuid
+  /// Optional account number, unique in the company.
+  number        String?
+  name          String
+  isGroup       Boolean       @default(false)
+  /// Inherited from the folder.
+  family        AccountFamily
+  /// How the system uses it: cash, bank, receivable, payable, stock, transit, grni, cogs, tax, rounding, temporary_opening, income, expense, equity, other. Null on folders.
+  kind          String?
+  /// Per-store accounts (cash in till, cash in hand).
+  storeId       String?       @db.Uuid
+  /// "debit" or "credit": the balance may never go the other way.
+  balanceMustBe String?
+  locked        Boolean       @default(false)
+  active        Boolean       @default(true)
+  /// Standard accounts the system creates, e.g. "sales", "cash_in_till:<storeId>".
+  systemKey     String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  parent   Account?         @relation("AccountTree", fields: [parentId], references: [id])
+  children Account[]        @relation("AccountTree")
+  lines    LedgerLine[]
+  defaults AccountDefault[]
+
+  @@unique([companyId, number])
+  @@unique([companyId, systemKey])
+  @@index([companyId, parentId])
+}
+
+/// Which account each kind of money from the other modules posts to.
+model AccountDefault {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @db.Uuid
+  /// e.g. goods_received_not_billed, supplier_payable, sales, cost_of_goods_sold.
+  role      String
+  accountId String @db.Uuid
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@unique([companyId, role])
+}
+
+model AccountingSettings {
+  id                String    @id @default(uuid()) @db.Uuid
+  companyId         String    @unique @db.Uuid
+  /// The Chartered Accountant's approval of the chart (decision 55), recorded by the Owner.
+  chartApprovedAt   DateTime?
+  chartApprovedById String?   @db.Uuid
+  chartApprovalNote String?
+  /// Age bands in days for unpaid bills.
+  ageingBands       Int[]     @default([30, 60, 90, 120])
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+/// One posting. Never updated or deleted (database trigger).
+model LedgerEntry {
+  id              String   @id @default(uuid()) @db.Uuid
+  companyId       String   @db.Uuid
+  entryDate       DateTime @db.Date
+  financialYearId String   @db.Uuid
+  /// supplier_bill, goods_receipt, stock_document, landed_charge, pos_shift, pos_bill, journal, payment, opening_bill, year_end_closing.
+  documentType    String
+  documentId      String   @db.Uuid
+  documentNumber  String?
+  storeId         String?  @db.Uuid
+  isOpening       Boolean  @default(false)
+  /// Set on a reversal: the entry it cancels.
+  cancelsId       String?  @unique @db.Uuid
+  remark          String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  cancels     LedgerEntry? @relation("LedgerCancel", fields: [cancelsId], references: [id])
+  cancelledBy LedgerEntry? @relation("LedgerCancel")
+  lines       LedgerLine[]
+
+  @@index([companyId, entryDate])
+  @@index([documentType, documentId])
+}
+
+/// One debit or credit. Never updated or deleted (database trigger).
+model LedgerLine {
+  id         BigInt    @id @default(autoincrement())
+  entryId    String    @db.Uuid
+  companyId  String    @db.Uuid
+  entryDate  DateTime  @db.Date
+  accountId  String    @db.Uuid
+  /// Store cost centre (required on income and expense lines).
+  storeId    String?   @db.Uuid
+  /// customer or supplier, on their balance accounts.
+  partyType  String?
+  partyId    String?   @db.Uuid
+  debit      Decimal   @default(0) @db.Decimal(16, 2)
+  credit     Decimal   @default(0) @db.Decimal(16, 2)
+  /// The open item this party line belongs to (a bill, a payment, a credit note).
+  itemType   String?
+  itemId     String?   @db.Uuid
+  itemNumber String?
+  dueDate    DateTime? @db.Date
+  remark     String?
+
+  entry   LedgerEntry @relation(fields: [entryId], references: [id])
+  account Account     @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, entryDate])
+  @@index([companyId, entryDate])
+  @@index([partyType, partyId, entryDate])
+  @@index([itemType, itemId])
+}
+
+/// A link: how much of one open item (e.g. a payment) settles another (e.g. a bill). Undone links stay.
+model Settlement {
+  id         String    @id @default(uuid()) @db.Uuid
+  companyId  String    @db.Uuid
+  partyType  String
+  partyId    String    @db.Uuid
+  /// The item that owed (normally the bill).
+  billType   String
+  billId     String    @db.Uuid
+  /// The item that settles it (payment, journal, credit note, return).
+  byType     String
+  byId       String    @db.Uuid
+  amount     Decimal   @db.Decimal(16, 2)
+  settledOn  DateTime  @db.Date
+  undone     Boolean   @default(false)
+  undoneAt   DateTime?
+  undoneById String?   @db.Uuid
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  @@index([partyType, partyId])
+  @@index([billType, billId])
+  @@index([byType, byId])
+}
+
+model Journal {
+  id              String              @id @default(uuid()) @db.Uuid
+  companyId       String              @db.Uuid
+  number          String?
+  /// general, cash, bank, contra, credit_note, debit_note, write_off, opening.
+  kind            String
+  journalDate     DateTime            @db.Date
+  financialYearId String              @db.Uuid
+  reference       String?
+  referenceDate   DateTime?           @db.Date
+  clearedOn       DateTime?           @db.Date
+  remark          String?
+  status          AccountingDocStatus @default(draft)
+  ledgerEntryId   String?             @db.Uuid
+  postedAt        DateTime?
+  postedById      String?             @db.Uuid
+  cancelledAt     DateTime?
+  cancelledById   String?             @db.Uuid
+  cancelReason    String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  lines JournalLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, journalDate])
+}
+
+model JournalLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  journalId   String  @db.Uuid
+  lineNo      Int
+  accountId   String  @db.Uuid
+  storeId     String? @db.Uuid
+  partyType   String?
+  partyId     String? @db.Uuid
+  debit       Decimal @default(0) @db.Decimal(16, 2)
+  credit      Decimal @default(0) @db.Decimal(16, 2)
+  /// The open item this line settles (a bill of the same party).
+  againstType String?
+  againstId   String? @db.Uuid
+  remark      String?
+
+  journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+}
+
+/// Money received from a customer, paid to a supplier, or moved between own accounts.
+model Payment {
+  id              String              @id @default(uuid()) @db.Uuid
+  companyId       String              @db.Uuid
+  number          String?
+  /// receipt, payment, transfer.
+  kind            String
+  paymentDate     DateTime            @db.Date
+  financialYearId String              @db.Uuid
+  storeId         String?             @db.Uuid
+  partyType       String?
+  partyId         String?             @db.Uuid
+  /// Receipt: to = cash or bank. Payment: from = cash or bank. Transfer: both.
+  fromAccountId   String?             @db.Uuid
+  toAccountId     String?             @db.Uuid
+  amount          Decimal             @db.Decimal(16, 2)
+  reference       String?
+  referenceDate   DateTime?           @db.Date
+  clearedOn       DateTime?           @db.Date
+  remark          String?
+  status          AccountingDocStatus @default(draft)
+  ledgerEntryId   String?             @db.Uuid
+  postedAt        DateTime?
+  postedById      String?             @db.Uuid
+  cancelledAt     DateTime?
+  cancelledById   String?             @db.Uuid
+  cancelReason    String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  allocations PaymentAllocation[]
+  deductions  PaymentDeduction[]
+
+  @@unique([companyId, number])
+  @@index([companyId, paymentDate])
+  @@index([partyType, partyId])
+}
+
+/// On a draft payment: which bills it will settle. Turned into Settlement links when posted.
+model PaymentAllocation {
+  id        String  @id @default(uuid()) @db.Uuid
+  paymentId String  @db.Uuid
+  billType  String
+  billId    String  @db.Uuid
+  amount    Decimal @db.Decimal(16, 2)
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+/// Bank charges, card commission, a small short payment written off.
+model PaymentDeduction {
+  id        String  @id @default(uuid()) @db.Uuid
+  paymentId String  @db.Uuid
+  accountId String  @db.Uuid
+  amount    Decimal @db.Decimal(16, 2)
+  remark    String?
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+/// An unpaid customer or supplier bill from before going live (against the temporary opening account).
+model OpeningBill {
+  id            String              @id @default(uuid()) @db.Uuid
+  companyId     String              @db.Uuid
+  partyType     String
+  partyId       String              @db.Uuid
+  storeId       String?             @db.Uuid
+  billNumber    String
+  billDate      DateTime            @db.Date
+  dueDate       DateTime?           @db.Date
+  amount        Decimal             @db.Decimal(16, 2)
+  status        AccountingDocStatus @default(posted)
+  ledgerEntryId String?             @db.Uuid
+  cancelledAt   DateTime?
+  cancelledById String?             @db.Uuid
+  cancelReason  String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([partyType, partyId])
+}
+
+model BankAccount {
+  id            String  @id @default(uuid()) @db.Uuid
+  companyId     String  @db.Uuid
+  accountId     String  @unique @db.Uuid
+  bankName      String
+  accountNumber String
+  ifsc          String?
+  branch        String?
+  isDefault     Boolean @default(false)
+  active        Boolean @default(true)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+model YearEndClosing {
+  id               String              @id @default(uuid()) @db.Uuid
+  companyId        String              @db.Uuid
+  financialYearId  String              @db.Uuid
+  closingAccountId String              @db.Uuid
+  periodEnd        DateTime            @db.Date
+  remark           String?
+  status           AccountingDocStatus @default(posted)
+  ledgerEntryId    String?             @db.Uuid
+  cancelledAt      DateTime?
+  cancelledById    String?             @db.Uuid
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@index([companyId, periodEnd])
 }

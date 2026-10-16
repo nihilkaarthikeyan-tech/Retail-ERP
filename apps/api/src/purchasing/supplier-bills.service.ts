@@ -32,6 +32,7 @@ import { NumberingService } from '../numbering/numbering.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { GoodsReceiptsService, type ReceiptHeader, type ResolvedReceiptLine } from './goods-receipts.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
+import { PurchasePostings } from './purchase-postings.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
 
 export const billInclude = {
@@ -84,6 +85,7 @@ export class SupplierBillsService {
     private readonly common: PurchaseCommon,
     private readonly orders: PurchaseOrdersService,
     private readonly receipts: GoodsReceiptsService,
+    private readonly postings: PurchasePostings,
   ) {}
 
   // ---- Reading ----
@@ -452,6 +454,8 @@ export class SupplierBillsService {
         }
 
         warnings = warnings.concat(await this.applyToOrders(tx, b, 1, user));
+        await tx.supplierBill.update({ where: { id }, data: { receiptId } });
+        await this.postings.supplierBill(tx, id, actor.userId);
         await tx.supplierBill.update({
           where: { id },
           data: {
@@ -525,6 +529,7 @@ export class SupplierBillsService {
         } else {
           const notes = await tx.supplierBill.count({ where: { returnOfId: id, status: { not: 'cancelled' } } });
           if (notes) throw new BadRequestException('A debit note refers to this bill; cancel it first');
+          await this.postings.cancelSupplierBill(tx, id, actor.userId);
           if (b.kind === 'debit_note') await this.undoDebitNote(tx, b, reason, actor, user);
           else {
             if (b.kind === 'against_receipt') {
@@ -699,6 +704,7 @@ export class SupplierBillsService {
             await this.receipts.refreshBilling(tx, rl.receiptId);
           }
         }
+        await this.postings.supplierBill(tx, created.id, actor.userId);
         await this.audit.record(tx, actor, { action: 'create', entityType: 'supplier_bill', entityId: created.id, changes: { number, kind: 'debit_note', against: original.number, total: totals.total }, reason: input.reason });
         return this.getRow(tx, created.id);
       },

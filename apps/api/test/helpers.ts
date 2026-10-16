@@ -38,6 +38,8 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
       "GoodsReceiptLine", "GoodsReceipt", "PurchaseOrderLine", "PurchaseOrder", "PurchaseSettings",
       "PosPayment", "PosBillLine", "PosBill", "ShiftClosingLine", "ShiftClosing", "CashMovement", "ShiftCash", "Shift",
       "PosSyncProblem", "PosApproval", "PosCashierToken", "TillDevice", "TillPaymentMethod", "Till", "PaymentMethod", "UserPin", "Coupon", "Offer", "GstRate", "PosSettings",
+      "LedgerLine", "LedgerEntry", "Settlement", "JournalLine", "Journal", "PaymentAllocation", "PaymentDeduction", "Payment",
+      "OpeningBill", "BankAccount", "YearEndClosing", "AccountDefault", "AccountingSettings", "Account",
       "Company", "SecuritySettings"
     RESTART IDENTITY CASCADE`);
   await prisma.securitySettings.create({ data: { id: 1 } });

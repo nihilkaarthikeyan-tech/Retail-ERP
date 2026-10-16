@@ -189,7 +189,8 @@ export class LandedChargesService {
       for (const e of entries) changes.push({ entryId: e.id, incomingCost: cost.toFixed(4) });
       receiptIds.add(line.receiptId);
     }
-    await this.engine.revalueIncoming(tx, changes, { allowNegative: true, actorId: actor.userId });
+    // Freight added to stock later: stock (and cost of goods for what was sold) against Freight inward.
+    await this.engine.revalueIncoming(tx, changes, { allowNegative: true, actorId: actor.userId, counterRole: 'freight_inward', ledgerRemark: `${sign > 0 ? 'Freight and charges' : 'Freight and charges cancelled'} ${c.number}` });
     for (const rid of receiptIds) {
       const sum = await tx.stockLedgerEntry.aggregate({ where: { documentId: rid, isCancellation: false }, _sum: { valueChange: true } });
       await tx.goodsReceipt.update({ where: { id: rid }, data: { stockValue: D(sum._sum.valueChange ?? '0').toFixed(2) } });

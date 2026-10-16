@@ -16,9 +16,10 @@ const signedDecimal = z
   .trim()
   .regex(/^-?\d+(\.\d+)?$/, 'Must be a number such as 12.50');
 
-export const PAYMENT_KINDS = ['cash', 'card', 'upi', 'other'] as const;
+/** on_account: the customer pays later (module 7 plan §1a, decision 22). */
+export const PAYMENT_KINDS = ['cash', 'card', 'upi', 'other', 'on_account'] as const;
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];
-export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount'] as const;
+export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit'] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 export const OFFER_KINDS = ['percent', 'amount', 'special_price', 'free_goods'] as const;
 export const OFFER_TARGETS = ['items', 'groups', 'brands', 'bill'] as const;
@@ -29,6 +30,7 @@ export const PAYMENT_ACCOUNT_ROLES: Record<PaymentKind, string> = {
   card: 'card_settlement',
   upi: 'upi_settlement',
   other: 'other_receipts',
+  on_account: 'customer_receivable',
 };
 
 // ---- GST rate list (decision 56; plan 06 answer 1) ----
@@ -207,6 +209,8 @@ export const posTransactionSchema = z
     payments: z.array(z.object({ paymentMethodId: uuid, amount: signedDecimal, reference: optionalText(60) })).min(1, 'Record how it was paid'),
     /** The total the till showed (online bills: a different server total is refused so the cashier sees it). */
     expectedTotal: signedDecimal.optional(),
+    /** A manager's approval to sell on account above the credit limit or with overdue bills (decision 22). */
+    creditApprovalToken: z.string().optional(),
   })
   .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return');
 export type PosTransactionInput = z.infer<typeof posTransactionSchema>;

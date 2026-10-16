@@ -7,6 +7,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   businessDate,
+  creditCheck,
   changeDue,
   checkDiscount,
   type CurrentUser,
@@ -36,6 +37,7 @@ import { ItemsService } from '../items/items.service.js';
 import { CustomersService } from '../parties/customers.service.js';
 import { PartySettingsService } from '../parties/party-settings.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
+import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
 import { D, fromIso, iso, PosCommon, type TillWithRefs } from './pos-common.service.js';
@@ -101,6 +103,7 @@ export class PosBillsService {
     private readonly partySettings: PartySettingsService,
     private readonly years: FinancialYearsService,
     private readonly engine: StockEngine,
+    private readonly ledger: LedgerService,
   ) {}
 
   // ---- Saving a sale, return or exchange ----
@@ -164,7 +167,7 @@ export class PosBillsService {
     const saleTotals = sale ? this.totals(sale.lines, interState) : null;
     const net = D(saleTotals?.total ?? '0').add(D(retTotals?.total ?? '0'));
 
-    // Payments (blueprint 09 process 3; plan 06 answer 5: no credit sales yet).
+    // Payments (blueprint 09 process 3); on account only as plan 07 §1a allows.
     const methods = new Map(till.paymentMethods.map((m) => [m.paymentMethodId, m.paymentMethod]));
     for (const p of input.payments) {
       const m = methods.get(p.paymentMethodId);
@@ -172,9 +175,10 @@ export class PosBillsService {
       if (D(p.amount).lt(0) && !m.allowRefund) throw new BadRequestException(`${m.name} cannot be used for refunds`);
       if (m.needsReference && !D(p.amount).eq(0) && !p.reference?.trim()) throw new BadRequestException(`${m.name} needs the approval code or reference`);
     }
+    await this.checkOnAccount(company.id, input, till, customer, methods, date, approvals, flags);
     const paid = changeDue({ total: net, payments: input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })) });
     if (net.gte(0)) {
-      if (paid.short.gt(0)) throw new BadRequestException(`₹${paid.short.toFixed(2)} is still to be paid (credit sales are not allowed at the till)`);
+      if (paid.short.gt(0)) throw new BadRequestException(`₹${paid.short.toFixed(2)} is still to be paid`);
       if (paid.overpaidWithoutCash) throw new BadRequestException('More than the bill was entered without cash; only cash can give change');
       if (input.payments.some((p) => D(p.amount).lt(0))) throw new BadRequestException('A sale cannot have a refund payment');
     } else if (!paid.paid.eq(net)) {
@@ -265,6 +269,49 @@ export class PosBillsService {
     if (!number.startsWith(prefix) || !/^\d{6}$/.test(number.slice(prefix.length))) {
       throw new BadRequestException(`Bill number ${number} is not in this till’s series (${prefix}000001)`);
     }
+  }
+
+  /**
+   * Selling on account (plan 07 §1a, decision 22): online only, for a named
+   * customer approved for credit; above the limit or with too much overdue a
+   * store manager's PIN is needed, and the override is logged on the bill.
+   */
+  private async checkOnAccount(
+    companyId: string,
+    input: PosTransactionInput,
+    till: TillWithRefs,
+    customer: Customer,
+    methods: Map<string, TillWithRefs['paymentMethods'][number]['paymentMethod']>,
+    date: string,
+    approvals: string[],
+    flags: Set<string>,
+  ) {
+    const onAccount = input.payments.filter((p) => methods.get(p.paymentMethodId)?.kind === 'on_account').reduce((s, p) => s.add(D(p.amount)), new Decimal(0));
+    if (onAccount.isZero()) return;
+    if (input.offline) throw new BadRequestException('On account needs the connection: the customer’s balance is checked on the server');
+    if (customer.isWalkIn) throw new BadRequestException('Choose the customer to sell on account');
+    if (customer.status !== 'active') throw new BadRequestException(`${customer.name} is ${customer.status === 'blocked' ? 'blocked' : 'switched off'}; they cannot buy on account`);
+    if (onAccount.lt(0)) return; // A refund on account only reduces what they owe.
+    const owed = (await this.ledger.partyBalance(this.prisma, 'customer', customer.id)).add(await this.pendingOnAccount(customer.id));
+    const overdue = (await this.ledger.openItems(this.prisma, 'customer', customer.id))
+      .filter((i) => i.owed.gt(0) && (i.dueDate ?? i.date) < date)
+      .reduce((s, i) => s.add(i.owed), new Decimal(0));
+    const verdict = creditCheck({ creditLimit: customer.creditLimit.toString(), owed, thisBill: onAccount, overdue, overdueLimit: customer.overdueLimit.toString() });
+    if (verdict.ok) return;
+    if (!verdict.canOverride) throw new BadRequestException(verdict.reason);
+    if (!input.creditApprovalToken) throw new ForbiddenException(`${verdict.reason}. A manager must approve`);
+    const managerId = await this.common.useApproval(this.prisma, input.creditApprovalToken, till.id, ['credit_over_limit'], `${customer.code} ₹${onAccount.toFixed(2)}`);
+    approvals.push(`credit over limit ${customer.code} ₹${onAccount.toFixed(2)} by ${managerId}`);
+    flags.add('credit_override');
+  }
+
+  /** On-account amounts on bills whose shift has not closed yet (not in the ledger until the shift posts). */
+  private async pendingOnAccount(customerId: string): Promise<Decimal> {
+    const sum = await this.prisma.posPayment.aggregate({
+      where: { paymentMethod: { kind: 'on_account' }, bill: { customerId, status: 'completed', shift: { status: 'open' } } },
+      _sum: { amount: true },
+    });
+    return D(sum._sum.amount ?? 0);
   }
 
   private async customerFor(companyId: string, input: PosTransactionInput, actor: Actor, flags: Set<string>): Promise<Customer> {
@@ -668,7 +715,7 @@ export class PosBillsService {
     for (const l of bill.lines) {
       if (!l.item.isStockItem) continue;
       const b = built.lines.find((x) => x.lineNo === l.lineNo)!;
-      const base = { companyId: bill.companyId, documentType: 'pos_bill', documentId: bill.id, documentLineId: l.id, itemId: l.itemId, locationId: till.locationId, batchId: l.batchId, postingDate: iso(bill.businessDate)!, postingAt: bill.soldAt, accountRole: COGS_ROLE };
+      const base = { companyId: bill.companyId, documentType: 'pos_bill', documentId: bill.id, documentLineId: l.id, itemId: l.itemId, locationId: till.locationId, batchId: l.batchId, postingDate: iso(bill.businessDate)!, postingAt: bill.soldAt, accountRole: COGS_ROLE, ledger: 'held' as const }; // posted at shift close (decision 39)
       const qty = D(l.basicQuantity).abs();
       if (qty.lte(0)) continue;
       if (built.kind === 'sale') movements.push({ ...base, kind: 'out', quantity: qty.toString() });

@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { use, useState } from "react";
 import { hasPermission } from "shared";
+import { PartyBalance } from "@/components/accounts/party-balance";
 import { AuditTable } from "@/components/audit-table";
 import { CustomerCredit } from "@/components/parties/customer-credit";
 import { CustomerForm } from "@/components/parties/customer-form";
@@ -81,6 +82,12 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
         {c.isWalkIn ? <Badge kind="neutral">Walk-in</Badge> : null}
         <Badge kind="neutral">{c.isBusiness ? "Business" : "Person"}</Badge>
         <PartyStatusBadge status={c.status} />
+        {!c.isWalkIn ? (
+          <>
+            <span className="spacer" />
+            <PartyBalance partyType="customer" partyId={c.id} />
+          </>
+        ) : null}
       </div>
       <div className="tabs" role="tablist" aria-label="Customer sections">
         {tabs.map((t) => (

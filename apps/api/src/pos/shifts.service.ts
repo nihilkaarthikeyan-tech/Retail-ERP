@@ -19,6 +19,7 @@ import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PosCommon } from './pos-common.service.js';
+import { PosPostings } from './pos-postings.service.js';
 
 const shiftInclude = {
   till: { select: { id: true, code: true, name: true, storeId: true, companyId: true } },
@@ -34,6 +35,7 @@ export class ShiftsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly common: PosCommon,
+    private readonly postings: PosPostings,
   ) {}
 
   async open(input: OpenShiftInput, actor: Actor, user: CurrentUser, deviceToken: string | undefined) {
@@ -209,6 +211,9 @@ export class ShiftsService {
         },
       });
       await tx.shift.update({ where: { id: shiftId }, data: { status: 'closed', closedAt: new Date(), closedById: user.id } });
+      // Decision 39: the shift's bills reach the ledger now, in the same transaction as the closing.
+      const ledgerEntryId = await this.postings.postShift(tx, shiftId, businessDate(), actor.userId);
+      await tx.shift.update({ where: { id: shiftId }, data: { ledgerEntryId } });
       await this.audit.record(tx, actor, {
         action: 'update',
         entityType: 'shift',
