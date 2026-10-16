@@ -75,6 +75,8 @@ export const MENU: MenuEntry[] = [
   { href: "/purchases/receipts", label: "Goods receipts", permissions: ["purchase.view"], section: "Purchases", icon: "truck" },
   { href: "/purchases/bills", label: "Supplier bills", permissions: ["purchase.view"], section: "Purchases", icon: "receipt" },
   { href: "/purchases/charges", label: "Freight and charges", permissions: ["purchase.view"], section: "Purchases", icon: "rupee" },
+  // Plan 11 part 2: supplier sale-or-return
+  { href: "/purchases/consignment", label: "Sale or return", permissions: ["purchase.view"], section: "Purchases", icon: "layers" },
   { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
   { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
   { href: "/purchases/settings", label: "Purchase settings", permissions: ["purchase.settings"], section: "Purchases", icon: "settings" },
@@ -85,6 +87,9 @@ export const MENU: MenuEntry[] = [
   { href: "/pos/offers", label: "Offers and coupons", permissions: ["offers.manage"], section: "Billing counter", icon: "tag" },
   { href: "/pos/sales-staff", label: "Sales staff", permissions: ["sales_staff.manage"], section: "Billing counter", icon: "users" },
   { href: "/pos/deliveries", label: "Home deliveries", permissions: ["deliveries.manage"], section: "Billing counter", icon: "truck" },
+  // Plan 11 part 2
+  { href: "/orders", label: "Customer orders", permissions: ["orders.manage"], section: "Billing counter", icon: "file" },
+  { href: "/alterations", label: "Alterations", permissions: ["alterations.manage"], section: "Billing counter", icon: "ruler" },
   { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
   { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
   { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
@@ -100,6 +105,7 @@ export const MENU: MenuEntry[] = [
   { href: "/accounts/reports", label: "Accounts reports", permissions: ["accounts.view", "payments.post"], section: "Accounts", icon: "list" },
   { href: "/accounts/closing", label: "Closing the books", permissions: ["accounts.view", "books.lock"], section: "Accounts", icon: "lock" },
   { href: "/accounts/defaults", label: "Default accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "settings" },
+  { href: "/accounts/tally", label: "Export to Tally", permissions: ["tally.export", "accounts.manage"], section: "Accounts", icon: "file" },
   // Module 9
   { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view"], section: "Reports", icon: "chart" },
   { href: "/reports/summary-email", label: "Daily summary email", permissions: ["reports.summary_email"], section: "Reports", icon: "mail" },

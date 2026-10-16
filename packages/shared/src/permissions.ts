@@ -82,6 +82,11 @@ export const PERMISSIONS = {
   'sales_staff.manage': 'Add and change the salespeople of own stores',
   'deliveries.manage': 'See and update home deliveries of own stores',
   'expenses.post': 'Enter simple expenses (rent, salaries, power) paid in cash or from the bank, and cancel them',
+  // Plan 11 part 2
+  'orders.manage': 'Take customer orders and their advances, mark them ready, cancel them',
+  'alterations.manage': 'Take alteration jobs, move them through the tailor and hand them back',
+  // Plan 11 part 2
+  'tally.export': 'Export vouchers and ledgers for Tally, and set the Tally ledger name of each account',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -144,6 +149,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'import.opening',
     'export.masters',
     'expenses.post',
+    'tally.export',
   ],
   store_manager: [
     'company.view',
@@ -181,9 +187,11 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'sales_staff.manage',
     'deliveries.manage',
     'expenses.post',
+    'orders.manage',
+    'alterations.manage',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
-  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close'],
+  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close', 'orders.manage', 'alterations.manage'],
   stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count', 'purchase.view', 'purchase.receive', 'labels.print'],
   viewer_auditor: [
     'company.view',

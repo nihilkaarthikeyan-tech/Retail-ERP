@@ -31,6 +31,8 @@ export const PURCHASE_ACCOUNT_ROLES = {
   payable: 'supplier_payable',
   gstInput: 'gst_input',
   expense: 'purchase_expense',
+  /** Plan 11 part 2: sale-or-return goods, owed only once sold. */
+  consignment: 'consignment_payable',
   freight: 'freight_inward',
   priceDifference: 'purchase_price_difference',
   rounding: 'rounding',
@@ -140,6 +142,8 @@ export const createGoodsReceiptSchema = z.object({
   vehicleNo: optionalText(30),
   /** Decision 31: required when no line comes from an order. */
   noOrderReason: optionalText(300),
+  /** Plan 11 part 2: sale or return; owed to the supplier only once sold (consignment statement). */
+  isConsignment: z.boolean().optional(),
   remarks: optionalText(500),
   lines: z.array(goodsReceiptLineSchema).min(1, 'Add at least one item'),
 });
@@ -179,6 +183,7 @@ export const goodsReceiptQuerySchema = z.object({
   supplierId: uuid.optional(),
   storeId: uuid.optional(),
   isReturn: z.enum(['true', 'false']).optional(),
+  isConsignment: z.enum(['true', 'false']).optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -301,3 +306,42 @@ export type PurchaseReportQuery = z.infer<typeof purchaseReportQuerySchema>;
 
 /** A plain decimal-string check for amounts typed in the web forms. */
 export const purchaseAmount = decimalString;
+
+// ---- Supplier sale-or-return (plan 11 part 2 §3) ----
+
+export const CONSIGNMENT_STATEMENT_STATUSES = ['draft', 'billed', 'cancelled'] as const;
+export type ConsignmentStatementStatus = (typeof CONSIGNMENT_STATEMENT_STATUSES)[number];
+
+/** A statement for one supplier and store; the period starts after the last billed statement unless given. */
+export const createConsignmentStatementSchema = z
+  .object({
+    supplierId: uuid,
+    storeId: uuid,
+    fromDate: isoDate.optional(),
+    toDate: isoDate,
+    remarks: optionalText(500),
+  })
+  .refine((s) => !s.fromDate || s.fromDate <= s.toDate, { message: 'The start date is after the end date', path: ['fromDate'] });
+export type CreateConsignmentStatementInput = z.infer<typeof createConsignmentStatementSchema>;
+
+export const consignmentStatementQuerySchema = z.object({
+  supplierId: uuid.optional(),
+  storeId: uuid.optional(),
+  status: z.enum(CONSIGNMENT_STATEMENT_STATUSES).optional(),
+});
+export type ConsignmentStatementQuery = z.infer<typeof consignmentStatementQuerySchema>;
+
+/** Turning a statement into the supplier's bill for the sold quantity. */
+export const consignmentBillSchema = z.object({
+  /** The supplier's own invoice number; the statement number when left out. */
+  supplierBillNo: z.string().trim().max(60).optional().nullable(),
+  supplierBillDate: isoDate.optional(),
+  postingDate: isoDate.optional(),
+});
+export type ConsignmentBillInput = z.infer<typeof consignmentBillSchema>;
+
+export const consignmentStockQuerySchema = z.object({
+  supplierId: uuid.optional(),
+  storeId: uuid.optional(),
+});
+export type ConsignmentStockQuery = z.infer<typeof consignmentStockQuerySchema>;

@@ -92,6 +92,8 @@ export const CHART_TEMPLATE: TemplateFamily[] = [
               ],
             },
             { key: 'loans_overdraft', number: '2140', name: 'Loans and overdraft', children: [] },
+            // Plan 11 part 2: sale-or-return goods in our stock, owed only once sold (no party: the statement settles it).
+            { key: 'consignment_payable', number: '2150', name: 'Owed to suppliers on consignment', kind: 'other' },
           ],
         },
       ],

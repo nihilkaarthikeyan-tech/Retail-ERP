@@ -51,6 +51,8 @@ export class PosSnapshotService {
       select: { id: true, code: true, name: true, mobile: true, gstin: true, stateCode: true, customerGroupId: true, status: true },
     });
     const stock = await this.prisma.stockPosition.findMany({ where: { locationId: till.locationId }, select: { itemId: true, quantity: true } });
+    // Plan 11 part 2: goods set aside for ready customer orders, so the till warns before selling them offline too.
+    const reserved = await this.prisma.stockReservation.groupBy({ by: ['itemId'], where: { locationId: till.locationId, releasedAt: null }, _sum: { quantity: true } });
     const years = await this.prisma.financialYear.findMany({ where: { companyId: company.id, status: 'open' }, select: { name: true, startDate: true, endDate: true } });
     const lastNumbers = await Promise.all(
       years.map(async (y) => {
@@ -86,6 +88,8 @@ export class PosSnapshotService {
         walkInCustomerId: partySettings?.walkInCustomerId ?? null,
         // Plan 11 B4 (decision 47): the store's home-delivery charge and the item it is billed as.
         delivery: { charge: store.deliveryCharge.toFixed(2), freeAbove: store.deliveryFreeAbove?.toFixed(2) ?? null, itemId: settings.deliveryItemId },
+        // Plan 11 part 2: the service item an alteration charge is billed as.
+        alterationItemId: settings.alterationItemId,
       },
       salesStaff,
       financialYears: years.map((y) => ({ name: y.name, startDate: iso(y.startDate), endDate: iso(y.endDate) })),
@@ -114,6 +118,7 @@ export class PosSnapshotService {
       coupons: coupons.map((c) => ({ code: c.code, offerId: c.offerId, startDate: iso(c.startDate), endDate: iso(c.endDate), maxUses: c.maxUses, usedCount: c.usedCount, customerId: c.customerId })),
       customers,
       stock: stock.map((s) => ({ itemId: s.itemId, quantity: s.quantity.toString() })),
+      reserved: reserved.map((r) => ({ itemId: r.itemId, quantity: (r._sum.quantity ?? 0).toString() })),
     };
   }
 }

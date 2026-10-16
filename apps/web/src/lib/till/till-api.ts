@@ -5,7 +5,7 @@
 import type { ApprovalAction, CloseShiftInput, CurrentUser, OpenShiftInput, PosTransactionInput } from "shared";
 import { api, ApiError, query } from "../api";
 import { TILL_TOKEN_HEADER, type TillDeviceInfo } from "../till-device";
-import type { BillDto, Person, Receipt, ServerShift, TillSnapshot, TransactionResult } from "./types";
+import type { BillDto, Person, Receipt, ServerShift, TillAlteration, TillOrder, TillSnapshot, TransactionResult } from "./types";
 
 /** Gives up on a request that hangs (the server is treated as unreachable). */
 export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -38,6 +38,15 @@ export interface TillApi {
   approve(body: { managerId: string; pin: string; action: ApprovalAction; details?: string }): Promise<{ token: string; manager: Person }>;
   switchCashier(body: { userId: string; pin: string }): Promise<{ token: string; cashier: Person }>;
   settings(): Promise<{ cashDifferenceApprovalAmount: string; printReceiptCopies: number; liveAllowed: boolean }>;
+  // Plan 11 part 2: customer orders and alteration jobs (online only).
+  findOrders(search: string, storeId: string): Promise<{ rows: TillOrder[] }>;
+  order(id: string): Promise<TillOrder>;
+  orderAdvance(id: string, body: { clientId: string; paymentMethodId: string; amount: string; reference?: string | null }): Promise<TillOrder>;
+  cancelOrder(id: string, body: { clientId: string; reason: string; outcome: "refund" | "keep_credit"; paymentMethodId?: string; reference?: string | null; approvalToken?: string }): Promise<TillOrder>;
+  customerCredit(customerId: string): Promise<{ available: string }>;
+  findAlterations(view: string, storeId: string, search?: string): Promise<{ rows: TillAlteration[] }>;
+  createAlteration(body: Record<string, unknown>): Promise<TillAlteration>;
+  alterationStatus(id: string, status: string): Promise<TillAlteration>;
 }
 
 export function tillApi(device: TillDeviceInfo): TillApi {
@@ -58,6 +67,14 @@ export function tillApi(device: TillDeviceInfo): TillApi {
     approve: (body) => t(api.post<{ token: string; manager: Person }>("/pos/approvals", { tillId, ...body }, opts)),
     switchCashier: (body) => t(api.post<{ token: string; cashier: Person }>("/pos/switch-cashier", { tillId, ...body }, opts)),
     settings: () => t(api.get<{ cashDifferenceApprovalAmount: string; printReceiptCopies: number; liveAllowed: boolean }>("/pos/settings", opts), 10_000),
+    findOrders: (search, storeId) => t(api.get<{ rows: TillOrder[] }>(`/orders${query({ search: search || undefined, storeId, pageSize: 20 })}`, opts), 10_000),
+    order: (id) => t(api.get<TillOrder>(`/orders/${id}`, opts), 10_000),
+    orderAdvance: (id, body) => t(api.post<TillOrder>(`/pos/orders/${id}/advances`, { tillId, ...body }, opts)),
+    cancelOrder: (id, body) => t(api.post<TillOrder>(`/pos/orders/${id}/cancel`, { tillId, ...body }, opts)),
+    customerCredit: (customerId) => t(api.get<{ available: string }>(`/orders/credit/${customerId}`, opts), 10_000),
+    findAlterations: (view, storeId, search) => t(api.get<{ rows: TillAlteration[] }>(`/alterations${query({ view, search: search || undefined, storeId, pageSize: 30 })}`, opts), 10_000),
+    createAlteration: (body) => t(api.post<TillAlteration>("/alterations", body, opts)),
+    alterationStatus: (id, status) => t(api.post<TillAlteration>(`/alterations/${id}/status`, { status }, opts)),
   };
 }
 

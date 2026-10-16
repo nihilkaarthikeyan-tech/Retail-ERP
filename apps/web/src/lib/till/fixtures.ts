@@ -141,6 +141,14 @@ export function fakeApi(over: Partial<TillApi> = {}): TillApi {
     approve: no,
     switchCashier: no,
     settings: no,
+    findOrders: no,
+    order: no,
+    orderAdvance: no,
+    cancelOrder: no,
+    customerCredit: no,
+    findAlterations: no,
+    createAlteration: no,
+    alterationStatus: no,
     ...over,
   };
 }

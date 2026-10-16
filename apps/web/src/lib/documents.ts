@@ -43,6 +43,9 @@ export const PRINT_KIND_LABELS: Record<PrintKind, string> = {
   payment: "Payment receipt or voucher",
   journal: "Journal voucher",
   statement: "Statement of account",
+  customer_order: "Customer order slip",
+  alteration_job: "Alteration job slip",
+  alteration_tag: "Alteration garment tag",
 };
 
 /** Where a document's print page is. A statement's id is "customer:<id>" or "supplier:<id>". */

@@ -24,6 +24,7 @@ import {
   type PosBillQuery,
   type PosLineInput,
   type PosTransactionInput,
+  freeToSell,
   QUANTITY_TOLERANCE,
   type QuickAddCustomerInput,
   quantityProblem,
@@ -46,6 +47,7 @@ import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
 import { D, fromIso, iso, type PendingApproval, PosCommon, type TillWithRefs } from './pos-common.service.js';
+import { type OpenAdvance, PosCredit } from './pos-credit.service.js';
 
 export const billInclude = {
   lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { id: true, code: true, name: true, hsnCode: true, isStockItem: true, trackSerials: true, trackBatches: true } } } },
@@ -101,6 +103,10 @@ interface BuiltBill {
   delivery: (Omit<DeliveryDetailsInput, 'charge'> & { charge: Decimal }) | null;
 }
 
+/** Plan 11 part 2: the customer order collected on the sale, with its lines. */
+type OrderRow = Prisma.CustomerOrderGetPayload<{ include: { lines: true } }>;
+type AlterationRow = Prisma.AlterationJobGetPayload<object>;
+
 interface BuildContext {
   till: TillWithRefs;
   date: string;
@@ -114,6 +120,9 @@ interface BuildContext {
   catalogue: { allowPriceChange: boolean; blockBelowCost: boolean; saveTyped: boolean };
   newPrices: { itemId: string; code: string; unitId: string; price: Decimal }[];
   pending: PendingApproval[];
+  /** Plan 11 part 2: the order collected and the alteration job charged on this sale. */
+  order: OrderRow | null;
+  alteration: AlterationRow | null;
 }
 
 /** A sale line priced and checked, before the bill's offers are chosen. */
@@ -167,6 +176,7 @@ export class PosBillsService {
     private readonly years: FinancialYearsService,
     private readonly engine: StockEngine,
     private readonly ledger: LedgerService,
+    private readonly credit: PosCredit,
   ) {}
 
   // ---- Saving a sale, return or exchange ----
@@ -230,7 +240,9 @@ export class PosBillsService {
     const newPrices: { itemId: string; code: string; unitId: string; price: Decimal }[] = [];
     // Manager approvals are checked now but only used up when the bill is saved.
     const pending: PendingApproval[] = [];
-    const ctx: BuildContext = { till, date, input, user, flags, interState, settings, customer, approvals, catalogue, newPrices, pending };
+    const order = await this.orderFor(company.id, input, till, customer);
+    const alteration = await this.alterationFor(company.id, input, till);
+    const ctx: BuildContext = { till, date, input, user, flags, interState, settings, customer, approvals, catalogue, newPrices, pending, order, alteration };
     await this.checkSalesStaff(company.id, till, input, flags);
 
     const ret = input.ret ? await this.buildReturn(ctx) : null;
@@ -251,7 +263,12 @@ export class PosBillsService {
       if (m.needsReference && !D(p.amount).eq(0) && !p.reference?.trim()) throw new BadRequestException(`${m.name} needs the approval code or reference`);
     }
     await this.checkOnAccount(company.id, input, till, customer, methods, date, approvals, flags, pending);
-    const paid = changeDue({ total: net, payments: input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })) });
+    // Plan 11 part 2: the order's advance and the customer's credit pay part of the bill (carried on account, then linked).
+    const credit = await this.creditFor(company.id, input, customer, order, net);
+    const paid = changeDue({
+      total: net,
+      payments: [...input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })), ...credit.rows.map((r) => ({ amount: r.amount, isCash: false }))],
+    });
     if (net.gte(0)) {
       if (paid.short.gt(0)) throw new BadRequestException(`₹${paid.short.toFixed(2)} is still to be paid`);
       if (paid.overpaidWithoutCash) throw new BadRequestException('More than the bill was entered without cash; only cash can give change');
@@ -267,6 +284,8 @@ export class PosBillsService {
     // Only new sales are refused once live; a return of a bill from the test period must still be possible.
     if (settings.liveAllowed && (sale?.lines ?? []).some((l) => l.provisional) && !input.offline) throw new BadRequestException('A GST rate on this bill is not approved yet; the accountant must approve it');
     if (provisional) flags.add('gst_provisional');
+    // Plan 11 part 2: a warning (never a refusal, decision 32) when the sale takes goods set aside for someone's order.
+    const warnings = sale ? await this.reservedWarnings(sale, till, order) : [];
 
     const saved = await this.prisma.$transaction(
       async (tx) => {
@@ -310,7 +329,16 @@ export class PosBillsService {
               approvedById: b.approvedById,
               salesStaffId: b.salesStaffId,
               lines: { create: t.lines.map((l) => lineData(l)) },
-              ...(holds ? { payments: { create: input.payments.filter((p) => !D(p.amount).eq(0)).map((p) => ({ paymentMethodId: p.paymentMethodId, amount: D(p.amount).toFixed(2), reference: p.reference ?? null })) } } : {}),
+              ...(holds
+                ? {
+                    payments: {
+                      create: [
+                        ...input.payments.filter((p) => !D(p.amount).eq(0)).map((p) => ({ paymentMethodId: p.paymentMethodId, amount: D(p.amount).toFixed(2), reference: p.reference ?? null })),
+                        ...credit.rows.map((r) => ({ paymentMethodId: credit.methodId!, amount: r.amount.toFixed(2), reference: r.reference })),
+                      ],
+                    },
+                  }
+                : {}),
             },
             include: billInclude,
           });
@@ -334,6 +362,13 @@ export class PosBillsService {
         }
         if (flags.size) await tx.posBill.updateMany({ where: { id: { in: created } }, data: { checkFlags: [...flags] } });
         await this.common.markApprovalsUsed(tx, pending);
+        const saleId = sale ? (await tx.posBill.findFirstOrThrow({ where: { id: { in: created }, kind: 'sale' }, select: { id: true } })).id : null;
+        if (credit.rows.length) {
+          const holderId = (await tx.posBill.findFirstOrThrow({ where: { id: { in: created }, kind: holder }, select: { id: true } })).id;
+          await this.useCredit(tx, company.id, customer.id, holderId, date, actor, credit, order);
+        }
+        if (order && saleId) await this.collectOrder(tx, order, saleId, actor);
+        if (alteration && saleId) await this.chargeAlteration(tx, alteration, saleId, input.alteration?.deliver ?? false, actor);
         for (const p of newPrices) {
           const row = await tx.price.create({ data: { priceListId: till.priceListId, itemId: p.itemId, unitId: p.unitId, price: p.price.toFixed(4), startDate: fromIso(date), createdById: actor.userId, updatedById: actor.userId } });
           await this.audit.record(tx, actor, { action: 'create', entityType: 'price', entityId: row.id, changes: { item: p.code, price: p.price.toFixed(2), from: 'typed on a till bill' } });
@@ -342,7 +377,134 @@ export class PosBillsService {
       },
       { timeout: 60_000, maxWait: 30_000 },
     );
-    return this.transactionDto(saved, user, false);
+    return { ...(await this.transactionDto(saved, user, false)), warnings };
+  }
+
+  // ---- Plan 11 part 2: customer orders, credit and alteration charges on a sale ----
+
+  /** The order collected on this sale: online only, same store and customer, still open or ready. */
+  private async orderFor(companyId: string, input: PosTransactionInput, till: TillWithRefs, customer: Customer): Promise<OrderRow | null> {
+    const orderLines = (input.sale?.lines ?? []).filter((l) => l.orderLineId);
+    if (!input.orderId) {
+      if (orderLines.length) throw new BadRequestException('Ordered items come onto a bill only with their order');
+      return null;
+    }
+    if (input.offline) throw new BadRequestException('Collecting an order needs the connection');
+    if (!input.sale) throw new BadRequestException('An order is collected on a sale');
+    const order = await this.prisma.customerOrder.findUnique({ where: { id: input.orderId }, include: { lines: { orderBy: { lineNo: 'asc' } } } });
+    if (!order || order.companyId !== companyId) throw new BadRequestException('Order not found');
+    if (order.storeId !== till.storeId) throw new BadRequestException(`Order ${order.number} is for another store`);
+    if (order.status !== 'open' && order.status !== 'ready') throw new BadRequestException(`Order ${order.number} is already ${order.status}`);
+    if (order.customerId !== customer.id) throw new BadRequestException(`Order ${order.number} is for another customer; choose that customer on the bill`);
+    // Every ordered line comes onto the bill once, as ordered.
+    for (const ol of order.lines) {
+      const on = orderLines.filter((l) => l.orderLineId === ol.id);
+      if (on.length !== 1) throw new BadRequestException(`Order ${order.number}: line ${ol.lineNo} must be on the bill once`);
+      const l = on[0];
+      if (l.itemId !== ol.itemId || (l.unitId && l.unitId !== ol.unitId) || !D(l.quantity).eq(D(ol.quantity))) throw new BadRequestException(`Order ${order.number}: line ${ol.lineNo} must be the ordered item and quantity`);
+      if (l.discountPercent && !D(l.discountPercent).isZero()) throw new BadRequestException(`Order ${order.number}: ordered items are sold at the agreed price, without a discount`);
+    }
+    if (orderLines.some((l) => !order.lines.some((ol) => ol.id === l.orderLineId))) throw new BadRequestException(`A line is not on order ${order.number}`);
+    if (input.billDiscount && (input.billDiscount.amount || input.billDiscount.percent)) throw new BadRequestException('A bill that collects an order takes no bill discount');
+    return order;
+  }
+
+  /** The alteration job whose charge goes on this sale: once only (plan 11 part 2, "never both"). */
+  private async alterationFor(companyId: string, input: PosTransactionInput, till: TillWithRefs): Promise<AlterationRow | null> {
+    if (!input.alteration) return null;
+    if (input.offline) throw new BadRequestException('Billing an alteration charge needs the connection');
+    if (!input.sale) throw new BadRequestException('An alteration charge is billed on a sale');
+    const job = await this.prisma.alterationJob.findUnique({ where: { id: input.alteration.jobId } });
+    if (!job || job.companyId !== companyId) throw new BadRequestException('Alteration job not found');
+    if (job.storeId !== till.storeId) throw new BadRequestException(`Alteration ${job.number} is for another store`);
+    if (job.status === 'cancelled') throw new BadRequestException(`Alteration ${job.number} is cancelled`);
+    if (job.chargeBillId) throw new BadRequestException(`The charge of alteration ${job.number} is already billed`);
+    if (D(job.charge).lte(0)) throw new BadRequestException(`Alteration ${job.number} has no charge to bill`);
+    if (input.alteration.deliver && job.status !== 'ready') throw new BadRequestException(`Alteration ${job.number} is not ready to hand back`);
+    return job;
+  }
+
+  /**
+   * How the order's advance and the customer's free credit pay part of the bill.
+   * Each part becomes an "on account" payment on the bill (the customer's
+   * balance), linked to the advances when the bill is saved.
+   */
+  private async creditFor(companyId: string, input: PosTransactionInput, customer: Customer, order: OrderRow | null, net: Decimal) {
+    const rows: { kind: 'order' | 'free'; amount: Decimal; reference: string; from: OpenAdvance[] }[] = [];
+    const wanted = D(input.useCredit ?? '0');
+    if (!order && wanted.isZero()) return { rows, methodId: null as string | null };
+    if (input.offline) throw new BadRequestException('Using a customer’s advance needs the connection');
+    if (customer.isWalkIn) throw new BadRequestException('Choose the customer to use their advance');
+    let left = Decimal.max(net, 0);
+    if (order) {
+      const advances = await this.credit.orderAdvances(this.prisma, customer.id, order.id);
+      const use = Decimal.min(left, PosCredit.total(advances));
+      if (use.gt(0)) rows.push({ kind: 'order', amount: use, reference: `Advance ${order.number}`, from: advances });
+      left = left.sub(use);
+    }
+    if (wanted.gt(0)) {
+      const free = await this.credit.freeCredit(this.prisma, customer.id);
+      const available = PosCredit.total(free);
+      if (wanted.gt(available)) throw new BadRequestException(`${customer.name} has only ₹${available.toFixed(2)} of credit`);
+      if (wanted.gt(left)) throw new BadRequestException('More credit than the bill is to be used');
+      rows.push({ kind: 'free', amount: wanted, reference: 'Customer credit', from: free });
+    }
+    if (!rows.length) return { rows, methodId: null as string | null };
+    const method = await this.prisma.paymentMethod.findFirst({ where: { companyId, kind: 'on_account', active: true }, orderBy: { createdAt: 'asc' } });
+    if (!method) throw new BadRequestException('The “On account” payment method is switched off; it carries the customer’s advance');
+    return { rows, methodId: method.id as string | null };
+  }
+
+  /** Links the advances used to the bill, checked again under the customer's lock. */
+  private async useCredit(tx: Db, companyId: string, customerId: string, billId: string, date: string, actor: Actor, credit: Awaited<ReturnType<PosBillsService['creditFor']>>, order: OrderRow | null) {
+    await this.credit.lock(tx, customerId);
+    for (const r of credit.rows) {
+      const fresh = r.kind === 'order' && order ? await this.credit.orderAdvances(tx, customerId, order.id) : await this.credit.freeCredit(tx, customerId);
+      await this.credit.useOnBill(tx, { companyId, customerId, billId, date, actorId: actor.userId, amount: r.amount, from: fresh });
+    }
+  }
+
+  /** The order is collected on the bill; its goods are no longer set aside. */
+  private async collectOrder(tx: Db, order: OrderRow, billId: string, actor: Actor) {
+    const done = await tx.customerOrder.updateMany({ where: { id: order.id, status: { in: ['open', 'ready'] } }, data: { status: 'collected', collectedAt: new Date(), collectedBillId: billId, updatedById: actor.userId } });
+    if (done.count !== 1) throw new BadRequestException(`Order ${order.number} was collected or cancelled a moment ago`);
+    await this.credit.release(tx, order.id);
+    await this.audit.record(tx, actor, { action: 'update', entityType: 'customer_order', entityId: order.id, changes: { status: { old: order.status, new: 'collected' }, number: order.number, billId } });
+  }
+
+  /** The alteration charge is billed (and the garment handed back, when asked). */
+  private async chargeAlteration(tx: Db, job: AlterationRow, billId: string, deliver: boolean, actor: Actor) {
+    const done = await tx.alterationJob.updateMany({ where: { id: job.id, chargeBillId: null }, data: { chargeBillId: billId, billId: job.billId ?? billId, updatedById: actor.userId } });
+    if (done.count !== 1) throw new BadRequestException(`The charge of alteration ${job.number} is already billed`);
+    const changes: Record<string, Prisma.InputJsonValue> = { number: job.number, chargeBillId: billId, charge: D(job.charge).toFixed(2) };
+    if (deliver) {
+      const history = [...((job.statusHistory as { status: string; at: string; byId: string | null }[] | null) ?? []), { status: 'delivered', at: new Date().toISOString(), byId: actor.userId }];
+      const moved = await tx.alterationJob.updateMany({ where: { id: job.id, status: 'ready' }, data: { status: 'delivered', deliveredAt: new Date(), statusHistory: history as Prisma.InputJsonValue } });
+      if (moved.count !== 1) throw new BadRequestException(`Alteration ${job.number} is not ready to hand back`);
+      changes.status = { old: 'ready', new: 'delivered' };
+    }
+    await this.audit.record(tx, actor, { action: 'update', entityType: 'alteration_job', entityId: job.id, changes });
+  }
+
+  /** Items on the sale whose free quantity (on hand − set aside for other orders − this bill) goes below zero. */
+  private async reservedWarnings(sale: BuiltBill, till: TillWithRefs, order: OrderRow | null): Promise<string[]> {
+    const qty = new Map<string, { item: Item; basic: Decimal }>();
+    for (const l of sale.lines) {
+      if (!l.item.isStockItem) continue;
+      const q = qty.get(l.item.id);
+      qty.set(l.item.id, { item: l.item, basic: (q?.basic ?? new Decimal(0)).add(l.basicQuantity) });
+    }
+    if (!qty.size) return [];
+    const reserved = await this.credit.reserved(this.prisma, till.locationId, [...qty.keys()], order?.id ?? null);
+    if (!reserved.size) return [];
+    const positions = await this.prisma.stockPosition.findMany({ where: { locationId: till.locationId, itemId: { in: [...reserved.keys()] } } });
+    const out: string[] = [];
+    for (const [itemId, r] of reserved) {
+      const onHand = D(positions.find((p) => p.itemId === itemId)?.quantity ?? 0);
+      const { item, basic } = qty.get(itemId)!;
+      if (freeToSell(onHand, r, basic).lt(0)) out.push(`${item.name} (${item.code}): ${r.toString()} set aside for customer orders; this sale uses stock kept for them`);
+    }
+    return out;
   }
 
   /**
@@ -506,6 +668,14 @@ export class PosBillsService {
     for (const l of part.lines.filter((x) => !x.freeOfLineNo)) {
       const b = await this.lineBasics(l);
       const code = b.item.code;
+      // Plan 11 part 2: an ordered line is sold at the price agreed on the order: no list price, offers or approvals.
+      const ordered = l.orderLineId ? ctx.order?.lines.find((x) => x.id === l.orderLineId) : undefined;
+      if (ordered) {
+        const agreed = D(ordered.price);
+        const gst = await this.common.gstRateFor(this.prisma, b.item, date);
+        priced.push({ l, b, listPrice: agreed, price: agreed, approvedById: null, gst, manualPct: new Decimal(0), covering: [] });
+        continue;
+      }
       let listPrice: Decimal;
       let typedNewPrice = false;
       try {
@@ -587,7 +757,8 @@ export class PosBillsService {
       const { amount, discount } = saleLineAmount({ quantity: b.quantity, price, discountPercent: manualPct, discountAmount: offerDiscount });
       // Mix-and-match prices are the owner's own promotion, like free lines: never refused as below cost.
       const promoted = !!chosen && isCountedOffer(chosen.offer.kind) && offerDiscount.gt(0);
-      if (ctx.catalogue.blockBelowCost && b.basicQuantity.gt(0) && !promoted) {
+      // The price agreed on a customer order was settled when the order was taken.
+      if (ctx.catalogue.blockBelowCost && b.basicQuantity.gt(0) && !promoted && !l.orderLineId) {
         // Plan 11 A2 (blueprint 04): net price per basic unit, before GST, not below the last purchase price or the current cost.
         const net = roundMoney(amount.div(D(1).add(D(gst.rate).div(100))).div(b.basicQuantity));
         const lastBought = D(b.item.lastPurchasePrice ?? 0);
@@ -732,7 +903,8 @@ export class PosBillsService {
         await this.common.useApproval(this.prisma, input.billDiscount.approvalToken, till.id, ['bill_discount', 'discount'], 'bill discount', ctx.pending);
         ctx.approvals.push(`bill discount ${billDiscount.toFixed(2)}`);
       }
-    } else if (!input.offline) {
+    } else if (!input.offline && !ctx.order) {
+      // A bill that collects an order keeps the agreed prices: no bill offer (the till does the same).
       const billOffer = this.offers.bestBillOffer(offers, base);
       if (billOffer) billDiscount = billOffer.saving;
     }
@@ -795,6 +967,40 @@ export class PosBillsService {
         });
       }
       delivery = { ...d, charge };
+    }
+
+    // Plan 11 part 2: an alteration charge as a service line (the item chosen in the till settings), after every other line.
+    if (ctx.alteration) {
+      if (!ctx.settings.alterationItemId) throw new BadRequestException('Choose the alteration charge item in the till settings first');
+      const item = await this.items.assertItemUsable(this.prisma, ctx.settings.alterationItemId, 'sale');
+      const gst = await this.common.gstRateFor(this.prisma, item, date);
+      const charge = roundMoney(D(ctx.alteration.charge));
+      lines.push({
+        lineNo: Math.max(0, ...lines.filter((x) => x.lineNo < 1000).map((x) => x.lineNo)) + 1,
+        item,
+        unitId: item.baseUnitId,
+        factor: new Decimal(1),
+        quantity: new Decimal(1),
+        basicQuantity: new Decimal(1),
+        barcode: null,
+        batchId: null,
+        serialNumbers: [],
+        mrp: null,
+        listPrice: charge,
+        price: charge,
+        discountPercent: new Decimal(0),
+        discountAmount: new Decimal(0),
+        offerDiscount: new Decimal(0),
+        offerId: null,
+        isFree: false,
+        gstRate: D(gst.rate),
+        provisional: !gst.approvedAt,
+        amount: charge,
+        returnOfLineId: null,
+        approvedById: null,
+        costSourceId: null,
+        salesStaffId: null,
+      });
     }
     return { kind: 'sale', number: part.number, lines, returnOfId: null, returnReason: null, approvedById: null, couponId, billDiscount, salesStaffId: billStaff, delivery };
   }
@@ -1096,6 +1302,7 @@ export class PosBillsService {
           if (b.couponId) await this.offers.countCouponUse(tx, b.couponId, -1);
           // Plan 11 B4: a cancelled bill is not delivered.
           await tx.posDelivery.updateMany({ where: { billId: b.id, status: 'pending' }, data: { status: 'cancelled', remarks: `Bill cancelled: ${reason}`, updatedById: actor.userId } });
+          await this.undoOrderExtras(tx, b, till, reason, actor);
           await tx.posBill.update({ where: { id: b.id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: user.id, cancelReason: reason } });
           await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_bill', entityId: b.id, changes: { status: { old: 'completed', new: 'cancelled' }, number: b.number, approvedBy: managerId }, reason });
         }
@@ -1104,6 +1311,31 @@ export class PosBillsService {
       { timeout: 60_000, maxWait: 30_000 },
     );
     return this.transactionDto(after, user, false);
+  }
+
+  /**
+   * Plan 11 part 2: a cancelled bill gives the advance back to the customer (the
+   * links are undone), reopens the order it collected (its goods set aside again
+   * if it was ready), and leaves the alteration charge unbilled.
+   */
+  private async undoOrderExtras(tx: Db, b: BillRow, till: TillWithRefs, reason: string, actor: Actor) {
+    await this.ledger.undoLinks(tx, 'pos_bill', b.id, actor.userId);
+    const order = await tx.customerOrder.findFirst({ where: { collectedBillId: b.id, status: 'collected' } });
+    if (order) {
+      const back = order.readyAt ? 'ready' : 'open';
+      await tx.customerOrder.update({ where: { id: order.id }, data: { status: back, collectedAt: null, collectedBillId: null, updatedById: actor.userId } });
+      if (back === 'ready') await this.credit.reserve(tx, { companyId: order.companyId, orderId: order.id, locationId: till.locationId, actorId: actor.userId });
+      await this.audit.record(tx, actor, { action: 'update', entityType: 'customer_order', entityId: order.id, changes: { status: { old: 'collected', new: back }, number: order.number, billCancelled: b.number }, reason });
+    }
+    for (const job of await tx.alterationJob.findMany({ where: { chargeBillId: b.id } })) {
+      const delivered = job.status === 'delivered';
+      const history = delivered ? [...((job.statusHistory as unknown[] | null) ?? []), { status: 'ready', at: new Date().toISOString(), byId: actor.userId, remarks: `Bill ${b.number} cancelled` }] : undefined;
+      await tx.alterationJob.update({
+        where: { id: job.id },
+        data: { chargeBillId: null, ...(delivered ? { status: 'ready', deliveredAt: null, statusHistory: history as Prisma.InputJsonValue } : {}), updatedById: actor.userId },
+      });
+      await this.audit.record(tx, actor, { action: 'update', entityType: 'alteration_job', entityId: job.id, changes: { number: job.number, chargeBillId: { old: b.id, new: null }, ...(delivered ? { status: { old: 'delivered', new: 'ready' } } : {}) }, reason });
+    }
   }
 
   // ---- Reading ----

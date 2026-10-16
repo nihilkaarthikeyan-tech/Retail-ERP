@@ -252,6 +252,7 @@ export const REPORTS: ReportEntry[] = [
   { id: "profit-and-loss", title: "Profit and loss", question: "Income less expenses: did the shop make money?", href: accounts("profit-and-loss"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
   { id: "balance-sheet", title: "Balance sheet", question: "What the shop owns and owes on a date.", href: accounts("balance-sheet"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
   { id: "stock-vs-accounts", title: "Stock against accounts", question: "Does the stock value agree with the stock accounts?", href: accounts("stock-vs-accounts"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
+  { id: "tally-export", title: "Export to Tally", question: "The vouchers of a period as a file your accountant imports into TallyPrime, with the Tally ledger name of each account.", href: "/accounts/tally", frequency: "monthly", area: "accounts", where: "Accounts", anyOf: ["tally.export"] },
 ];
 
 export const FREQUENCY_LABELS: Record<ReportFrequency, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };

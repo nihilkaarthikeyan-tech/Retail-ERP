@@ -14,11 +14,12 @@ import { ExpensesService } from './expenses.service.js';
 import { JournalsService } from './journals.service.js';
 import { LedgerReportsService } from './ledger-reports.service.js';
 import { PaymentsService } from './payments.service.js';
+import { TallyExportService } from './tally-export.service.js';
 
 @Module({
   imports: [CompanyModule, NumberingModule, PurchasingModule, PosModule],
   controllers: [AccountingController],
-  providers: [AccountingCommon, CatchUpService, ChartService, JournalsService, PaymentsService, ClosingService, LedgerReportsService, ExpensesService, CashBookService],
+  providers: [AccountingCommon, CatchUpService, ChartService, JournalsService, PaymentsService, ClosingService, LedgerReportsService, ExpensesService, CashBookService, TallyExportService],
   exports: [AccountingCommon, LedgerReportsService, ClosingService],
 })
 export class AccountingModule {}

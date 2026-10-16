@@ -36,7 +36,10 @@ the rest are hidden from menus, forms, columns and reports.
 Full list with reasons: `docs/coverage-check.md`.
 
 - **Done (16 October 2026):** A1–A10 fixed, and plan 11 part 1 built (`docs/plans/11-shop-extras.md`).
-- **Plan 11 part 2, still to do:** supplier consignment (sale or return), Tally export, alterations, customer orders with advance; and the smaller part-B items in `docs/coverage-check.md` (reopening a closed shift, e-receipt by email, per-till screen switches, more customer and stock reports).
+- **Done (16 October 2026):** plan 11 part 2 — customer orders with advances, alterations, supplier sale-or-return, TallyPrime export (`docs/plans/11-shop-extras-part2.md`).
+- **Still to do:** the smaller part-B items in `docs/coverage-check.md` (reopening a closed shift, e-receipt by email, per-till screen switches, more customer and stock reports).
+- **Before relying on the Tally export:** the accountant test-imports a sample file into a copy of their Tally company.
+- **Known limits of part 2:** a card/UPI advance taken at the till is not in the shift's expected card/UPI totals; order collection, store credit and alteration billing need the connection; sale-or-return goods should be sold at the store that received them.
 - **Choices made while building, for the owner to confirm:** season sell-through % = sold ÷ (sold + in stock); a markdown skips items that already have a price starting that day; expense heads exclude accounts the system posts to itself; a customer is "no promotions" if any contact person opted out.
 - **Full-year speed test:** paused by the owner. The tools are ready (`pnpm --filter api perf:seed`, then `perf:measure`; `PERF_RESUME=1` continues a stopped run). Run it once on the company server before go-live.
 

@@ -102,6 +102,8 @@ export class LandedChargesService {
     for (const r of receipts) {
       if (r.companyId !== companyId) throw new BadRequestException('Goods receipt not found');
       if (r.isReturn) throw new BadRequestException(`${r.number} is a return`);
+      // Plan 11 part 2: sale-or-return goods stay at the agreed rate (they may go back); freight on them is an expense.
+      if (r.isConsignment) throw new BadRequestException(`${r.number} is sale-or-return goods; record freight on them as an expense, not as a charge on their cost`);
       if (['draft', 'cancelled'].includes(r.status)) throw new BadRequestException(`Goods receipt ${r.number} is ${r.status}`);
       assertStoreAccess(user, r.storeId);
     }

@@ -14,9 +14,9 @@ import { Alert, Button } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
-import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems } from "@/lib/till/pricing";
+import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
-import type { Receipt, SnapItem, StoredSnapshot } from "@/lib/till/types";
+import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillOrder } from "@/lib/till/types";
 import { BillOptionsDialog, CustomerDialog, HelperDialog, ParkedDialog } from "./bill-dialogs";
 import { NumPad } from "./num-pad";
 import { PayDialog } from "./pay-dialog";
@@ -24,9 +24,10 @@ import { type ApprovalRequest, ManagerApprovalDialog } from "./pin-dialogs";
 import { PrintArea, ReceiptPaper } from "./receipt-paper";
 import { ReturnDialog } from "./return-dialog";
 import { DeliveryDialog, SalespersonDialog } from "./extras-dialogs";
+import { AlterationsDialog, customerForOrder, OrdersDialog } from "./order-dialogs";
 import { CashDialog, CloseShiftDialog } from "./shift-dialogs";
 
-type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery";
+type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery" | "orders" | "alterations";
 type PadMode = "qty" | "price" | "disc";
 
 const PAD_LABEL: Record<PadMode, string> = { qty: "Quantity", price: "Price", disc: "Discount %" };
@@ -48,6 +49,8 @@ interface Done {
   receipts: PrintableReceipt[];
   change: string;
   offline: boolean;
+  /** Plan 11 part 2: the server's warnings, e.g. stock set aside for a customer order was sold. */
+  warnings: string[];
 }
 
 interface BillingScreenProps {
@@ -127,7 +130,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (!draft) return;
     setScanError(null);
     setNotice(null);
-    const same = item.trackSerials ? undefined : draft.lines.find((l) => l.itemId === item.id && l.unitId === unitId && !l.priceOverride && (l.discountPercent || "0") === "0" && !l.salesStaffId);
+    const same = item.trackSerials ? undefined : draft.lines.find((l) => l.itemId === item.id && l.unitId === unitId && !l.priceOverride && (l.discountPercent || "0") === "0" && !l.salesStaffId && !l.orderLineId);
     if (same) {
       const next = new Decimal(same.quantity || "0").add(1).toString();
       patchLine(same.key, { quantity: next });
@@ -233,7 +236,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       const res = await engine.finish(input, { creditApprovalToken });
       const receipts = printable(res.receipts);
       setDialog(null);
-      setDone({ receipts, change: res.change, offline: res.offline });
+      setDone({ receipts, change: res.change, offline: res.offline, warnings: res.warnings ?? [] });
       if (res.paidCash) void openDrawer();
       if (till.autoPrint) void printReceipts(receipts);
       const next = await engine.loadDraft();
@@ -267,6 +270,48 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       setDraft(kept.draft);
     } finally {
       setPayBusy(false);
+    }
+  }
+
+  // ---- Plan 11 part 2: customer orders, customer credit, alteration charges ----
+
+  /** The order's lines come onto the bill at the agreed prices, for its customer, with its advance. */
+  function collectOrder(order: TillOrder) {
+    if (!draft) return;
+    const lines: DraftLine[] = order.lines.map((l) => ({ key: engine.uuid(), itemId: l.item.id, unitId: l.unitId, quantity: l.quantity, barcode: null, priceOverride: null, discountPercent: "0", orderLineId: l.id, agreedPrice: l.price }));
+    const basic = order.lines.map((l) => {
+      const factor = snapshot.items.find((i) => i.id === l.item.id)?.units.find((u) => u.unitId === l.unitId)?.factor ?? "1";
+      return { itemId: l.item.id, quantity: new Decimal(l.quantity).mul(factor).toString() };
+    });
+    const kept = draft.lines.filter((l) => !l.orderLineId);
+    change({ ...draft, customer: customerForOrder(order, snapshot), lines: [...kept, ...lines], order: { id: order.id, number: order.number, advance: order.advanceHeld, lines: basic }, credit: null, billDiscount: null, payments: [] });
+    setDialog(null);
+    setNotice(`Order ${order.number} is on the bill; its advance of ${rupees(order.advanceHeld)} is used as payment.`);
+  }
+
+  function removeOrder() {
+    if (!draft) return;
+    change({ ...draft, lines: draft.lines.filter((l) => !l.orderLineId), order: null, payments: [] });
+  }
+
+  function chargeAlteration(job: TillAlteration, deliver: boolean) {
+    if (!draft) return;
+    change({ ...draft, alteration: { jobId: job.id, number: job.number, charge: job.charge, deliver }, payments: [] });
+    setDialog(null);
+  }
+
+  /** The customer's credit (advances kept from cancelled orders), up to what is left to pay. */
+  async function applyCustomerCredit() {
+    if (!draft?.customer?.id || !bill) return;
+    setNotice(null);
+    try {
+      const { available } = await engine.api.customerCredit(draft.customer.id);
+      const already = new Decimal(draft.credit || "0");
+      const use = Decimal.min(new Decimal(available), bill.due.add(already));
+      if (use.lte(0)) return setNotice(`${draft.customer.name} has no credit to use.`);
+      change({ ...draft, credit: use.toFixed(2), payments: [] });
+    } catch (err) {
+      setNotice(errorMessage(err));
     }
   }
 
@@ -399,6 +444,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   if (!draft || !bill) return <p className="till-center muted">Loading the bill…</p>;
 
   const saleLines = bill.sale?.lines ?? [];
+  const setAside = setAsideWarnings(draft, bill, snapshot);
   const retLines = bill.ret?.lines ?? [];
   const selectedLine = draft.lines.find((l) => l.key === selected) ?? null;
   const gstRows = [...(bill.ret ? [bill.ret] : []), ...(bill.sale ? [bill.sale] : [])].flatMap((p) => p.lines);
@@ -561,6 +607,38 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               </Button>
             </p>
           ) : null}
+          {draft.order ? (
+            <p className="muted" data-testid="order-note">
+              Collecting order <span className="mono">{draft.order.number}</span> at the agreed prices; advance {rupees(draft.order.advance)}.{" "}
+              <Button size="small" variant="link" onClick={removeOrder}>
+                Take the order off the bill
+              </Button>
+            </p>
+          ) : null}
+          {draft.alteration ? (
+            <p className="muted" data-testid="alteration-note">
+              Alteration charge of job <span className="mono">{draft.alteration.number}</span>: {rupees(draft.alteration.charge)}
+              {draft.alteration.deliver ? "; the garment is handed back with this bill" : ""}.{" "}
+              <Button size="small" variant="link" onClick={() => change({ ...draft, alteration: null, payments: [] })}>
+                Remove
+              </Button>
+            </p>
+          ) : null}
+          {draft.credit ? (
+            <p className="muted">
+              Customer credit used: {rupees(draft.credit)}.{" "}
+              <Button size="small" variant="link" onClick={() => change({ ...draft, credit: null, payments: [] })}>
+                Do not use
+              </Button>
+            </p>
+          ) : null}
+          {setAside.length ? (
+            <div className="alert alert-info" role="status" data-testid="set-aside">
+              {setAside.map((w, i) => (
+                <div key={i}>{w}</div>
+              ))}
+            </div>
+          ) : null}
           {draft.ret?.originalBillId ? (
             <p className="muted">
               Returning against bill <span className="mono">{draft.ret.originalNumber}</span>. Scan new items now for an exchange.
@@ -659,6 +737,14 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               <span>{bill.net.isNegative() ? "Refund" : "Total"}</span>
               <strong data-testid="bill-total">{rupees(bill.net.abs())}</strong>
             </div>
+            {bill.credit.gt(0) ? (
+              <dl>
+                <dt>Advance / credit used</dt>
+                <dd>−{rupees(bill.credit)}</dd>
+                <dt>To pay</dt>
+                <dd data-testid="bill-due">{rupees(bill.due)}</dd>
+              </dl>
+            ) : null}
             {gstByRate.size ? (
               <table className="table till-gst">
                 <caption>GST{bill.provisional ? " (provisional)" : ""}</caption>
@@ -711,6 +797,15 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <button type="button" className="till-action" onClick={() => setDialog("delivery")} disabled={!draft.lines.length}>
               {draft.delivery ? "Delivery details" : "Home delivery"}
             </button>
+            <button type="button" className="till-action" onClick={() => setDialog("orders")} disabled={!state.online}>
+              Customer orders
+            </button>
+            <button type="button" className="till-action" onClick={() => setDialog("alterations")} disabled={!state.online}>
+              Alterations
+            </button>
+            <button type="button" className="till-action" onClick={() => void applyCustomerCredit()} disabled={!state.online || !draft.customer?.id || !bill.sale}>
+              Use customer credit
+            </button>
             <button type="button" className="till-action" onClick={() => setDialog("cash")}>
               Cash in / out
             </button>
@@ -756,6 +851,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           <div className="till-done-box">
             <h2 id="till-done-title">Bill finished</h2>
             {done.offline ? <Alert kind="info">Saved on the till; it will be sent when the connection returns.</Alert> : null}
+            {done.warnings.length ? <Alert kind="info">{done.warnings.join(" ")}</Alert> : null}
             <div className="till-change till-change-huge">
               <span>Change</span>
               <strong data-testid="done-change">{rupees(done.change)}</strong>
@@ -785,7 +881,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
 
       <PayDialog
         open={dialog === "pay"}
-        net={bill.net}
+        net={bill.due}
         draft={draft}
         methods={methods}
         busy={payBusy}
@@ -872,6 +968,10 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           change({ ...draft, ret, customer, payments: [] });
         }}
       />
+      {dialog === "orders" ? <OrdersDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} onCollect={collectOrder} onClose={() => setDialog(null)} /> : null}
+      {dialog === "alterations" ? (
+        <AlterationsDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} customer={draft.customer} today={today} onCharge={chargeAlteration} onClose={() => setDialog(null)} />
+      ) : null}
       <CashDialog open={dialog === "cash"} engine={engine} onClose={() => setDialog(null)} />
       <CloseShiftDialog
         open={dialog === "close"}
@@ -952,7 +1052,9 @@ function LineRow({
     <tr className={`${selected ? "till-line-selected" : ""}${line.problem ? " row-alert" : ""}`} onClick={onSelect} aria-selected={selected}>
       <td>
         {line.isFree ? <span className="badge badge-ok">Free</span> : null}
-        {line.isDelivery ? <span className="badge badge-neutral">Delivery</span> : null} {line.item.name}
+        {line.isDelivery ? <span className="badge badge-neutral">Delivery</span> : null}
+        {line.isAlteration ? <span className="badge badge-neutral">Alteration</span> : null}
+        {draftLine?.orderLineId ? <span className="badge badge-ok">Ordered</span> : null} {line.item.name}
         <div className="muted till-line-sub">
           {line.item.code}
           {line.unitCode ? ` · ${line.unitCode}` : ""}
@@ -997,7 +1099,7 @@ function LineRow({
       <td className="num">{line.discountAmount.gt(0) ? `−${rupees(line.discountAmount)}` : ""}</td>
       <td className="num">{rupees(line.amount)}</td>
       <td>
-        {!line.isFree && line.draftKey ? (
+        {!line.isFree && line.draftKey && !draftLine?.orderLineId ? (
           <Button
             variant="link"
             aria-label={`Remove ${line.item.name}`}

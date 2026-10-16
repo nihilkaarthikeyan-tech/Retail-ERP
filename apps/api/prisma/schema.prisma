@@ -1360,6 +1360,8 @@ model GoodsReceipt {
   companyId       String             @db.Uuid
   number          String             @unique
   supplierId      String             @db.Uuid
+  /// Plan 11 part 2: sale-or-return goods; owed only when sold (consignment statement).
+  isConsignment   Boolean            @default(false)
   storeId         String             @db.Uuid
   postingDate     DateTime           @db.Date
   postingAt       DateTime
@@ -2076,6 +2078,8 @@ model PosSettings {
   liveAllowed                  Boolean @default(false)
   /// Plan 11 B4: the service item the delivery charge is billed as.
   deliveryItemId               String? @db.Uuid
+  /// Plan 11 part 2: the service item alteration charges are billed as.
+  alterationItemId             String? @db.Uuid
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2361,6 +2365,8 @@ model Payment {
   storeId         String?             @db.Uuid
   partyType       String?
   partyId         String?             @db.Uuid
+  /// Plan 11 part 2: an advance taken against a customer order.
+  orderId         String?             @db.Uuid
   /// Receipt: to = cash or bank. Payment: from = cash or bank. Transfer: both.
   fromAccountId   String?             @db.Uuid
   toAccountId     String?             @db.Uuid
@@ -2709,4 +2715,173 @@ model PosDelivery {
   updatedById String?  @db.Uuid
 
   @@index([storeId, status])
+}
+
+// Plan 11 part 2 (docs/plans/11-shop-extras-part2.md).
+
+/// A customer's order for goods to collect later, usually with an advance (blueprint 10).
+model CustomerOrder {
+  id              String    @id @default(uuid()) @db.Uuid
+  companyId       String    @db.Uuid
+  storeId         String    @db.Uuid
+  number          String    @unique
+  customerId      String    @db.Uuid
+  /// open, ready, collected or cancelled.
+  status          String    @default("open")
+  expectedOn      DateTime? @db.Date
+  remarks         String?
+  readyAt         DateTime?
+  collectedAt     DateTime?
+  /// The till bill it was collected on.
+  collectedBillId String?   @db.Uuid
+  cancelledAt     DateTime?
+  cancelReason    String?
+  /// On cancelling: refund or keep_credit.
+  advanceOutcome  String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  lines CustomerOrderLine[]
+
+  @@index([storeId, status])
+  @@index([customerId])
+}
+
+model CustomerOrderLine {
+  id       String  @id @default(uuid()) @db.Uuid
+  orderId  String  @db.Uuid
+  lineNo   Int
+  itemId   String  @db.Uuid
+  unitId   String  @db.Uuid
+  quantity Decimal @db.Decimal(18, 3)
+  /// The agreed price per unit, GST included.
+  price    Decimal @db.Decimal(16, 4)
+  remarks  String?
+
+  order CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+/// Stock set aside for a ready customer order; released when collected or cancelled.
+model StockReservation {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  itemId      String    @db.Uuid
+  locationId  String    @db.Uuid
+  /// In the basic unit.
+  quantity    Decimal   @db.Decimal(18, 3)
+  orderLineId String    @db.Uuid
+  releasedAt  DateTime?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  @@index([itemId, locationId])
+  @@index([orderLineId])
+}
+
+/// An alteration or tailoring job (plan 11 part 2).
+model AlterationJob {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @db.Uuid
+  storeId        String    @db.Uuid
+  number         String    @unique
+  customerId     String?   @db.Uuid
+  name           String?
+  phone          String?
+  /// The till bill the garment was bought on, if any.
+  billId         String?   @db.Uuid
+  tailorStaffId  String?   @db.Uuid
+  tailorName     String?
+  promisedOn     DateTime  @db.Date
+  /// received, with_tailor, ready, delivered or cancelled.
+  status         String    @default("received")
+  charge         Decimal   @default(0) @db.Decimal(16, 2)
+  /// bill (added to the purchase bill) or collection (billed when handed back).
+  chargePaidWith String    @default("collection")
+  /// The till bill that carries the charge, once billed.
+  chargeBillId   String?   @db.Uuid
+  statusHistory  Json      @default("[]")
+  deliveredAt    DateTime?
+  remarks        String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  lines AlterationJobLine[]
+
+  @@index([storeId, status, promisedOn])
+}
+
+model AlterationJobLine {
+  id      String  @id @default(uuid()) @db.Uuid
+  jobId   String  @db.Uuid
+  lineNo  Int
+  itemId  String? @db.Uuid
+  garment String
+  work    String
+
+  job AlterationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
+
+/// A supplier's sale-or-return statement: sold units become a supplier bill.
+model ConsignmentStatement {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @db.Uuid
+  supplierId     String   @db.Uuid
+  storeId        String   @db.Uuid
+  number         String   @unique
+  fromDate       DateTime @db.Date
+  toDate         DateTime @db.Date
+  /// draft, billed or cancelled.
+  status         String   @default("draft")
+  supplierBillId String?  @db.Uuid
+  remarks        String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  lines ConsignmentStatementLine[]
+
+  @@index([supplierId, storeId])
+}
+
+model ConsignmentStatementLine {
+  id          String  @id @default(uuid()) @db.Uuid
+  statementId String  @db.Uuid
+  itemId      String  @db.Uuid
+  received    Decimal @db.Decimal(18, 3)
+  sold        Decimal @db.Decimal(18, 3)
+  returned    Decimal @db.Decimal(18, 3)
+  held        Decimal @db.Decimal(18, 3)
+  /// Agreed cost per unit; amount = sold × rate.
+  rate        Decimal @db.Decimal(16, 4)
+  amount      Decimal @db.Decimal(16, 2)
+
+  statement ConsignmentStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
+}
+
+/// Which TallyPrime ledger each of our accounts is exported to.
+model TallyLedgerMap {
+  id          String @id @default(uuid()) @db.Uuid
+  companyId   String @db.Uuid
+  accountId   String @unique @db.Uuid
+  tallyLedger String
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
 }

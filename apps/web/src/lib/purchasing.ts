@@ -89,6 +89,8 @@ export interface GoodsReceiptHeader {
   number: string;
   status: GoodsReceiptStatus;
   isReturn: boolean;
+  /** Plan 11 part 2: sale or return. */
+  isConsignment: boolean;
   returnOfId: string | null;
   billId: string | null;
   supplier: Ref;
@@ -312,6 +314,7 @@ export const ACCOUNT_ROLE_LABELS: Record<string, string> = {
   stock: "Stock",
   purchase_expense: "Purchase expense",
   supplier_payable: "Owed to supplier",
+  consignment_payable: "Sale or return (consignment statement)",
   gst_input: "GST input credit",
 };
 

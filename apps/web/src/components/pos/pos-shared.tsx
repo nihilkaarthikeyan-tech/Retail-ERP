@@ -56,6 +56,8 @@ export interface PosSettingsDto {
   liveAllowed: boolean;
   /** Plan 11 B4: the service item the delivery charge is billed as. */
   deliveryItemId?: string | null;
+  /** Plan 11 part 2: the service item an alteration charge is billed as. */
+  alterationItemId?: string | null;
 }
 
 export type OfferKind = "percent" | "amount" | "special_price" | "free_goods" | "buy_get" | "mix_match";

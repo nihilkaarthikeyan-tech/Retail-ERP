@@ -129,7 +129,7 @@ describe('1.2 Creating a cashier limited to one store', () => {
   it('has no back-office rights and cannot touch the other store', async () => {
     const me = (await priya.get('/auth/me').expect(200)).body;
     // Modules 2–4 give cashiers lookups and quick-add only (decision 70: no cost, buying prices or stock values); module 6 adds billing at the till.
-    expect(me.permissions).toEqual(['catalogue.view', 'customers.quick_add', 'customers.view', 'pos.close', 'pos.return', 'pos.sell', 'prices.view', 'stock.view']);
+    expect(me.permissions).toEqual(['alterations.manage', 'catalogue.view', 'customers.quick_add', 'customers.view', 'orders.manage', 'pos.close', 'pos.return', 'pos.sell', 'prices.view', 'stock.view']);
     expect(me.stores.map((s: { code: string }) => s.code)).toEqual(['ANNA']);
     await priya.get('/users').expect(403);
     await priya.get(`/stores/${mainId}`).expect(403); // lacks stores.view at all

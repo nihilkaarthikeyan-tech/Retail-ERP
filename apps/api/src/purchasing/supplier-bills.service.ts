@@ -283,6 +283,8 @@ export class SupplierBillsService {
           const rl = await db.goodsReceiptLine.findUnique({ where: { id: l.receiptLineId }, include: { receipt: true, item: true } });
           if (!rl || rl.receipt.companyId !== companyId || rl.receipt.isReturn) throw new BadRequestException('Goods receipt line not found');
           if (['draft', 'cancelled', 'closed'].includes(rl.receipt.status)) throw new BadRequestException(`Goods receipt ${rl.receipt.number} is ${rl.receipt.status}`);
+          // Plan 11 part 2: sale-or-return goods are owed only when sold, through a consignment statement.
+          if (rl.receipt.isConsignment) throw new BadRequestException(`Goods receipt ${rl.receipt.number} is sale or return; it is billed from a consignment statement, not by a normal bill`);
           if (rl.receipt.supplierId !== supplier.id) throw new BadRequestException(`Goods receipt ${rl.receipt.number} is from another supplier`);
           if (l.itemId !== rl.itemId || (l.unitId && l.unitId !== rl.unitId)) throw new BadRequestException(`The item and unit must match goods receipt ${rl.receipt.number}`);
           assertStoreAccess(user, rl.receipt.storeId);
@@ -356,14 +358,103 @@ export class SupplierBillsService {
     }
 
     const paymentTermsId = input.paymentTermsId ?? supplier.paymentTermsId ?? null;
-    let dueDate = input.supplierBillDate;
+    const dueDate = await this.dueDate(db, paymentTermsId, input.supplierBillDate, input.postingDate);
+    return { supplier, storeId, financialYearId, dueDate, paymentTermsId, lines, receipt };
+  }
+
+  private async dueDate(db: Db, paymentTermsId: string | null, billDate: string, postingDate: string): Promise<string> {
+    let dueDate = billDate;
     if (paymentTermsId) {
       const terms = await db.paymentTerms.findUnique({ where: { id: paymentTermsId }, include: { parts: true } });
       if (!terms) throw new BadRequestException('Payment terms not found');
-      dueDate = dueDates(input.supplierBillDate, terms.parts.map((p) => ({ share: p.share.toString(), dueBasis: p.dueBasis, days: p.days, months: p.months }))).dueDate;
+      dueDate = dueDates(billDate, terms.parts.map((p) => ({ share: p.share.toString(), dueBasis: p.dueBasis, days: p.days, months: p.months }))).dueDate;
     }
-    if (dueDate < input.postingDate) dueDate = input.postingDate; // never before the posting date
-    return { supplier, storeId, financialYearId, dueDate, paymentTermsId, lines, receipt };
+    return dueDate < postingDate ? postingDate : dueDate; // never before the posting date
+  }
+
+  // ---- Sale-or-return bills (plan 11 part 2 §3) ----
+
+  /**
+   * The bill a consignment statement makes, finalised at once inside the
+   * statement's transaction: one line per sale-or-return receipt line for the
+   * units sold, at the agreed rate. It moves the amount from the consignment
+   * balance to the supplier's normal balance (paid as usual) and records the
+   * units as billed on the receipt lines, so they are never billed twice.
+   */
+  async createConsignmentBill(
+    tx: Db,
+    input: { companyId: string; supplierId: string; storeId: string; supplierBillNo: string; supplierBillDate: string; postingDate: string; remarks: string; lines: { receiptLineId: string; quantity: Decimal; rate: Decimal }[] },
+    actor: Actor,
+    user: CurrentUser,
+  ): Promise<BillRow> {
+    const supplier = await this.common.supplierForBills(tx, input.supplierId, user);
+    if (input.supplierBillDate > businessDate()) throw new BadRequestException('The supplier’s bill date cannot be in the future');
+    const postingYear = await this.common.checkPostingDate(tx, input.companyId, input.postingDate, 'A bill');
+    const billYear = await tx.financialYear.findFirst({ where: { companyId: input.companyId, startDate: { lte: fromIso(input.supplierBillDate) }, endDate: { gte: fromIso(input.supplierBillDate) } } });
+    const financialYearId = billYear?.id ?? postingYear.id;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${supplier.id}|${input.supplierBillNo.trim().toLowerCase()}`}))`;
+    await this.assertBillNoFree(tx, input.companyId, supplier.id, input.supplierBillNo, financialYearId, null);
+    const interState = await this.common.interState(tx, supplier, input.storeId);
+
+    const lines: ResolvedBillLine[] = [];
+    for (const l of [...input.lines].sort((a, b) => a.receiptLineId.localeCompare(b.receiptLineId))) await tx.$queryRaw`SELECT 1 FROM "GoodsReceiptLine" WHERE "id" = ${l.receiptLineId}::uuid FOR UPDATE`;
+    for (const l of input.lines) {
+      const rl = await tx.goodsReceiptLine.findUniqueOrThrow({ where: { id: l.receiptLineId }, include: { receipt: true, item: true } });
+      if (!rl.receipt.isConsignment || rl.receipt.isReturn || rl.receipt.supplierId !== supplier.id || rl.receipt.storeId !== input.storeId) throw new BadRequestException('Not a sale-or-return receipt line of this supplier and store');
+      const left = D(rl.basicAcceptedQuantity).add(D(rl.basicRejectedQuantity)).sub(D(rl.returnedAcceptedQuantity)).sub(D(rl.returnedRejectedQuantity)).sub(D(rl.billedQuantity));
+      if (l.quantity.gt(left.add(QUANTITY_TOLERANCE))) throw new BadRequestException(`${rl.item.code}: only ${Decimal.max(0, left).toString()} still unbilled on receipt ${rl.receipt.number}`);
+      // Quantities in the item's own unit; the rate is the agreed rate per unit (discounts already in it).
+      const priced = this.common.price({ quantity: l.quantity.toString(), rate: l.rate.toString(), gstRate: rl.gstRate.toString() }, interState, rl.item.code);
+      lines.push({
+        receiptLineId: rl.id,
+        orderLineId: null,
+        itemId: rl.itemId,
+        itemCode: rl.item.code,
+        unitId: rl.item.baseUnitId,
+        factor: new Decimal(1),
+        quantity: l.quantity,
+        freeQuantity: new Decimal(0),
+        basicQuantity: l.quantity,
+        priced,
+        priceDifference: new Decimal(0),
+        accountRole: PURCHASE_ACCOUNT_ROLES.consignment,
+      });
+      await tx.goodsReceiptLine.update({ where: { id: rl.id }, data: { billedQuantity: D(rl.billedQuantity).add(l.quantity).toString() } });
+    }
+    if (!lines.length) throw new BadRequestException('Nothing to bill');
+    const paymentTermsId = supplier.paymentTermsId ?? null;
+    const dueDate = await this.dueDate(tx, paymentTermsId, input.supplierBillDate, input.postingDate);
+    const number = await this.common.allocate(tx, { companyId: input.companyId, documentKind: 'supplier_bill', date: input.postingDate });
+    const b = await tx.supplierBill.create({
+      data: {
+        companyId: input.companyId,
+        number,
+        supplierId: supplier.id,
+        kind: 'against_receipt',
+        supplierBillNo: input.supplierBillNo.trim(),
+        supplierBillDate: fromIso(input.supplierBillDate),
+        postingDate: fromIso(input.postingDate),
+        postingAt: postingInstant(input.postingDate),
+        financialYearId,
+        storeId: input.storeId,
+        paymentTermsId,
+        dueDate: fromIso(dueDate),
+        status: 'unpaid',
+        remarks: input.remarks,
+        ...this.totalsOf(lines),
+        lines: { create: lines.map((l, i) => billLineData(l, i)) },
+        finalisedAt: new Date(),
+        finalisedById: actor.userId,
+        createdById: actor.userId,
+        updatedById: actor.userId,
+      },
+    });
+    for (const receiptId of new Set((await tx.goodsReceiptLine.findMany({ where: { id: { in: lines.map((l) => l.receiptLineId!) } }, select: { receiptId: true } })).map((r) => r.receiptId))) {
+      await this.receipts.refreshBilling(tx, receiptId);
+    }
+    await this.postings.supplierBill(tx, b.id, actor.userId);
+    await this.audit.record(tx, actor, { action: 'create', entityType: 'supplier_bill', entityId: b.id, changes: { number, kind: 'sale_or_return', supplierBillNo: b.supplierBillNo, total: b.total.toString() } });
+    return this.getRow(tx, b.id);
   }
 
   private async openOrderLine(db: Db, companyId: string, supplier: Supplier, orderLineId: string, itemId: string, billDate: string) {
@@ -552,6 +643,12 @@ export class SupplierBillsService {
           const notes = await tx.supplierBill.count({ where: { returnOfId: id, status: { not: 'cancelled' } } });
           if (notes) throw new BadRequestException('A debit note refers to this bill; cancel it first');
           await this.postings.cancelSupplierBill(tx, id, actor.userId);
+          // Plan 11 part 2: a bill made from a sale-or-return statement takes the statement with it (the units become unbilled again below).
+          const statements = await tx.consignmentStatement.findMany({ where: { supplierBillId: id, status: 'billed' } });
+          for (const st of statements) {
+            await tx.consignmentStatement.update({ where: { id: st.id }, data: { status: 'cancelled', updatedById: actor.userId } });
+            await this.audit.record(tx, actor, { action: 'update', entityType: 'consignment_statement', entityId: st.id, changes: { status: { old: 'billed', new: 'cancelled' }, number: st.number, bill: b.number }, reason });
+          }
           if (b.kind === 'debit_note') await this.undoDebitNote(tx, b, reason, actor, user);
           else {
             if (b.kind === 'against_receipt') {
@@ -633,6 +730,9 @@ export class SupplierBillsService {
     if (original.storeId) assertStoreAccess(user, original.storeId);
     if (original.kind === 'debit_note') throw new BadRequestException('A debit note cannot itself be returned');
     if (original.status !== 'unpaid') throw new BadRequestException('Only a finalised bill can have a debit note');
+    if (original.lines.some((l) => l.accountRole === PURCHASE_ACCOUNT_ROLES.consignment)) {
+      throw new BadRequestException('This bill was made from a sale-or-return statement; cancel the statement and make it again instead of a debit note');
+    }
     const postingDate = input.postingDate ?? businessDate();
     if (postingDate < iso(original.postingDate)!) throw new BadRequestException('A debit note cannot be dated before the bill');
     const year = await this.common.checkPostingDate(this.prisma, original.companyId, postingDate, 'A debit note');

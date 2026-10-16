@@ -21,7 +21,7 @@ const signedDecimal = z
 /** on_account: the customer pays later (module 7 plan §1a, decision 22). */
 export const PAYMENT_KINDS = ['cash', 'card', 'upi', 'other', 'on_account'] as const;
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];
-export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit'] as const;
+export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit', 'order_refund'] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 export const OFFER_KINDS = ['percent', 'amount', 'special_price', 'free_goods', 'buy_get', 'mix_match'] as const;
 export const OFFER_TARGETS = ['items', 'groups', 'brands', 'bill'] as const;
@@ -99,6 +99,8 @@ export const posSettingsSchema = z
     liveAllowed: z.boolean(),
     /** Plan 11 B4: the service item a home-delivery charge is billed as. */
     deliveryItemId: uuid.nullable(),
+    /** Plan 11 part 2: the service item an alteration charge is billed as. */
+    alterationItemId: uuid.nullable(),
   })
   .partial();
 export type PosSettingsInput = z.infer<typeof posSettingsSchema>;
@@ -193,6 +195,8 @@ export const posLineSchema = z.object({
   /** Plan 11 C1: who sold this line, when not the bill's salesperson. */
   salesStaffId: uuid.optional().nullable(),
   charged: chargedFields.optional(),
+  /** Plan 11 part 2: a line of the customer order being collected (sold at the agreed price). */
+  orderLineId: uuid.optional().nullable(),
 });
 export type PosLineInput = z.infer<typeof posLineSchema>;
 
@@ -251,7 +255,8 @@ export const posTransactionSchema = z
     billDiscount: z.object({ percent: percent.optional(), amount: nonNegativeDecimalString.optional(), approvalToken: z.string().optional() }).optional(),
     /** Return part: against a bill, or without one (manager approval). */
     ret: billPart.extend({ returnOfId: uuid.optional().nullable(), approvalToken: z.string().optional(), reason: optionalText(200) }).optional(),
-    sale: billPart.optional(),
+    /** A sale with only an alteration charge has no lines of its own (plan 11 part 2). */
+    sale: billPart.extend({ lines: z.array(posLineSchema) }).optional(),
     /** Net payments: positive collected, negative refunded. */
     payments: z.array(z.object({ paymentMethodId: uuid, amount: signedDecimal, reference: optionalText(60) })).min(1, 'Record how it was paid'),
     /** The total the till showed (online bills: a different server total is refused so the cashier sees it). */
@@ -262,8 +267,15 @@ export const posTransactionSchema = z
     salesStaffId: uuid.optional().nullable(),
     /** Plan 11 B4: deliver the sale to the customer's home. */
     delivery: deliveryDetailsSchema.optional().nullable(),
+    /** Plan 11 part 2: the customer order collected on this sale; its advance pays part of the bill. */
+    orderId: uuid.optional().nullable(),
+    /** Plan 11 part 2: how much of the customer's unused credit (advances kept) pays part of the bill. */
+    useCredit: nonNegativeDecimalString.optional(),
+    /** Plan 11 part 2: an alteration job whose charge is billed on this sale, optionally handed back now. */
+    alteration: z.object({ jobId: uuid, deliver: z.boolean().optional() }).optional().nullable(),
   })
   .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return')
+  .refine((t) => !t.sale || t.sale.lines.length > 0 || !!t.alteration, { message: 'Add at least one item', path: ['sale', 'lines'] })
   .refine((t) => !t.delivery || t.sale, { message: 'Home delivery is for a sale', path: ['delivery'] });
 export type PosTransactionInput = z.infer<typeof posTransactionSchema>;
 

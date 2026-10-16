@@ -7,6 +7,7 @@ import { ImportKindsService } from '../imports/kinds.service.js';
 import { ImportsService } from '../imports/imports.service.js';
 import { InventoryModule } from '../inventory/inventory.module.js';
 import { ItemsModule } from '../items/items.module.js';
+import { OrdersModule } from '../orders/orders.module.js';
 import { PartiesModule } from '../parties/parties.module.js';
 import { PricingModule } from '../pricing/pricing.module.js';
 import { DocumentsController } from './documents.controller.js';
@@ -15,7 +16,7 @@ import { LabelsService } from './labels.service.js';
 import { PrintService } from './print.service.js';
 
 @Module({
-  imports: [CompanyModule, AccountingModule, CatalogueModule, InventoryModule, ItemsModule, PartiesModule, PricingModule],
+  imports: [CompanyModule, AccountingModule, CatalogueModule, InventoryModule, ItemsModule, OrdersModule, PartiesModule, PricingModule],
   controllers: [DocumentsController],
   providers: [PrintService, LabelsService, GoLiveService, ImportsService, ImportKindsService],
 })

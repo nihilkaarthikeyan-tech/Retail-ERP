@@ -8,11 +8,11 @@ import { api, errorMessage } from "@/lib/api";
 import { type GoodsReceiptHeader, RECEIPT_STATUS_LABELS, statusTone } from "@/lib/purchasing";
 import { issuesToFieldErrors } from "@/lib/validation";
 
-/** Status of a goods receipt; returns are also marked "Return". */
-export function ReceiptStatusBadge({ receipt }: { receipt: Pick<GoodsReceiptHeader, "status" | "isReturn"> }) {
+/** Status of a goods receipt; returns are also marked "Return", sale-or-return goods "Sale or return". */
+export function ReceiptStatusBadge({ receipt }: { receipt: Pick<GoodsReceiptHeader, "status" | "isReturn"> & { isConsignment?: boolean } }) {
   return (
     <>
-      {receipt.isReturn ? <Badge kind="warn">Return</Badge> : null} <Badge kind={statusTone(receipt.status)}>{RECEIPT_STATUS_LABELS[receipt.status] ?? receipt.status}</Badge>
+      {receipt.isConsignment ? <Badge kind="neutral">Sale or return</Badge> : null} {receipt.isReturn ? <Badge kind="warn">Return</Badge> : null} <Badge kind={statusTone(receipt.status)}>{RECEIPT_STATUS_LABELS[receipt.status] ?? receipt.status}</Badge>
     </>
   );
 }

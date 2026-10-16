@@ -8,7 +8,7 @@ import { PrintButton } from "@/components/documents/print-button";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { StockItemAdder } from "@/components/stock/stock-item-adder";
 import { SizeColourGrid } from "./size-colour-grid";
-import { Alert, Button, SelectInput, TextareaInput, TextInput } from "@/components/ui";
+import { Alert, Button, CheckInput, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { blankToNull } from "@/lib/format";
@@ -95,6 +95,8 @@ interface HeaderState {
   transporterName: string;
   vehicleNo: string;
   noOrderReason: string;
+  /** Plan 11 part 2: sale or return (owed only once sold). */
+  isConsignment: boolean;
   remarks: string;
 }
 
@@ -113,6 +115,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
     transporterName: receipt?.transporterName ?? "",
     vehicleNo: receipt?.vehicleNo ?? "",
     noOrderReason: receipt?.noOrderReason ?? "",
+    isConsignment: receipt?.isConsignment ?? false,
     remarks: receipt?.remarks ?? "",
   }));
   const [dateTouched, setDateTouched] = useState(false);
@@ -130,7 +133,8 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
 
   const shelves = header.storeId ? shelvesOf(locations, header.storeId) : [];
   const hasOrderLines = lines.some((l) => l.orderLineId);
-  const withoutOrder = lines.some((l) => !l.orderLineId);
+  // Sale-or-return goods never come from an order, so no reason is asked for them.
+  const withoutOrder = lines.some((l) => !l.orderLineId) && !header.isConsignment;
 
   function set<K extends keyof HeaderState>(key: K, value: HeaderState[K]) {
     setHeader((h) => ({ ...h, [key]: value }));
@@ -187,6 +191,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
       transporterName: blankToNull(header.transporterName),
       vehicleNo: blankToNull(header.vehicleNo),
       noOrderReason: withoutOrder ? blankToNull(header.noOrderReason) : null,
+      isConsignment: header.isConsignment,
       remarks: blankToNull(header.remarks),
       lines: lines.map((l) => receiptLineToInput(l, rights.prices)),
     };
@@ -283,9 +288,21 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
           <TextInput id="grn-vehicle" label="Vehicle no." value={header.vehicleNo} onChange={(e) => set("vehicleNo", e.target.value)} disabled={!editable} error={errors.vehicleNo} maxLength={30} />
         </div>
         <TextareaInput id="grn-remarks" label="Remarks" value={header.remarks} onChange={(e) => set("remarks", e.target.value)} disabled={!editable} error={errors.remarks} maxLength={500} />
+        <CheckInput
+          id="grn-consignment"
+          label="Sale or return"
+          description={
+            hasOrderLines
+              ? "Goods from a purchase order cannot be on sale or return."
+              : "The supplier is paid only for what sells, through a consignment statement. Unsold goods can go back. They are not billed by a normal supplier bill."
+          }
+          checked={header.isConsignment}
+          onChange={(e) => set("isConsignment", e.target.checked)}
+          disabled={!editable || hasOrderLines}
+        />
       </div>
 
-      {editable && supplier ? (
+      {editable && supplier && !header.isConsignment ? (
         <>
           <h2>Orders waiting for goods</h2>
           <ReceiptsOrderPicker supplierId={supplier.id} usedOrderIds={orderIds} busyOrderId={addingOrder} onPick={addOrder} />
@@ -294,7 +311,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
       <Alert kind="info">{note}</Alert>
 
       <h2>Lines</h2>
-      {editable && rights.receiveWithoutOrder ? (
+      {editable && (rights.receiveWithoutOrder || header.isConsignment) ? (
         <>
           <p className="muted">Goods that came without an order: scan or search for the item.</p>
           <StockItemAdder onAdd={(item, unitId) => setLines([...lines, lineWithoutOrder(item, unitId)])} />

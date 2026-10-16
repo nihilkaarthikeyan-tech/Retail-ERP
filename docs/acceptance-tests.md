@@ -612,3 +612,39 @@ Reports only read. Each scenario checks that a report agrees with the documents 
 - **Then:**
   - a customer's purchases tab lists their bills and returns with this year's total equal to the sales report filtered by that customer;
   - a customer with a birthday in the next 7 days appears in "birthdays this week".
+
+## Module 11, part 2 — Orders, alterations, sale-or-return, Tally (plan 11 part 2)
+
+### 11.20 Customer order with an advance
+- **Given** Priya orders a ₹2,499 kurta in size XL (not in stock) and pays a ₹1,000 advance by UPI
+- **Then** the order is open with ₹1,000 advance; her customer balance shows ₹1,000 in credit; stock does not move.
+- **When** the kurta arrives and the order is marked ready
+- **Then** one unit is set aside for her, and the till warns before selling that last unit to someone else.
+- **When** she collects it
+- **Then** the till bill is ₹2,499.00, the advance pays ₹1,000.00 and she pays ₹1,499.00. The order is "collected", the advance is linked to the bill, her balance is back to zero, and one unit has left stock.
+
+### 11.21 Cancelling an order
+- **Then** cancelling with a refund needs a manager's PIN and returns the ₹1,000.00 by a refund-allowed method; the balance is zero.
+- **Then** cancelling with credit kept leaves ₹1,000.00 in her favour, and her next bill can use it.
+
+### 11.22 Alteration job
+- **Given** a trouser bought on bill MAIN-T1-…-000010 needs shortening, ₹150, promised in 2 days
+- **Then** the job is "received", then "with the tailor", then "ready", then "delivered", each with who and when.
+- **Then:**
+  - the ₹150 charge can be added to the original bill as a service line, or billed when the trouser is collected — never both;
+  - jobs past their promised date show as overdue.
+
+### 11.23 Supplier sale-or-return
+- **Given** 20 handbags received on sale-or-return from Fancy World at ₹300 each
+- **Then** stock goes up by 20, valued at ₹6,000.00, against the consignment balance owed, not the supplier's normal balance.
+- **When** 7 are sold, 3 are returned unsold, and a statement is made for the month
+- **Then:**
+  - the statement shows received 20, sold 7, returned 3, held 10;
+  - it becomes a supplier bill of ₹2,100.00 for the 7 sold;
+  - the consignment balance is ₹3,000.00 for the 10 still held;
+  - a second statement for the same period adds nothing twice.
+
+### 11.24 Tally export
+- **Given** one day with till sales at two stores, a supplier bill, a supplier payment and an expense
+- **Then** the export has one voucher for each, with debits equal to credits on every voucher, using the mapped ledger names.
+- **Then** exporting the same day again gives identical vouchers, and the export is recorded in the history.

@@ -58,6 +58,8 @@ export const ACCOUNT_ROLES = {
   stock_transfer_clearing: 'Stock transfer clearing',
   goods_received_not_billed: 'Goods received not billed',
   supplier_payable: 'Supplier balances',
+  /** Plan 11 part 2: sale-or-return goods held, owed only once sold and settled by a statement. */
+  consignment_payable: 'Owed to suppliers on consignment',
   customer_receivable: 'Customer balances',
   gst_input_cgst: 'Input CGST',
   gst_input_sgst: 'Input SGST',

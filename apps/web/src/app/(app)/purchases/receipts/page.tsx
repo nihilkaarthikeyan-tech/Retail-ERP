@@ -22,12 +22,12 @@ export default function GoodsReceiptsPage() {
   const { user } = useAuth();
   const rights = purchaseRights(user);
   const locations = useStockLocations();
-  const [filters, setFilters] = useState({ status: "", storeId: "", isReturn: "", from: "", to: "" });
+  const [filters, setFilters] = useState({ status: "", storeId: "", isReturn: "", isConsignment: "", from: "", to: "" });
   const [supplier, setSupplier] = useState<PartyRef | null>(null);
   const [page, setPage] = useState(1);
   const receipts = useLoad(
     () => api.get<Page<GoodsReceiptHeader>>(`/purchase/receipts${query({ ...filters, supplierId: supplier?.id, page, pageSize: PAGE_SIZE })}`),
-    [filters.status, filters.storeId, filters.isReturn, filters.from, filters.to, supplier?.id, page],
+    [filters.status, filters.storeId, filters.isReturn, filters.isConsignment, filters.from, filters.to, supplier?.id, page],
   );
   const stores = storesFromLocations(locations.data ?? []);
   const rows = receipts.data?.rows;
@@ -103,6 +103,11 @@ export default function GoodsReceiptsPage() {
           <option value="">Receipts and returns</option>
           <option value="false">Receipts only</option>
           <option value="true">Returns only</option>
+        </SelectInput>
+        <SelectInput id="grn-terms" label="Terms" value={filters.isConsignment} onChange={(e) => setFilter("isConsignment", e.target.value)}>
+          <option value="">All</option>
+          <option value="false">Bought outright</option>
+          <option value="true">Sale or return</option>
         </SelectInput>
         <TextInput id="grn-from" label="From" type="date" value={filters.from} onChange={(e) => setFilter("from", e.target.value)} />
         <TextInput id="grn-to" label="To" type="date" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} />

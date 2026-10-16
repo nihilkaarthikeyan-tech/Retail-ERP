@@ -35,6 +35,8 @@ export interface SnapTill {
   walkInCustomerId: string | null;
   /** Plan 11 B4 (decision 47): the store's home-delivery charge, none at or above freeAbove, billed as itemId. */
   delivery?: { charge: string; freeAbove: string | null; itemId: string | null };
+  /** Plan 11 part 2: the service item an alteration charge is billed as. */
+  alterationItemId?: string | null;
 }
 
 export interface SnapItemUnit {
@@ -152,6 +154,8 @@ export interface TillSnapshot {
   coupons: SnapCoupon[];
   customers: SnapCustomer[];
   stock: { itemId: string; quantity: string }[];
+  /** Plan 11 part 2: stock set aside for ready customer orders (basic units). */
+  reserved?: { itemId: string; quantity: string }[];
   /** Plan 11 C1: the store's salespeople in use. */
   salesStaff?: SnapSalesStaff[];
 }
@@ -251,6 +255,8 @@ export interface TransactionResult {
   net: string;
   change: string;
   receipts: Receipt[];
+  /** Plan 11 part 2: e.g. the sale took stock set aside for a customer order (never a refusal). */
+  warnings?: string[];
 }
 
 export interface ShiftExpected {
@@ -294,4 +300,47 @@ export interface LocalShift {
 export interface Person {
   id: string;
   name: string;
+}
+
+// ---- Plan 11 part 2: customer orders and alteration jobs at the till ----
+
+export interface TillOrderLine {
+  id: string;
+  lineNo: number;
+  item: { id: string; code: string; name: string };
+  unitId: string;
+  unitCode: string;
+  quantity: string;
+  price: string;
+  amount: string;
+  setAside: string;
+}
+
+export interface TillOrder {
+  id: string;
+  number: string;
+  status: "open" | "ready" | "collected" | "cancelled";
+  customer: { id: string; code: string; name: string; mobile: string | null } | null;
+  customerId: string;
+  expectedOn: string | null;
+  overdue: boolean;
+  total: string;
+  advanceReceived: string;
+  advanceHeld: string;
+  lines: TillOrderLine[];
+}
+
+export interface TillAlteration {
+  id: string;
+  number: string;
+  status: "received" | "with_tailor" | "ready" | "delivered" | "cancelled";
+  name: string | null;
+  phone: string | null;
+  promisedOn: string | null;
+  overdue: boolean;
+  charge: string;
+  chargePaidWith: "bill" | "collection";
+  chargeBill: { id: string; number: string | null } | null;
+  tailor: string | null;
+  lines: { garment: string; work: string }[];
 }

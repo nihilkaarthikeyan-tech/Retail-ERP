@@ -30,7 +30,8 @@ export class PurchasePostings {
     }
     const taxable = r.lines.reduce((s, l) => s.add(D(l.taxableAmount)), new Decimal(0));
     const charges = r.lines.reduce((s, l) => s.add(D(l.extraCharges)), new Decimal(0));
-    lines.push({ role: 'goods_received_not_billed', storeId: r.storeId, credit: taxable });
+    // Plan 11 part 2: sale-or-return goods are owed only once sold, so they go to the consignment balance.
+    lines.push({ role: r.isConsignment ? 'consignment_payable' : 'goods_received_not_billed', storeId: r.storeId, credit: taxable });
     if (!charges.isZero()) lines.push({ role: 'freight_inward', storeId: r.storeId, credit: charges });
     const rounding = stock.sub(taxable).sub(charges);
     if (!rounding.isZero()) lines.push({ role: 'cost_of_goods_sold', storeId: r.storeId, credit: rounding });

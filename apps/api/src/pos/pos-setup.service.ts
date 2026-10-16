@@ -235,6 +235,13 @@ export class PosSetupService {
       if (item.isStockItem) throw new BadRequestException(`${item.code} is a stock item; the delivery charge needs a service item`);
       if (!item.hsnCode) throw new BadRequestException(`${item.code} needs an HSN (SAC) code so its GST rate is known`);
     }
+    // Plan 11 part 2: the alteration charge too is a sellable service item.
+    if (input.alterationItemId) {
+      const item = await this.prisma.item.findUnique({ where: { id: input.alterationItemId } });
+      if (!item || !item.active || !item.canSell) throw new BadRequestException('The alteration charge item must be an item in use that can be sold');
+      if (item.isStockItem) throw new BadRequestException(`${item.code} is a stock item; the alteration charge needs a service item`);
+      if (!item.hsnCode) throw new BadRequestException(`${item.code} needs an HSN (SAC) code so its GST rate is known`);
+    }
     return this.prisma.$transaction(async (tx) => {
       const before = await ensurePosDefaults(tx, company.id);
       const after = await tx.posSettings.update({ where: { companyId: company.id }, data: { ...input, updatedById: actor.userId } });
@@ -311,8 +318,8 @@ function tillDto(t: {
   };
 }
 
-function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean; deliveryItemId: string | null }) {
-  return { cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2), printReceiptCopies: s.printReceiptCopies, liveAllowed: s.liveAllowed, deliveryItemId: s.deliveryItemId };
+function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean; deliveryItemId: string | null; alterationItemId: string | null }) {
+  return { cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2), printReceiptCopies: s.printReceiptCopies, liveAllowed: s.liveAllowed, deliveryItemId: s.deliveryItemId, alterationItemId: s.alterationItemId };
 }
 
 function chargesDto(s: Store) {

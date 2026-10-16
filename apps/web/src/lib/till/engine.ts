@@ -73,7 +73,12 @@ export interface FinishResult {
   offline: boolean;
   change: string;
   paidCash: boolean;
+  /** Plan 11 part 2: the server's warnings (e.g. stock set aside for a customer order was sold). */
+  warnings?: string[];
 }
+
+/** Plan 11 part 2: orders, customer credit and alteration charges are checked on the server, so never kept offline. */
+export const ORDER_OFFLINE = "Collecting an order, using a customer's advance or billing an alteration needs the connection. Try again when the till is online.";
 
 /** An online bill whose total the server worked out differently (409 PRICE_CHANGED). */
 export class PriceChangedError extends Error {
@@ -514,7 +519,7 @@ export class TillEngine {
     if (bill.problems.length) throw new Error(bill.problems[0]);
     if (bill.approvals.length) throw new Error(bill.approvals[0].reason);
     const methods = snapshot.till.paymentMethods.filter((m) => m.active);
-    const pay = checkPayments(bill.net, draft.payments, methods);
+    const pay = checkPayments(bill.due, draft.payments, methods);
     if (pay.problem) throw new Error(pay.problem);
     if (pay.short.gt(0)) throw new Error(bill.net.gte(0) ? `₹${pay.short.toFixed(2)} is still to be paid` : `₹${pay.short.toFixed(2)} is still to be refunded`);
     const onAccount = usesOnAccount(draft.payments, methods);
@@ -522,6 +527,8 @@ export class TillEngine {
     if (onAccount && (!this.state.online || this.state.signedOut)) throw new Error(ON_ACCOUNT_OFFLINE);
     const noBill = isNoBillReturn(draft);
     if (noBill && (!this.state.online || this.state.signedOut)) throw new Error(NO_BILL_RETURN_OFFLINE);
+    const needsServer = !!draft.order || !!draft.alteration || bill.credit.gt(0);
+    if (needsServer && (!this.state.online || this.state.signedOut)) throw new Error(ORDER_OFFLINE);
 
     // The identity and the numbers are given once and saved before anything is sent (pos-offline §3–§4).
     draft.clientId = draft.clientId ?? this.uuid();
@@ -543,7 +550,7 @@ export class TillEngine {
         await this.rememberResult(result);
         await this.store.set(LAST_RECEIPTS_KEY, result.receipts);
         await this.newDraft();
-        return { receipts: result.receipts, offline: false, change: result.change, paidCash };
+        return { receipts: result.receipts, offline: false, change: result.change, paidCash, warnings: result.warnings ?? [] };
       } catch (err) {
         const serverTotal = priceChangedTotal(err);
         if (serverTotal !== null) throw new PriceChangedError(serverTotal, bill.net.toFixed(2));
@@ -567,8 +574,10 @@ export class TillEngine {
         // The bill keeps its identity and numbers; it is not queued.
         if (onAccount) throw new Error(ON_ACCOUNT_DROPPED);
         if (noBill) throw new Error(NO_BILL_RETURN_DROPPED);
+        if (needsServer) throw new Error(ORDER_OFFLINE);
       }
     }
+    if (needsServer) throw new Error(ORDER_OFFLINE);
     if (onAccount) throw new Error(ON_ACCOUNT_OFFLINE);
     if (noBill) throw new Error(NO_BILL_RETURN_OFFLINE);
 

@@ -58,14 +58,14 @@ export class DocumentsController {
   ) {}
 
   // ---- Printing ----
-  @Get('print/settings') @RequireAnyPermission('print.settings', 'purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit') printSettings() {
+  @Get('print/settings') @RequireAnyPermission('print.settings', 'purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit', 'orders.manage', 'alterations.manage') printSettings() {
     return this.print.settings();
   }
   @Put('print/settings') @RequirePermission('print.settings') savePrintSettings(@Body(zod(printSettingsSchema)) input: PrintSettingsInput, @ReqActor() actor: Actor) {
     return this.print.saveSettings(input, actor);
   }
   /** The logo for printed letterheads (an image the browser loads; logged-in users only). */
-  @Get('print/logo') @RequireAnyPermission('print.settings', 'purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit', 'labels.print') async printLogo(@Res() res: Response) {
+  @Get('print/logo') @RequireAnyPermission('print.settings', 'purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit', 'labels.print', 'orders.manage', 'alterations.manage') async printLogo(@Res() res: Response) {
     const logo = await this.print.logo();
     if (!logo) {
       res.status(404).send();
@@ -88,7 +88,7 @@ export class DocumentsController {
     return this.print.saveTerms(termsId, input, actor);
   }
   /** A document's print data; the statement id is "customer:<id>" or "supplier:<id>". Every print is logged. */
-  @Get('print/:kind/:id') @RequireAnyPermission('purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit') document(
+  @Get('print/:kind/:id') @RequireAnyPermission('purchase.view', 'stock.view', 'accounts.view', 'payments.post', 'journals.post', 'cash.deposit', 'orders.manage', 'alterations.manage') document(
     @Param('kind', zod(z.enum(PRINT_KINDS))) kind: PrintKind,
     @Param('id', zod(z.string().regex(/^((customer|supplier):)?[0-9a-f-]{36}$/i, 'Not a document id'))) docId: string,
     @ReqActor() actor: Actor,

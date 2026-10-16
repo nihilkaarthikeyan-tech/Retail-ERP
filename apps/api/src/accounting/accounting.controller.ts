@@ -1,7 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Module 7 endpoints (plan 07 §7). Every endpoint checks the permission here and
 // the store inside the service (rule 11).
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   type AsOfQuery,
   asOfQuerySchema,
@@ -35,6 +36,10 @@ import {
   setDefaultsSchema,
   type SettleInput,
   settleSchema,
+  type TallyExportQuery,
+  tallyExportQuerySchema,
+  type TallyLedgerMapInput,
+  tallyLedgerMapSchema,
   type UpdateAccountInput,
   updateAccountSchema,
   updateBankAccountSchema,
@@ -52,11 +57,18 @@ import { ExpensesService } from './expenses.service.js';
 import { JournalsService } from './journals.service.js';
 import { LedgerReportsService } from './ledger-reports.service.js';
 import { PaymentsService } from './payments.service.js';
+import { TallyExportService } from './tally-export.service.js';
 
 const id = () => new ParseUUIDPipe();
 const zod = <T>(schema: { parse: (v: unknown) => T }) => new ZodValidationPipe(schema as never);
 const partyTypeSchema = z.enum(['customer', 'supplier']);
 const statementQuerySchema = z.object({ from: z.string().optional(), to: z.string().optional() });
+
+function sendXml(res: Response, file: { fileName: string; data: Buffer; contentType: string }) {
+  res.setHeader('Content-Type', file.contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+  res.send(file.data);
+}
 
 @Controller()
 export class AccountingController {
@@ -68,6 +80,7 @@ export class AccountingController {
     private readonly reports: LedgerReportsService,
     private readonly expenses: ExpensesService,
     private readonly cashBooks: CashBookService,
+    private readonly tally: TallyExportService,
   ) {}
 
   // ---- Chart of accounts ----
@@ -241,5 +254,19 @@ export class AccountingController {
   }
   @Get('reports/book-health') @RequirePermission('accounts.view') bookHealth() {
     return this.reports.bookHealth();
+  }
+
+  // ---- Tally export (plan 11 part 2 §4) ----
+  @Get('tally/ledger-map') @RequireAnyPermission('tally.export', 'accounts.view') tallyLedgerMap(@ReqUser() user: AuthUser) {
+    return this.tally.ledgerMap(user);
+  }
+  @Put('tally/ledger-map') @RequireAnyPermission('tally.export', 'accounts.manage') saveTallyLedgerMap(@Body(zod(tallyLedgerMapSchema)) input: TallyLedgerMapInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.tally.saveMap(input, actor, user);
+  }
+  @Get('tally/vouchers') @RequirePermission('tally.export') async tallyVouchers(@Query(zod(tallyExportQuerySchema)) q: TallyExportQuery, @ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
+    sendXml(res, await this.tally.exportVouchers(q, actor, user));
+  }
+  @Get('tally/ledgers') @RequirePermission('tally.export') async tallyLedgers(@ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
+    sendXml(res, await this.tally.exportMasters(actor, user));
   }
 }

@@ -7,6 +7,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { amountInWords, type CurrentUser, Decimal, hasPermission, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput } from 'shared';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
+import { AlterationsService } from '../orders/alterations.service.js';
+import { OrdersService } from '../orders/orders.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import { canAccessStore } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
@@ -52,6 +54,10 @@ const RIGHTS: Record<PrintKind, PermissionKey[]> = {
   payment: ['accounts.view', 'payments.post', 'cash.deposit'],
   journal: ['accounts.view', 'journals.post', 'cash.deposit'],
   statement: ['accounts.view', 'payments.post'],
+  // Plan 11 part 2
+  customer_order: ['orders.manage'],
+  alteration_job: ['alterations.manage'],
+  alteration_tag: ['alterations.manage'],
 };
 
 const TERMS_FOR: Record<PrintKind, 'selling' | 'buying' | null> = {
@@ -62,6 +68,9 @@ const TERMS_FOR: Record<PrintKind, 'selling' | 'buying' | null> = {
   payment: null,
   journal: null,
   statement: 'selling',
+  customer_order: 'selling',
+  alteration_job: null,
+  alteration_tag: null,
 };
 
 @Injectable()
@@ -71,6 +80,8 @@ export class PrintService {
     private readonly audit: AuditService,
     private readonly company: CompanyService,
     private readonly ledgerReports: LedgerReportsService,
+    private readonly orders: OrdersService,
+    private readonly alterations: AlterationsService,
   ) {}
 
   // ---- Settings, logo and standard terms ----
@@ -156,6 +167,11 @@ export class PrintService {
         return this.journal(id, user);
       case 'statement':
         return this.statement(id, user);
+      case 'customer_order':
+        return this.customerOrder(id, user);
+      case 'alteration_job':
+      case 'alteration_tag':
+        return this.alterationJob(kind, id, user);
     }
   }
 
@@ -211,6 +227,70 @@ export class PrintService {
 
   private mark(status: string): PrintDocument['mark'] {
     return status === 'draft' ? 'DRAFT' : status === 'cancelled' ? 'CANCELLED' : null;
+  }
+
+  /** Plan 11 part 2: the order slip, with the advance received. */
+  private async customerOrder(id: string, user: CurrentUser): Promise<PrintDocument> {
+    const o = await this.orders.get(id, user);
+    const lh = await this.letterhead(o.storeId);
+    const received = D(o.advanceReceived);
+    const balance = D(o.total).sub(D(o.advanceHeld));
+    return {
+      ...this.base('customer_order', 'Customer order', lh),
+      number: o.number,
+      date: iso(o.createdAt),
+      mark: o.status === 'cancelled' ? 'CANCELLED' : null,
+      party: await this.partyBlock('customer', o.customerId),
+      details: [['Expected on', o.expectedOn ?? ''], ['Status', o.status], ...(o.remarks ? [['Remarks', o.remarks] as [string, string]] : [])],
+      columns: [
+        { key: 'no', label: '#' },
+        { key: 'item', label: 'Item' },
+        { key: 'quantity', label: 'Quantity', align: 'right' },
+        { key: 'price', label: 'Agreed price', align: 'right' },
+        { key: 'amount', label: 'Amount', align: 'right' },
+      ],
+      lines: o.lines.map((l) => ({ no: String(l.lineNo), item: `${l.item.name} (${l.item.code})${l.remarks ? ` · ${l.remarks}` : ''}`, quantity: `${qty(l.quantity)} ${l.unitCode}`.trim(), price: money(l.price), amount: money(l.amount) })),
+      totals: [
+        ['Total (GST included)', money(o.total)],
+        ['Advance received', money(received)],
+        ...(D(o.advanceRefunded).gt(0) ? [['Advance refunded', money(o.advanceRefunded)] as [string, string]] : []),
+        ['To pay on collection', money(Decimal.max(balance, 0))],
+      ],
+      amountInWords: amountInWords(o.total),
+      terms: await this.termsFor('customer_order'),
+      signatures: ['Customer', 'For the shop'],
+    };
+  }
+
+  /** Plan 11 part 2: the alteration job slip, or the small tag that goes with the garment. */
+  private async alterationJob(kind: 'alteration_job' | 'alteration_tag', id: string, user: CurrentUser): Promise<PrintDocument> {
+    const j = await this.alterations.get(id, user);
+    const lh = await this.letterhead(j.storeId);
+    const tag = kind === 'alteration_tag';
+    return {
+      ...this.base(kind, tag ? 'Alteration tag' : 'Alteration job', lh),
+      paper: tag ? 'A5' : lh.paper,
+      number: j.number,
+      date: iso(j.createdAt),
+      mark: j.status === 'cancelled' ? 'CANCELLED' : null,
+      party: { label: 'Customer', name: j.name ?? '', code: null, address: [], gstin: null, phone: j.phone },
+      details: [
+        ['Promised on', j.promisedOn ?? ''],
+        ...(tag ? [] : [['Tailor', j.tailor ?? ''] as [string, string], ['Status', j.status.replace('_', ' ')] as [string, string]]),
+        ...(j.bill?.number ? [['Bought on bill', j.bill.number] as [string, string]] : []),
+        ...(!tag && j.remarks ? [['Remarks', j.remarks] as [string, string]] : []),
+      ],
+      columns: [
+        { key: 'no', label: '#' },
+        { key: 'garment', label: 'Garment' },
+        { key: 'work', label: 'Work' },
+      ],
+      lines: j.lines.map((l) => ({ no: String(l.lineNo), garment: l.garment, work: l.work })),
+      totals: tag ? [] : [['Alteration charge', money(j.charge)], ['Paid', j.chargeBill ? `on bill ${j.chargeBill.number}` : j.chargePaidWith === 'bill' ? 'with the bill' : 'on collection']],
+      amountInWords: null,
+      terms: tag ? [] : await this.termsFor(kind),
+      signatures: tag ? [] : ['Customer', 'For the shop'],
+    };
   }
 
   private async purchaseOrder(id: string, user: CurrentUser): Promise<PrintDocument> {

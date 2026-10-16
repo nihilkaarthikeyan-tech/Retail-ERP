@@ -38,6 +38,7 @@ export const PURCHASE_NUMBER_SERIES: Record<string, string> = {
   supplier_bill: 'PB-{FY}-',
   debit_note: 'DN-{FY}-',
   landed_charge: 'LC-{FY}-',
+  consignment_statement: 'CS-{STORE}-{FY}-',
 };
 
 /**

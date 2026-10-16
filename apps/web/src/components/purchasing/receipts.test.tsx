@@ -114,6 +114,7 @@ function receipt(over: Partial<GoodsReceiptDto> = {}): GoodsReceiptDto {
     number: "GRN-MAIN-2627-0001",
     status: "draft",
     isReturn: false,
+    isConsignment: false,
     returnOfId: null,
     billId: null,
     supplier: SUPPLIER,
@@ -230,6 +231,40 @@ describe("ReceiptEditor", () => {
     const [w] = writes(fetchMock);
     expect(w.path).toBe(`/purchase/receipts/${RECEIPT_ID}`);
     expect((w.body as { noOrderReason: string }).noOrderReason).toBe("Urgent festival stock");
+  });
+
+  it("sale or return: no order reason is asked, and the receipt is sent as sale or return (plan 11 part 2)", async () => {
+    const fetchMock = mockApi({
+      "/auth/me": () => ({ status: 200, body: user(RECEIVER) }),
+      [`/items/${rice.id}`]: () => ({ status: 200, body: rice }),
+      "GET /purchase/orders": noOrders,
+      [`PATCH /purchase/receipts/${RECEIPT_ID}`]: () => ({ status: 200, body: receipt({ isConsignment: true }) }),
+    });
+    const onSaved = vi.fn();
+    render(
+      <AuthProvider>
+        <ReceiptEditor receipt={receipt()} locations={locations} onSaved={onSaved} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByLabelText(/Why is there no order\?/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/Sale or return/));
+    expect(screen.queryByLabelText(/Why is there no order\?/)).toBeNull();
+    expect(screen.queryByText("Orders waiting for goods")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const [w] = writes(fetchMock);
+    expect(w.body).toMatchObject({ isConsignment: true, noOrderReason: null });
+  });
+
+  it("shows sale-or-return receipts with their badge", async () => {
+    mockApi({ "/auth/me": () => ({ status: 200, body: user(RECEIVER) }), "GET /purchase/orders": noOrders, [`/items/${rice.id}`]: () => ({ status: 200, body: rice }) });
+    render(
+      <AuthProvider>
+        <ReceiptEditor receipt={receipt({ isConsignment: true })} locations={locations} onSaved={vi.fn()} />
+      </AuthProvider>,
+    );
+    expect((await screen.findAllByText("Sale or return")).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText(/Sale or return/) as HTMLInputElement).checked).toBe(true);
   });
 
   it("stops rejected above received before calling the API", async () => {

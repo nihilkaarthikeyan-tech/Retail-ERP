@@ -35,6 +35,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { PurchasePostings } from './purchase-postings.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
+import { ConsignmentStock } from './consignment-stock.service.js';
 
 export const receiptInclude = {
   supplier: { select: { id: true, code: true, name: true } },
@@ -50,6 +51,8 @@ export const receiptInclude = {
 export type ReceiptRow = Prisma.GoodsReceiptGetPayload<{ include: typeof receiptInclude }>;
 
 const ROLE = PURCHASE_ACCOUNT_ROLES.grni;
+/** Plan 11 part 2: sale-or-return goods are held against the consignment balance, not goods received not billed. */
+const roleOf = (r: { isConsignment: boolean }) => (r.isConsignment ? PURCHASE_ACCOUNT_ROLES.consignment : ROLE);
 
 /** A receipt line after every check, ready to store (positive quantities). */
 export interface ResolvedReceiptLine {
@@ -84,6 +87,8 @@ export interface ReceiptHeader {
   transporterName?: string | null;
   vehicleNo?: string | null;
   noOrderReason?: string | null;
+  /** Plan 11 part 2: sale or return. */
+  isConsignment?: boolean;
   remarks?: string | null;
 }
 
@@ -98,6 +103,7 @@ export class GoodsReceiptsService {
     private readonly engine: StockEngine,
     private readonly stockDocs: StockDocumentsService,
     private readonly postings: PurchasePostings,
+    private readonly consignment: ConsignmentStock,
   ) {}
 
   // ---- Reading ----
@@ -114,6 +120,7 @@ export class GoodsReceiptsService {
       ...(q.storeId ? { storeId: q.storeId } : {}),
       ...(stores ? { storeId: { in: stores } } : {}),
       ...(q.isReturn ? { isReturn: q.isReturn === 'true' } : {}),
+      ...(q.isConsignment ? { isConsignment: q.isConsignment === 'true' } : {}),
       ...(q.from || q.to ? { postingDate: { ...(q.from ? { gte: fromIso(q.from) } : {}), ...(q.to ? { lte: fromIso(q.to) } : {}) } } : {}),
     };
     const [rows, total] = await Promise.all([
@@ -144,7 +151,7 @@ export class GoodsReceiptsService {
     const { lines } = await this.resolve(this.prisma, company.id, header, input.lines, user);
     const created = await this.prisma.$transaction(async (tx) => {
       const r = await this.createDraft(tx, company.id, header, lines, actor, {});
-      await this.audit.record(tx, actor, { action: 'create', entityType: 'goods_receipt', entityId: r.id, changes: { number: r.number, lines: lines.length, ...(header.noOrderReason ? { withoutOrder: header.noOrderReason } : {}) } });
+      await this.audit.record(tx, actor, { action: 'create', entityType: 'goods_receipt', entityId: r.id, changes: { number: r.number, lines: lines.length, ...(header.isConsignment ? { saleOrReturn: true } : {}), ...(header.noOrderReason ? { withoutOrder: header.noOrderReason } : {}) } });
       return r;
     });
     return this.toDto(created, user);
@@ -164,6 +171,7 @@ export class GoodsReceiptsService {
       transporterName: input.transporterName !== undefined ? input.transporterName : before.transporterName,
       vehicleNo: input.vehicleNo !== undefined ? input.vehicleNo : before.vehicleNo,
       noOrderReason: input.noOrderReason !== undefined ? input.noOrderReason : before.noOrderReason,
+      isConsignment: input.isConsignment ?? before.isConsignment,
       remarks: input.remarks !== undefined ? input.remarks : before.remarks,
     };
     const lineInputs = input.lines ?? before.lines.map((l) => lineInputOf(l));
@@ -180,6 +188,7 @@ export class GoodsReceiptsService {
           transporterName: header.transporterName ?? null,
           vehicleNo: header.vehicleNo ?? null,
           noOrderReason: header.noOrderReason ?? null,
+          isConsignment: header.isConsignment ?? false,
           remarks: header.remarks ?? null,
           ...this.totalsOf(lines),
           updatedById: actor.userId,
@@ -207,6 +216,7 @@ export class GoodsReceiptsService {
         transporterName: header.transporterName ?? null,
         vehicleNo: header.vehicleNo ?? null,
         noOrderReason: header.noOrderReason ?? null,
+        isConsignment: header.isConsignment ?? false,
         remarks: header.remarks ?? null,
         billId: extra.billId ?? null,
         ...this.totalsOf(lines),
@@ -236,6 +246,8 @@ export class GoodsReceiptsService {
     for (const l of inputs) {
       const orderLine = l.orderLineId ? await db.purchaseOrderLine.findUnique({ where: { id: l.orderLineId }, include: { order: true } }) : null;
       if (l.orderLineId && !orderLine) throw new BadRequestException('Purchase order line not found');
+      // Plan 11 part 2: sale-or-return goods are agreed with the supplier, not ordered.
+      if (orderLine && header.isConsignment) throw new BadRequestException('Sale-or-return goods are received without a purchase order; remove the order lines or untick "Sale or return"');
       if (orderLine) {
         const order = orderLine.order;
         if (order.companyId !== companyId) throw new BadRequestException('Purchase order line not found');
@@ -346,7 +358,8 @@ export class GoodsReceiptsService {
     }
 
     // Decision 31: without an order only with the right and a reason (unless orders are required).
-    if (withoutOrder && !opts.forBill) {
+    // Sale-or-return goods never come from an order, so decision 31 does not apply to them.
+    if (withoutOrder && !opts.forBill && !header.isConsignment) {
       if (settings.requireOrderForReceipt) throw new BadRequestException('A purchase order is required before receiving goods');
       if (!hasPermission(user, 'purchase.receive_without_order')) throw new ForbiddenException('Receiving goods without a purchase order needs a Store Manager');
       if (!header.noOrderReason?.trim()) throw new BadRequestException('Give the reason for receiving goods without a purchase order');
@@ -431,7 +444,7 @@ export class GoodsReceiptsService {
       const cost = unitCostPerBasicUnit({ taxable: l.taxableAmount.toString(), extraCharges: l.extraCharges.toString(), basicQuantity: basicReceived });
       costs.set(l.id, cost);
       // The receipt posts its own ledger entry (freight is credited separately), so the engine holds the value.
-      const base = { companyId: r.companyId, documentType: 'goods_receipt', documentId: r.id, documentLineId: l.id, itemId: l.itemId, batchId: l.batchId, postingDate, postingAt: r.postingAt, accountRole: ROLE, ledger: 'held' as const };
+      const base = { companyId: r.companyId, documentType: 'goods_receipt', documentId: r.id, documentLineId: l.id, itemId: l.itemId, batchId: l.batchId, postingDate, postingAt: r.postingAt, accountRole: roleOf(r), ledger: 'held' as const };
       if (D(l.basicAcceptedQuantity).gt(0)) movements.push({ ...base, locationId: l.shelfLocationId, kind: 'in', quantity: l.basicAcceptedQuantity.toString(), incomingCost: cost.toString() });
       if (D(l.basicRejectedQuantity).gt(0)) movements.push({ ...base, locationId: l.rejectedLocationId!, kind: 'in', quantity: l.basicRejectedQuantity.toString(), incomingCost: cost.toString() });
     }
@@ -449,7 +462,8 @@ export class GoodsReceiptsService {
     await tx.goodsReceipt.update({
       where: { id },
       data: {
-        status: D(r.total).eq(0) ? 'completed' : 'to_bill',
+        // Sale-or-return goods are never billed by a normal bill: only a consignment statement bills them.
+        status: D(r.total).eq(0) || r.isConsignment ? 'completed' : 'to_bill',
         stockValue: stockValue.toFixed(2),
         isBackDated,
         finalisedAt: new Date(),
@@ -462,7 +476,7 @@ export class GoodsReceiptsService {
       action: 'update',
       entityType: 'goods_receipt',
       entityId: id,
-      changes: { status: { old: 'draft', new: 'finalised' }, number: r.number, stockValue: stockValue.toFixed(2), ...(warnings.length ? { overReceipt: warnings } : {}), ...(r.noOrderReason ? { withoutOrder: r.noOrderReason } : {}) },
+      changes: { status: { old: 'draft', new: 'finalised' }, number: r.number, stockValue: stockValue.toFixed(2), ...(r.isConsignment ? { saleOrReturn: true } : {}), ...(warnings.length ? { overReceipt: warnings } : {}), ...(r.noOrderReason ? { withoutOrder: r.noOrderReason } : {}) },
     });
     return { receipt: await this.getRow(tx, id), warnings };
   }
@@ -549,6 +563,19 @@ export class GoodsReceiptsService {
       plan.push({ line, acc, rej, basicAcc, basicRej, serials, rejectedSerials });
     }
 
+    // Plan 11 part 2: only sale-or-return goods still in the shop can go back on sale-or-return terms.
+    if (original.isConsignment) {
+      const byItem = new Map<string, Decimal>();
+      for (const p of plan) byItem.set(p.line.itemId, (byItem.get(p.line.itemId) ?? new Decimal(0)).add(p.basicAcc).add(p.basicRej));
+      for (const [itemId, qty] of byItem) {
+        const held = await this.consignment.held(tx, original.storeId, itemId, original.supplierId);
+        if (qty.gt(held.add(QUANTITY_TOLERANCE))) {
+          const code = plan.find((p) => p.line.itemId === itemId)!.line.item.code;
+          throw new BadRequestException(`${code}: only ${held.toString()} of this supplier's sale-or-return goods are still in the shop (the rest were sold)`);
+        }
+      }
+    }
+
     const number = await this.common.allocate(tx, { companyId: original.companyId, documentKind: 'purchase_return', storeId: original.storeId, date: postingDate });
     const neg = (v: Decimal) => v.neg().toString();
     const lineData = plan.map((p, i) => {
@@ -600,6 +627,7 @@ export class GoodsReceiptsService {
         postingDate: fromIso(postingDate),
         postingAt,
         isReturn: true,
+        isConsignment: original.isConsignment,
         returnOfId: original.id,
         status: 'completed',
         remarks: input.reason,
@@ -622,7 +650,7 @@ export class GoodsReceiptsService {
       const originals = await tx.stockLedgerEntry.findMany({ where: { documentId: original.id, documentLineId: p.line.id, kind: 'in', isCancellation: false } });
       const fromShelf = originals.find((e) => e.locationId === p.line.shelfLocationId);
       const fromRejected = originals.find((e) => e.locationId === p.line.rejectedLocationId);
-      const base = { companyId: original.companyId, documentType: 'goods_receipt', documentId: ret.id, documentLineId: retLine.id, itemId: p.line.itemId, batchId: p.line.batchId, postingDate, postingAt, accountRole: ROLE };
+      const base = { companyId: original.companyId, documentType: 'goods_receipt', documentId: ret.id, documentLineId: retLine.id, itemId: p.line.itemId, batchId: p.line.batchId, postingDate, postingAt, accountRole: roleOf(original) };
       if (p.basicAcc.gt(0)) movements.push({ ...base, locationId: p.line.shelfLocationId, kind: 'out', quantity: p.basicAcc.toString(), costSourceId: fromShelf?.id ?? null });
       if (p.basicRej.gt(0)) movements.push({ ...base, locationId: p.line.rejectedLocationId!, kind: 'out', quantity: p.basicRej.toString(), costSourceId: fromRejected?.id ?? null });
     }
@@ -677,6 +705,15 @@ export class GoodsReceiptsService {
       if (returns) throw new BadRequestException('Goods from this receipt were returned; cancel the return first');
       const charges = await tx.landedChargeShare.count({ where: { receiptLineId: { in: lineIds }, charge: { status: 'finalised' } } });
       if (charges) throw new BadRequestException('Extra charges were added to this receipt; cancel them first');
+      if (r.isConsignment) {
+        // Sold sale-or-return goods are owed to the supplier: they cannot silently disappear.
+        const picture = await this.consignment.picture(tx, r.storeId, [...new Set(r.lines.map((l) => l.itemId))]);
+        const sold = picture.layers.filter((l) => lineIds.includes(l.lineId) && l.sold.gt(0));
+        if (sold.length) {
+          const list = sold.map((l) => `${r.lines.find((x) => x.id === l.lineId)!.item.code} × ${l.sold.toString()}`).join(', ');
+          throw new BadRequestException(`Some of these sale-or-return goods were sold (${list}); they are owed to the supplier, so the receipt cannot be cancelled`);
+        }
+      }
     }
     if (iso(r.postingDate)!.slice(0, 7) < businessDate().slice(0, 7) && !hasPermission(user, 'stock.backdate')) {
       throw new ForbiddenException('Only the Accountant may cancel a goods receipt from an earlier month');
@@ -732,7 +769,7 @@ export class GoodsReceiptsService {
     );
     const anythingLeft = r.lines.some((l) => D(l.basicAcceptedQuantity).add(D(l.basicRejectedQuantity)).sub(D(l.returnedAcceptedQuantity)).sub(D(l.returnedRejectedQuantity)).gt(0));
     const anyBilled = r.lines.some((l) => D(l.billedQuantity).gt(0));
-    const status = !anythingLeft ? 'returned' : billedPercent.gte(100) || D(r.total).eq(0) ? 'completed' : anyBilled ? 'partly_billed' : 'to_bill';
+    const status = !anythingLeft ? 'returned' : r.isConsignment || billedPercent.gte(100) || D(r.total).eq(0) ? 'completed' : anyBilled ? 'partly_billed' : 'to_bill';
     await tx.goodsReceipt.update({ where: { id: receiptId }, data: { billedPercent: billedPercent.toFixed(2), status } });
   }
 
@@ -797,6 +834,7 @@ export class GoodsReceiptsService {
       number: r.number,
       status: r.status,
       isReturn: r.isReturn,
+      isConsignment: r.isConsignment,
       returnOfId: r.returnOfId,
       billId: r.billId,
       supplier: r.supplier,
@@ -940,6 +978,7 @@ function headerOf(r: ReceiptRow): ReceiptHeader {
     transporterName: r.transporterName,
     vehicleNo: r.vehicleNo,
     noOrderReason: r.noOrderReason,
+    isConsignment: r.isConsignment,
     remarks: r.remarks,
   };
 }
@@ -951,6 +990,7 @@ function summarise(r: ReceiptRow): Record<string, unknown> {
     postingDate: iso(r.postingDate),
     deliveryNoteNo: r.deliveryNoteNo,
     noOrderReason: r.noOrderReason,
+    isConsignment: r.isConsignment,
     lines: r.lines.map((l) => `${l.item.code}×${l.receivedQuantity.toString()}(−${l.rejectedQuantity.toString()})`),
   };
 }

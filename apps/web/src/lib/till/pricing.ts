@@ -14,6 +14,7 @@ import {
   type DecimalInput,
   deliveryChargeFor,
   effectiveDiscountPercent,
+  freeToSell,
   inclusiveTax,
   type InclusiveTax,
   lineOfferSaving,
@@ -52,6 +53,9 @@ export interface DraftLine {
   serials?: string;
   /** Plan 11 C1: who sold this line, when not the bill's salesperson. */
   salesStaffId?: string | null;
+  /** Plan 11 part 2: a line of the customer order being collected, sold at its agreed price. */
+  orderLineId?: string | null;
+  agreedPrice?: string | null;
 }
 
 /** Plan 11 B4 (decision 46): where and when to deliver the sale. */
@@ -159,6 +163,12 @@ export interface DraftBill {
   salesStaffId?: string | null;
   /** Plan 11 B4: home delivery of the sale. */
   delivery?: DraftDelivery | null;
+  /** Plan 11 part 2: the customer order collected on this bill; its unused advance pays part of it. */
+  order?: { id: string; number: string; advance: string; lines: { itemId: string; quantity: string }[] } | null;
+  /** Plan 11 part 2: how much of the customer's credit (advances kept) pays part of the bill. */
+  credit?: string | null;
+  /** Plan 11 part 2: an alteration job whose charge is billed on this sale (handed back now when `deliver`). */
+  alteration?: { jobId: string; number: string; charge: string; deliver: boolean } | null;
 }
 
 export function emptyDraft(id: string, now: Date = new Date()): DraftBill {
@@ -166,7 +176,7 @@ export function emptyDraft(id: string, now: Date = new Date()): DraftBill {
 }
 
 export function isDraftEmpty(d: DraftBill): boolean {
-  return d.lines.length === 0 && !d.ret?.lines.length;
+  return d.lines.length === 0 && !d.ret?.lines.length && !d.alteration;
 }
 
 /** The bill has a return without the original bill (online only, with a manager's approval). */
@@ -201,6 +211,8 @@ export interface ComputedLine {
   isFree: boolean;
   /** Plan 11 B4: the delivery charge line, added from the store's settings (not sent as a line). */
   isDelivery: boolean;
+  /** Plan 11 part 2: the alteration charge line, added by the server from the job (not sent as a line). */
+  isAlteration?: boolean;
   freeOfLineNo: number | null;
   returnOfLineId: string | null;
   /** Plan 11 C1: who sold the line (returns: the server keeps the original line's). */
@@ -243,6 +255,10 @@ export interface ComputedBill {
   delivery: { charge: Decimal } | null;
   /** Plan 11 B3: each offer used on the sale and what it saves. */
   offers: { offer: SnapOffer; saving: Decimal }[];
+  /** Plan 11 part 2: the order's advance and the customer's credit used on the bill. */
+  credit: Decimal;
+  /** What is left to pay (or refund) with the till's payment methods: net less credit. */
+  due: Decimal;
 }
 
 export interface PricingContext {
@@ -507,7 +523,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   let billDiscount = ZERO;
   let billOffer: SnapOffer | null = null;
   let delivery: { charge: Decimal } | null = null;
-  if (draft.lines.length) {
+  if (draft.lines.length || draft.alteration) {
     // 1. Price, GST and the cashier's discount of each line.
     const priced: { line: ComputedLine; covering: SnapOffer[] }[] = [];
     draft.lines.forEach((dl, index) => {
@@ -531,22 +547,25 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       if (!item.active) problem = `${item.code} can no longer be sold`;
       if (item.isStockItem && item.trackSerials && !problem && !quantity.eq(serialList(dl.serials).length)) problem = `scan the ${quantity.toString()} serial number(s) of ${item.code}`;
       const mrp = unit?.mrp ? D(unit.mrp) : item.mrp ? D(item.mrp).mul(factor) : null;
-      const list = listPriceFor(snapshot, item, dl.unitId, quantity.gt(0) ? quantity : "1", customerIdForPrice, date);
+      // Plan 11 part 2: an ordered line is sold at the price agreed on the order (no list price, offers or approvals).
+      const agreed = dl.orderLineId && dl.agreedPrice != null ? D(dl.agreedPrice) : null;
+      const list = agreed ?? listPriceFor(snapshot, item, dl.unitId, quantity.gt(0) ? quantity : "1", customerIdForPrice, date);
       if (list === null && !problem) problem = `${item.code} has no price in the till's price list`;
       const listPrice = list ?? ZERO;
-      const price = dl.priceOverride !== null && dl.priceOverride !== "" ? roundMoney(dl.priceOverride) : listPrice;
+      const price = agreed ?? (dl.priceOverride !== null && dl.priceOverride !== "" ? roundMoney(dl.priceOverride) : listPrice);
       const priceChanged = !price.eq(listPrice);
       const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date);
       if (!rate && !problem) problem = item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code})` : `${item.code} has no HSN code, so its GST rate is not known`;
       const gstRate = D(rate?.rate ?? "0");
       // Offers apply to the list price; a typed price switches them off for the line (blueprint 04).
-      const covering = !priceChanged && quantity.gt(0) ? offers.filter((o) => o.appliesTo !== "bill" && offerCovers(o, item)) : [];
+      const covering = !priceChanged && !agreed && quantity.gt(0) ? offers.filter((o) => o.appliesTo !== "bill" && offerCovers(o, item)) : [];
       let manualPercent = ZERO;
       try {
         manualPercent = D(dl.discountPercent || "0");
       } catch {
         problem = problem ?? "The discount is not a number";
       }
+      if (agreed && manualPercent.gt(0)) problem = problem ?? "an ordered item is sold at the agreed price, without a discount";
       if (priceChanged && !till.allowPriceChange && !dl.approvalToken) approvals.push({ kind: "price_change", lineKey: dl.key, reason: `${item.code}: a price change needs a manager` });
       const verdict = checkDiscount({ listPrice, price, mrp, manualDiscountPercent: manualPercent, itemMaxPercent: item.maxDiscountPercent, cashierLimitPercent: cashierLimit, approved: !!dl.approvalToken });
       if (!verdict.ok) {
@@ -656,7 +675,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       billDiscount = bd.amount && D(bd.amount).gt(0) ? roundMoney(bd.amount) : roundMoney(base.mul(D(bd.percent!)).div(100));
       const pct = base.gt(0) ? billDiscount.div(base).mul(100) : ZERO;
       if (pct.gt(cashierLimit) && !bd.approvalToken) approvals.push({ kind: "bill_discount", lineKey: null, reason: `A bill discount of ₹${billDiscount.toFixed(2)} is above the cashier's limit of ${cashierLimit.toFixed(2)}%` });
-    } else {
+    } else if (!draft.order) {
+      // A bill that collects an order keeps the agreed prices: no bill offer (as the server).
       const best = bestBillOffer(offers, base);
       if (best) {
         billDiscount = best.saving;
@@ -721,6 +741,44 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         }
       }
       delivery = { charge };
+    }
+    // Plan 11 part 2: the alteration charge as a service line after every other line (as the server adds it).
+    if (draft.alteration) {
+      const item = till.alterationItemId ? findItem(snapshot, till.alterationItemId) : undefined;
+      const rate = item ? gstRateFor(snapshot.gstRates, item.hsnCode, date) : null;
+      if (!item) problems.push("The alteration charge item is not set up; ask the owner to choose it in the till settings");
+      else if (!rate) problems.push(`No GST rate is set for the alteration charge (${item.code})`);
+      else {
+        const charge = roundMoney(draft.alteration.charge);
+        lines.push({
+          lineNo: Math.max(0, ...lines.filter((l) => l.lineNo < 1000).map((l) => l.lineNo)) + 1,
+          draftKey: null,
+          item,
+          unitId: item.baseUnitId,
+          unitCode: item.units.find((u) => u.unitId === item.baseUnitId)?.code ?? "",
+          quantity: D(1),
+          mrp: null,
+          listPrice: charge,
+          price: charge,
+          manualPercent: ZERO,
+          manualDiscount: ZERO,
+          offer: null,
+          offerDiscount: ZERO,
+          billShare: ZERO,
+          discountAmount: ZERO,
+          amount: charge,
+          gstRate: D(rate.rate),
+          provisional: !rate.approved,
+          tax: blankTax(),
+          isFree: false,
+          isDelivery: false,
+          isAlteration: true,
+          freeOfLineNo: null,
+          returnOfLineId: null,
+          salesStaffId: null,
+          problem: null,
+        });
+      }
     }
     for (const l of lines) l.tax = inclusiveTax(l.amount, l.gstRate, interState);
     sale = partTotals(lines);
@@ -803,7 +861,15 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
 
   const net = (sale?.total ?? ZERO).add(ret?.total ?? ZERO);
   const provisional = (sale?.lines ?? []).some((l) => l.provisional);
-  return { sale, ret, net, billDiscount, billOffer, coupon, interState, problems, approvals, provisional, delivery, offers: offersUsed(sale?.lines ?? []) };
+  // Plan 11 part 2: the order's advance (up to the bill) and the customer's credit pay part of it.
+  const payable = Decimal.max(net, 0);
+  const advance = draft.order ? Decimal.min(D(draft.order.advance || "0"), payable) : ZERO;
+  let credit = advance;
+  if (draft.credit && D(draft.credit).gt(0)) {
+    if (D(draft.credit).gt(payable.sub(advance))) problems.push("More credit is used than the bill");
+    else credit = credit.add(D(draft.credit));
+  }
+  return { sale, ret, net, billDiscount, billOffer, coupon, interState, problems, approvals, provisional, delivery, offers: offersUsed(sale?.lines ?? []), credit, due: net.sub(credit) };
 }
 
 // ---- Payments ----
@@ -904,7 +970,7 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
     shiftClientId: o.shiftClientId,
     soldAt: o.soldAt,
     offline: o.offline,
-    payments: paymentsForServer(bill.net, draft.payments, methods),
+    payments: paymentsForServer(bill.due, draft.payments, methods),
   };
   if (o.cashierToken) input.cashierToken = o.cashierToken;
   // A return against a bill is for that bill's customer; without a bill, the customer chosen on the till.
@@ -922,6 +988,10 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
   else if (draft.customer?.id) input.customerId = draft.customer.id;
   if (draft.couponCode && bill.coupon) input.couponCode = bill.coupon.code;
   if (draft.salesStaffId) input.salesStaffId = draft.salesStaffId;
+  // Plan 11 part 2: the order collected, the customer's credit used and an alteration charge.
+  if (draft.order) input.orderId = draft.order.id;
+  if (draft.credit && D(draft.credit).gt(0)) input.useCredit = D(draft.credit).toFixed(2);
+  if (draft.alteration && bill.sale) input.alteration = { jobId: draft.alteration.jobId, ...(draft.alteration.deliver ? { deliver: true } : {}) };
   if (draft.delivery && bill.sale && bill.delivery) {
     const d = draft.delivery;
     input.delivery = {
@@ -943,7 +1013,7 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
     const draftByKey = new Map(draft.lines.map((l) => [l.key, l]));
     // The delivery charge line is added by the server from the store's settings.
     const lines = bill.sale.lines
-      .filter((l) => !l.isDelivery && (!l.isFree || o.offline))
+      .filter((l) => !l.isDelivery && !l.isAlteration && (!l.isFree || o.offline))
       .map((l) => {
         const dl = l.draftKey ? draftByKey.get(l.draftKey) : undefined;
         if (l.isFree) {
@@ -954,6 +1024,7 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
           itemId: l.item.id,
           unitId: l.unitId,
           quantity: l.quantity.toString(),
+          ...(dl?.orderLineId ? { orderLineId: dl.orderLineId } : {}),
           ...(dl?.salesStaffId ? { salesStaffId: dl.salesStaffId } : {}),
           ...(dl?.barcode ? { barcode: dl.barcode } : {}),
           ...(serialList(dl?.serials).length ? { serialNumbers: serialList(dl?.serials) } : {}),
@@ -998,4 +1069,31 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
   }
   if (!o.offline) input.expectedTotal = bill.net.toFixed(2);
   return input;
+}
+
+// ---- Plan 11 part 2: goods set aside for customer orders ----
+
+/**
+ * Items on the sale whose free quantity (on hand less what is set aside for
+ * customer orders, less this bill) goes below zero. The till warns; it never
+ * refuses (decision 32). The order being collected does not count against itself.
+ */
+export function setAsideWarnings(draft: DraftBill, bill: ComputedBill, snapshot: TillSnapshot): string[] {
+  const reserved = new Map((snapshot.reserved ?? []).map((r) => [r.itemId, D(r.quantity)]));
+  if (!reserved.size || !bill.sale) return [];
+  for (const l of draft.order?.lines ?? []) reserved.set(l.itemId, Decimal.max(0, (reserved.get(l.itemId) ?? ZERO).sub(D(l.quantity))));
+  const onHand = new Map(snapshot.stock.map((s) => [s.itemId, D(s.quantity)]));
+  const onBill = new Map<string, { item: SnapItem; qty: Decimal }>();
+  for (const l of bill.sale.lines) {
+    if (!l.item.isStockItem) continue;
+    const factor = D(l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1");
+    const q = onBill.get(l.item.id);
+    onBill.set(l.item.id, { item: l.item, qty: (q?.qty ?? ZERO).add(l.quantity.mul(factor)) });
+  }
+  const out: string[] = [];
+  for (const [itemId, { item, qty }] of onBill) {
+    const r = reserved.get(itemId) ?? ZERO;
+    if (r.gt(0) && freeToSell(onHand.get(itemId) ?? ZERO, r, qty).lt(0)) out.push(`${item.name}: ${r.toString()} set aside for customer orders. Selling it takes stock kept for a customer.`);
+  }
+  return out;
 }

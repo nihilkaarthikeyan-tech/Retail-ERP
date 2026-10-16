@@ -127,3 +127,44 @@ function StoreRow({ store, canEdit, onSaved }: { store: StoreCharges; canEdit: b
     </tr>
   );
 }
+
+/** Plan 11 part 2: the service item an alteration charge is billed as at the till. */
+export function AlterationChargeSettings({ settings, canEdit, onSaved }: { settings: PosSettingsDto; canEdit: boolean; onSaved: (s: PosSettingsDto) => void }) {
+  const item = useLoad<ItemDto | null>(() => (settings.alterationItemId ? api.get<ItemDto>(`/items/${settings.alterationItemId}`) : Promise.resolve(null)), [settings.alterationItemId]);
+  const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
+  async function chooseItem(next: ItemDto | null) {
+    setError(null);
+    try {
+      onSaved(await api.patch<PosSettingsDto>("/pos/settings", { alterationItemId: next?.id ?? null }));
+      setPicking(false);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Alterations</h2>
+      <p className="muted">An alteration charge is billed at the till as a line of this item: a service item with its SAC code, not a stock item. It goes on the purchase bill or on the bill when the garment is collected, never both.</p>
+      <Alert kind="error">{error}</Alert>
+      <p>
+        Alteration charge item:{" "}
+        {item.data ? (
+          <>
+            <span className="mono">{item.data.code}</span> {item.data.name}
+          </>
+        ) : (
+          <span className="muted">not chosen</span>
+        )}{" "}
+        {canEdit && !picking ? (
+          <Button size="small" variant="link" onClick={() => setPicking(true)}>
+            {item.data ? "Change" : "Choose"}
+          </Button>
+        ) : null}
+      </p>
+      {picking ? <ItemPicker id="pos-alteration-item" label="Service item for the alteration charge" value={null} onChange={(i) => i && void chooseItem(i)} /> : null}
+    </div>
+  );
+}
