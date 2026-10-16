@@ -5,6 +5,7 @@
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { SYSTEM_ROLE_PERMISSIONS, SYSTEM_ROLES } from 'shared';
+import { ACCOUNTING_NUMBER_SERIES, AccountingCommon } from '../src/accounting/accounting-common.service.js';
 import { CatalogueSettingsService } from '../src/catalogue/catalogue-settings.service.js';
 import { UnitsService } from '../src/catalogue/units.service.js';
 import { ensureStoreLocations, STOCK_NUMBER_SERIES, seriesKind } from '../src/inventory/location-defaults.js';
@@ -130,6 +131,14 @@ describe('company defaults, called at the same moment', () => {
     expect(await prisma.catalogueSettings.count()).toBe(1);
     expect((await prisma.priceList.findMany({ orderBy: { code: 'asc' } })).map((p) => p.code)).toEqual(['STD-BUY', 'STD-SELL']);
     expect(await companyWideSeries(companyId, ['item'])).toEqual(once(['item']));
+  });
+
+  it('chart of accounts and the accounting number series', async () => {
+    const kinds = Object.keys(ACCOUNTING_NUMBER_SERIES);
+    await prisma.numberSeries.deleteMany({ where: { companyId, documentKind: { in: kinds } } });
+    await atOnce(() => app.get(AccountingCommon).ready(prisma));
+    expect(await companyWideSeries(companyId, kinds)).toEqual(once(kinds));
+    expect(await prisma.accountingSettings.count()).toBe(1);
   });
 
   it('party settings, the walk-in customer and number series', async () => {

@@ -2480,6 +2480,8 @@ model SummaryEmailRun {
   error        String?
 
   @@index([companyId, startedAt])
+  /// The scheduled email goes at most once per business day.
+  @@unique([companyId, businessDate], where: raw("\"kind\" = 'scheduled'"), map: "SummaryEmailRun_once_per_day")
 }
 
 // ---------------------------------------------------------------------------

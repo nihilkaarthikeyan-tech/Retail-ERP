@@ -31,14 +31,17 @@ export class AccountingCommon {
     private readonly numbering: NumberingService,
   ) {}
 
-  /** The company, with its chart of accounts and number series in place. */
+  /**
+   * The company, with its chart of accounts and number series in place.
+   * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
+   */
   async ready(db: Db = this.prisma): Promise<Company> {
     const company = await this.company.current(db);
     await this.setup.ensure(db, company.id);
-    for (const [documentKind, pattern] of Object.entries(ACCOUNTING_NUMBER_SERIES)) {
-      const exists = await db.numberSeries.findFirst({ where: { companyId: company.id, documentKind, storeId: null } });
-      if (!exists) await db.numberSeries.create({ data: { companyId: company.id, documentKind, pattern, counterLength: 5 } });
-    }
+    await db.numberSeries.createMany({
+      data: Object.entries(ACCOUNTING_NUMBER_SERIES).map(([documentKind, pattern]) => ({ companyId: company.id, documentKind, pattern, counterLength: 5 })),
+      skipDuplicates: true,
+    });
     return company;
   }
 
