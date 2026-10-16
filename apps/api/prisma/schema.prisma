@@ -5,8 +5,9 @@
 // document numbering, sessions and audit history (docs/plans/01-users-company-stores.md).
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -162,6 +163,9 @@ model NumberSeries {
   counters NumberSeriesCounter[]
 
   @@unique([companyId, documentKind, storeId])
+  /// PostgreSQL treats nulls as different, so the rule above never stops two
+  /// company-wide series for the same document kind; this one does.
+  @@unique([companyId, documentKind], where: raw("\"storeId\" IS NULL"), map: "NumberSeries_companyId_documentKind_company_wide_key")
 }
 
 /// One running number per filled-in prefix; locked row-by-row when allocating.

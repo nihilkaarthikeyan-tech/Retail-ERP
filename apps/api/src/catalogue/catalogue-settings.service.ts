@@ -35,34 +35,25 @@ export class CatalogueSettingsService implements OnModuleInit {
   /**
    * Idempotent per-company defaults: Standard Selling and Standard Buying
    * price lists, the settings row pointing at them, and the item number series.
+   * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
    */
   async ensureCompanyDefaults(db: Db, companyId: string): Promise<CatalogueSettings> {
-    const selling = await db.priceList.upsert({
-      where: { companyId_code: { companyId, code: 'STD-SELL' } },
-      create: { companyId, code: 'STD-SELL', name: 'Standard Selling', forSelling: true, forBuying: false },
-      update: {},
+    await db.priceList.createMany({
+      data: [
+        { companyId, code: 'STD-SELL', name: 'Standard Selling', forSelling: true, forBuying: false },
+        { companyId, code: 'STD-BUY', name: 'Standard Buying', forSelling: false, forBuying: true },
+      ],
+      skipDuplicates: true,
     });
-    const buying = await db.priceList.upsert({
-      where: { companyId_code: { companyId, code: 'STD-BUY' } },
-      create: { companyId, code: 'STD-BUY', name: 'Standard Buying', forSelling: false, forBuying: true },
-      update: {},
-    });
+    const selling = await db.priceList.findUniqueOrThrow({ where: { companyId_code: { companyId, code: 'STD-SELL' } } });
+    const buying = await db.priceList.findUniqueOrThrow({ where: { companyId_code: { companyId, code: 'STD-BUY' } } });
     const pcs = await db.unit.findUnique({ where: { code: 'PCS' } });
-    const settings = await db.catalogueSettings.upsert({
-      where: { companyId },
-      create: {
-        companyId,
-        defaultSellingPriceListId: selling.id,
-        defaultBuyingPriceListId: buying.id,
-        defaultUnitId: pcs?.id ?? null,
-      },
-      update: {},
+    await db.catalogueSettings.createMany({
+      data: [{ companyId, defaultSellingPriceListId: selling.id, defaultBuyingPriceListId: buying.id, defaultUnitId: pcs?.id ?? null }],
+      skipDuplicates: true,
     });
-    const series = await db.numberSeries.findFirst({ where: { companyId, documentKind: ITEM_NUMBER_SERIES.documentKind, storeId: null } });
-    if (!series) {
-      await db.numberSeries.create({ data: { companyId, ...ITEM_NUMBER_SERIES } });
-    }
-    return settings;
+    await db.numberSeries.createMany({ data: [{ companyId, ...ITEM_NUMBER_SERIES }], skipDuplicates: true });
+    return db.catalogueSettings.findUniqueOrThrow({ where: { companyId } });
   }
 
   async get(db: Db = this.prisma): Promise<CatalogueSettings> {

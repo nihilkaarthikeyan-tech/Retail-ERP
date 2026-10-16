@@ -21,45 +21,34 @@ export function seriesKind(kind: string): string {
   return `stock_${kind}`;
 }
 
-/** Idempotent: transit location, inventory settings and number series for a company. */
+/**
+ * Idempotent: transit location, inventory settings and number series for a company.
+ * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
+ */
 export async function ensureCompanyInventory(db: Db, companyId: string): Promise<StockLocation> {
-  const transit = await db.stockLocation.upsert({
-    where: { companyId_code: { companyId, code: TRANSIT_CODE } },
-    create: { companyId, code: TRANSIT_CODE, name: 'Goods in transit', kind: 'transit' },
-    update: {},
+  await db.stockLocation.createMany({ data: [{ companyId, code: TRANSIT_CODE, name: 'Goods in transit', kind: 'transit' }], skipDuplicates: true });
+  const transit = await db.stockLocation.findUniqueOrThrow({ where: { companyId_code: { companyId, code: TRANSIT_CODE } } });
+  await db.inventorySettings.createMany({ data: [{ companyId, transitLocationId: transit.id }], skipDuplicates: true });
+  await db.numberSeries.createMany({
+    data: Object.entries(STOCK_NUMBER_SERIES).map(([kind, pattern]) => ({ companyId, documentKind: seriesKind(kind), pattern, counterLength: 5 })),
+    skipDuplicates: true,
   });
-  await db.inventorySettings.upsert({
-    where: { companyId },
-    create: { companyId, transitLocationId: transit.id },
-    update: {},
-  });
-  for (const [kind, pattern] of Object.entries(STOCK_NUMBER_SERIES)) {
-    const documentKind = seriesKind(kind);
-    const exists = await db.numberSeries.findFirst({ where: { companyId, documentKind, storeId: null } });
-    if (!exists) await db.numberSeries.create({ data: { companyId, documentKind, pattern, counterLength: 5 } });
-  }
   return transit;
 }
 
-/** Idempotent: folder + Shop floor + Back room + Rejected for a store. */
+/** Idempotent, and safe at the same moment as above: folder + Shop floor + Back room + Rejected for a store. */
 export async function ensureStoreLocations(db: Db, store: { id: string; companyId: string; code: string; name: string }): Promise<void> {
   await ensureCompanyInventory(db, store.companyId);
-  const folder = await db.stockLocation.upsert({
-    where: { companyId_code: { companyId: store.companyId, code: store.code } },
-    create: { companyId: store.companyId, storeId: store.id, code: store.code, name: store.name, kind: 'folder' },
-    update: {},
-  });
+  const { companyId } = store;
+  await db.stockLocation.createMany({ data: [{ companyId, storeId: store.id, code: store.code, name: store.name, kind: 'folder' }], skipDuplicates: true });
+  const folder = await db.stockLocation.findUniqueOrThrow({ where: { companyId_code: { companyId, code: store.code } } });
   const children: [string, string, 'shelf' | 'rejected'][] = [
     ['FLOOR', 'Shop floor', 'shelf'],
     ['BACK', 'Back room', 'shelf'],
     ['REJECT', 'Rejected goods', 'rejected'],
   ];
-  for (const [suffix, name, kind] of children) {
-    const code = `${store.code}-${suffix}`;
-    await db.stockLocation.upsert({
-      where: { companyId_code: { companyId: store.companyId, code } },
-      create: { companyId: store.companyId, storeId: store.id, parentId: folder.id, code, name, kind },
-      update: {},
-    });
-  }
+  await db.stockLocation.createMany({
+    data: children.map(([suffix, name, kind]) => ({ companyId, storeId: store.id, parentId: folder.id, code: `${store.code}-${suffix}`, name, kind })),
+    skipDuplicates: true,
+  });
 }

@@ -41,20 +41,18 @@ export class UnitsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Idempotent; used on start-up and by the test database reset. */
+  /**
+   * Idempotent; used on start-up and by the test database reset.
+   * Safe when called at the same moment: rows that already exist are skipped, never an error.
+   */
   async ensureStandardUnits(db: Db): Promise<void> {
-    for (const u of STANDARD_UNITS) {
-      await db.unit.upsert({ where: { code: u.code }, create: u, update: {} });
-    }
-    for (const [from, to, factor] of STANDARD_CONVERSIONS) {
-      const f = await db.unit.findUniqueOrThrow({ where: { code: from } });
-      const t = await db.unit.findUniqueOrThrow({ where: { code: to } });
-      await db.unitConversion.upsert({
-        where: { fromUnitId_toUnitId: { fromUnitId: f.id, toUnitId: t.id } },
-        create: { fromUnitId: f.id, toUnitId: t.id, factor: new Decimal(factor) },
-        update: {},
-      });
-    }
+    await db.unit.createMany({ data: STANDARD_UNITS, skipDuplicates: true });
+    const units = await db.unit.findMany({ where: { code: { in: STANDARD_UNITS.map((u) => u.code) } } });
+    const idOf = (code: string) => units.find((u) => u.code === code)!.id;
+    await db.unitConversion.createMany({
+      data: STANDARD_CONVERSIONS.map(([from, to, factor]) => ({ fromUnitId: idOf(from), toUnitId: idOf(to), factor: new Decimal(factor) })),
+      skipDuplicates: true,
+    });
   }
 
   list() {

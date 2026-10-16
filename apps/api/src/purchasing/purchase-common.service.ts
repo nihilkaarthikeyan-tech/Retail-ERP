@@ -40,13 +40,17 @@ export const PURCHASE_NUMBER_SERIES: Record<string, string> = {
   landed_charge: 'LC-{FY}-',
 };
 
-/** Idempotent: purchase settings and number series for a company. */
+/**
+ * Idempotent: purchase settings and number series for a company.
+ * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
+ */
 export async function ensurePurchaseDefaults(db: Db, companyId: string): Promise<PurchaseSettings> {
-  for (const [documentKind, pattern] of Object.entries(PURCHASE_NUMBER_SERIES)) {
-    const exists = await db.numberSeries.findFirst({ where: { companyId, documentKind, storeId: null } });
-    if (!exists) await db.numberSeries.create({ data: { companyId, documentKind, pattern, counterLength: 5 } });
-  }
-  return db.purchaseSettings.upsert({ where: { companyId }, create: { companyId }, update: {} });
+  await db.numberSeries.createMany({
+    data: Object.entries(PURCHASE_NUMBER_SERIES).map(([documentKind, pattern]) => ({ companyId, documentKind, pattern, counterLength: 5 })),
+    skipDuplicates: true,
+  });
+  await db.purchaseSettings.createMany({ data: [{ companyId }], skipDuplicates: true });
+  return db.purchaseSettings.findUniqueOrThrow({ where: { companyId } });
 }
 
 export interface PricedLineInput {

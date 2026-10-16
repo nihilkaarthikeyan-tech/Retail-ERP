@@ -5,6 +5,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { PartySettings } from '../generated/prisma/client.js';
+import { inTransaction } from '../prisma/in-transaction.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 export const CUSTOMER_NUMBER_SERIES = { documentKind: 'customer', pattern: 'CUS-', counterLength: 6 };
@@ -49,52 +50,70 @@ export class PartySettingsService implements OnModuleInit {
     }
   }
 
-  /** Idempotent: standard payment terms and starting groups (also in the migration). */
+  /**
+   * Idempotent: standard payment terms and starting groups (also in the migration).
+   * Safe when called at the same moment: each new row is added in one transaction with its
+   * parts or path, and only by the caller whose insert actually created it.
+   */
   async ensureStandardMasters(db: Db): Promise<void> {
-    for (const t of STANDARD_TERMS) {
-      const terms = await db.paymentTerms.upsert({ where: { code: t.code }, create: { code: t.code, name: t.name }, update: {} });
-      if ((await db.paymentTermsPart.count({ where: { paymentTermsId: terms.id } })) === 0) {
-        await db.paymentTermsPart.create({
-          data: { paymentTermsId: terms.id, share: new Decimal(100), dueBasis: 'days_after_date', days: t.days },
-        });
-      }
-    }
-    for (const [code, name] of CUSTOMER_GROUPS) {
-      const g = await db.customerGroup.upsert({ where: { code }, create: { code, name, path: '' }, update: {} });
-      if (!g.path) await db.customerGroup.update({ where: { id: g.id }, data: { path: `/${g.id}/` } });
-    }
-    for (const [code, name] of SUPPLIER_GROUPS) {
-      const g = await db.supplierGroup.upsert({ where: { code }, create: { code, name, path: '' }, update: {} });
-      if (!g.path) await db.supplierGroup.update({ where: { id: g.id }, data: { path: `/${g.id}/` } });
-    }
+    await inTransaction(db, async (tx) => {
+      const terms = await tx.paymentTerms.createManyAndReturn({
+        data: STANDARD_TERMS.map((t) => ({ code: t.code, name: t.name })),
+        skipDuplicates: true,
+        select: { id: true, code: true },
+      });
+      await tx.paymentTermsPart.createMany({
+        data: terms.map((terms) => ({
+          paymentTermsId: terms.id,
+          share: new Decimal(100),
+          dueBasis: 'days_after_date' as const,
+          days: STANDARD_TERMS.find((t) => t.code === terms.code)!.days,
+        })),
+      });
+      const customerGroups = await tx.customerGroup.createManyAndReturn({
+        data: CUSTOMER_GROUPS.map(([code, name]) => ({ code, name, path: '' })),
+        skipDuplicates: true,
+        select: { id: true },
+      });
+      for (const g of customerGroups) await tx.customerGroup.update({ where: { id: g.id }, data: { path: `/${g.id}/` } });
+      const supplierGroups = await tx.supplierGroup.createManyAndReturn({
+        data: SUPPLIER_GROUPS.map(([code, name]) => ({ code, name, path: '' })),
+        skipDuplicates: true,
+        select: { id: true },
+      });
+      for (const g of supplierGroups) await tx.supplierGroup.update({ where: { id: g.id }, data: { path: `/${g.id}/` } });
+    });
   }
 
-  /** Idempotent per company: settings row, walk-in customer, number series. */
+  /**
+   * Idempotent per company: settings row, walk-in customer, number series.
+   * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
+   */
   async ensureCompanyDefaults(db: Db, companyId: string): Promise<PartySettings> {
     const retail = await db.customerGroup.findUnique({ where: { code: 'RETAIL' } });
     const local = await db.supplierGroup.findUnique({ where: { code: 'LOCAL' } });
     const cash = await db.paymentTerms.findUnique({ where: { code: 'CASH' } });
-    let settings = await db.partySettings.upsert({
-      where: { companyId },
-      create: {
-        companyId,
-        defaultCustomerGroupId: retail?.id ?? null,
-        defaultSupplierGroupId: local?.id ?? null,
-        defaultPaymentTermsId: cash?.id ?? null,
-      },
-      update: {},
+    await db.partySettings.createMany({
+      data: [
+        {
+          companyId,
+          defaultCustomerGroupId: retail?.id ?? null,
+          defaultSupplierGroupId: local?.id ?? null,
+          defaultPaymentTermsId: cash?.id ?? null,
+        },
+      ],
+      skipDuplicates: true,
     });
-    for (const series of [CUSTOMER_NUMBER_SERIES, SUPPLIER_NUMBER_SERIES]) {
-      const exists = await db.numberSeries.findFirst({ where: { companyId, documentKind: series.documentKind, storeId: null } });
-      if (!exists) await db.numberSeries.create({ data: { companyId, ...series } });
-    }
+    await db.numberSeries.createMany({ data: [CUSTOMER_NUMBER_SERIES, SUPPLIER_NUMBER_SERIES].map((series) => ({ companyId, ...series })), skipDuplicates: true });
+    let settings = await db.partySettings.findUniqueOrThrow({ where: { companyId } });
     if (!settings.walkInCustomerId && retail) {
       const code = `${WALK_IN_CODE}-${(await db.company.findUniqueOrThrow({ where: { id: companyId } })).code}`;
-      const walkIn =
-        (await db.customer.findUnique({ where: { code } })) ??
-        (await db.customer.create({
-          data: { companyId, code, name: 'Walk-in customer', customerGroupId: retail.id, isWalkIn: true, paymentTermsId: cash?.id ?? null },
-        }));
+      await db.customer.createMany({
+        data: [{ companyId, code, name: 'Walk-in customer', customerGroupId: retail.id, isWalkIn: true, paymentTermsId: cash?.id ?? null }],
+        skipDuplicates: true,
+      });
+      const walkIn = await db.customer.findUniqueOrThrow({ where: { code } });
+      // Every caller links the same customer, so a second update at the same moment changes nothing.
       settings = await db.partySettings.update({ where: { companyId }, data: { walkInCustomerId: walkIn.id } });
     }
     return settings;

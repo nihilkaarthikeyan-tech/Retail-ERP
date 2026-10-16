@@ -12,6 +12,7 @@ import {
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { inTransaction } from '../prisma/in-transaction.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const roleInclude = { permissions: { select: { permissionKey: true } } } satisfies Prisma.RoleInclude;
@@ -31,20 +32,21 @@ export class RolesService implements OnModuleInit {
   /**
    * Creates any of the six system roles that are missing (decision 71).
    * Existing roles are left alone so an admin's permission edits survive restarts.
+   * Safe when called at the same moment: a role and its permissions are added in one
+   * transaction, and only by the caller whose insert actually created the role.
    */
   async ensureSystemRoles(db: Db): Promise<void> {
-    const existing = new Set((await db.role.findMany({ select: { code: true } })).map((r) => r.code));
-    for (const code of Object.values(SYSTEM_ROLES) as SystemRoleCode[]) {
-      if (existing.has(code)) continue;
-      await db.role.create({
-        data: {
-          code,
-          name: SYSTEM_ROLE_NAMES[code],
-          isSystem: true,
-          permissions: { create: SYSTEM_ROLE_PERMISSIONS[code].map((permissionKey) => ({ permissionKey })) },
-        },
+    await inTransaction(db, async (tx) => {
+      const codes = Object.values(SYSTEM_ROLES) as SystemRoleCode[];
+      const created = await tx.role.createManyAndReturn({
+        data: codes.map((code) => ({ code, name: SYSTEM_ROLE_NAMES[code], isSystem: true })),
+        skipDuplicates: true,
+        select: { id: true, code: true },
       });
-    }
+      await tx.rolePermission.createMany({
+        data: created.flatMap((r) => SYSTEM_ROLE_PERMISSIONS[r.code as SystemRoleCode].map((permissionKey) => ({ roleId: r.id, permissionKey }))),
+      });
+    });
   }
 
   listPermissions() {
