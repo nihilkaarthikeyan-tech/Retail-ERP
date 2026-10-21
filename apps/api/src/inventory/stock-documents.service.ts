@@ -31,6 +31,7 @@ import { FinancialYearsService } from '../financial-years/financial-years.servic
 import type { Item, Prisma, StockDocument, StockLedgerEntry, StockLocation } from '../generated/prisma/client.js';
 import { ItemsService } from '../items/items.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { seriesKind } from './location-defaults.js';
 import { type Movement, StockEngine } from './stock-engine.service.js';
@@ -127,6 +128,8 @@ export class StockDocumentsService {
 
   async create(input: CreateStockDocumentInput, actor: Actor, user: CurrentUser) {
     this.requireDraftRight(input.kind, user);
+    // Plan 12: sending stock to another shop belongs to "Transfers between shops".
+    if (input.kind === 'transfer_send') await assertModuleOn(this.prisma, 'transfers');
     assertStoreAccess(user, input.storeId);
     const company = await this.company.current();
     const header = await this.checkHeader(this.prisma, company.id, input.kind, input);
@@ -299,6 +302,7 @@ export class StockDocumentsService {
     this.assertDocAccess(doc, user);
     if (doc.status !== 'draft') throw new BadRequestException(`Document is already ${doc.status}`);
     this.requireFinaliseRight(doc.kind, user);
+    if (doc.kind === 'transfer_send') await assertModuleOn(this.prisma, 'transfers');
     await this.checkDates(this.prisma, doc, user);
 
     const finalised = await this.prisma.$transaction(

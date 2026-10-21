@@ -7,6 +7,7 @@
 import { Injectable } from '@nestjs/common';
 import { averageBill, type CurrentUser, Decimal, grossMarginPercent, itemsPerBill, type ReportQuery } from 'shared';
 import { Prisma } from '../generated/prisma/client.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, money, pctText, qty, ReportsCommon, type StoreScope, ZERO } from './reports-common.service.js';
 
@@ -168,6 +169,9 @@ export class SalesReportsService {
     const scope = this.common.scope(user, q.storeId);
     const seesCost = this.common.seesCost(user);
     const by = q.groupBy ?? defaultGroup;
+    // Plan 12: grouping by style or size and colour, or by season, belongs to those optional modules.
+    if (by === 'style' || by === 'attribute') await assertModuleOn(this.prisma, 'variants');
+    if (by === 'season' || q.seasonId) await assertModuleOn(this.prisma, 'seasons');
     const lines = await this.lines(company.id, from, to, scope, q);
     // Plan 11 C3, C4: style, size or colour, and season come from the item's style and values.
     const styled = by === 'style' || by === 'attribute' || by === 'season' ? await this.styleKeys([...new Set(lines.map((l) => l.itemId))], q.attributeId) : null;

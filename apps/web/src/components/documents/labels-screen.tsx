@@ -16,6 +16,7 @@ import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { type LabelDataDto, type LabelTemplatesDto, sheetLayout, sheetsOf } from "@/lib/documents";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import type { GoodsReceiptHeader, Page } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
 import type { MarkdownDto } from "@/lib/styles-seasons";
@@ -41,6 +42,8 @@ export function LabelsScreen() {
   const { user, loading } = useAuth();
   const params = useSearchParams();
   const allowed = hasPermission(user, "labels.print");
+  // Plan 12: markdown labels only while "Seasons and markdowns" is on.
+  const markdownsOn = useModules().isOn("seasons");
   const canSeeReceipts = hasPermission(user, "purchase.view");
   const startReceipt = params.get("receiptId") ?? "";
   const startMarkdown = params.get("markdownId") ?? "";
@@ -54,7 +57,7 @@ export function LabelsScreen() {
   );
   const { stores } = useOrderStores();
   // Plan 11 C5: markdowns, to print "was ₹X, now ₹Y" labels.
-  const markdowns = useLoad<MarkdownDto[]>(() => (allowed ? api.get<MarkdownDto[]>("/markdowns").catch(() => []) : Promise.resolve([])), [allowed]);
+  const markdowns = useLoad<MarkdownDto[]>(() => (allowed && markdownsOn ? api.get<MarkdownDto[]>("/markdowns").catch(() => []) : Promise.resolve([])), [allowed, markdownsOn]);
 
   const [source, setSource] = useState<Source>(startMarkdown ? "markdown" : startReceipt ? "receipt" : "items");
   const [markdownId, setMarkdownId] = useState(startMarkdown);
@@ -204,7 +207,7 @@ export function LabelsScreen() {
             <div className="check-row">
               <RadioInput id="src-items" name="label-source" label="Items I choose" checked={source === "items"} onChange={() => changed(setSource)("items")} />
               {canSeeReceipts || startReceipt ? <RadioInput id="src-receipt" name="label-source" label="Everything on a goods receipt" description="One label for each piece received" checked={source === "receipt"} onChange={() => changed(setSource)("receipt")} /> : null}
-              {startMarkdown || (markdowns.data ?? []).length ? <RadioInput id="src-markdown" name="label-source" label="A markdown" description="The old price struck through and the new price" checked={source === "markdown"} onChange={() => changed(setSource)("markdown")} /> : null}
+              {markdownsOn && (startMarkdown || (markdowns.data ?? []).length) ? <RadioInput id="src-markdown" name="label-source" label="A markdown" description="The old price struck through and the new price" checked={source === "markdown"} onChange={() => changed(setSource)("markdown")} /> : null}
               <RadioInput id="src-changed" name="label-source" label="Items whose price changed" description="Since a date, to re-label the shelf" checked={source === "changed"} onChange={() => changed(setSource)("changed")} />
             </div>
           </fieldset>

@@ -7,6 +7,7 @@ import { ActiveBadge, Alert, Badge, Button, CheckInput, Dialog, SelectInput, Tex
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { showMoney } from "@/lib/catalogue";
+import { useModules } from "@/lib/modules";
 import type { PartyGroupNode, PartyType, PaymentTermsDto, PriceListDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -72,6 +73,8 @@ function GroupTree({ nodes, canManage, holds, lookup, onEdit, onAddChild }: Tree
 /** Customer or supplier group tree with the defaults new parties copy. */
 export function PartyGroupsPage({ kind }: { kind: PartyType }) {
   const { user } = useAuth();
+  // Plan 12: credit limits only while "Credit sales" is on (saved values are kept).
+  const creditOn = useModules().isOn("credit_sales");
   const isCustomer = kind === "customer";
   const path = isCustomer ? "/customer-groups" : "/supplier-groups";
   const canManage = hasPermission(user, isCustomer ? "customers.manage" : "suppliers.manage");
@@ -150,8 +153,8 @@ export function PartyGroupsPage({ kind }: { kind: PartyType }) {
     if (l) out.push(l);
     const t = termsName(n.paymentTermsId);
     if (t) out.push(t);
-    if (isCustomer && n.creditLimit && Number(n.creditLimit) > 0) out.push(`credit ${showMoney(n.creditLimit)}`);
-    if (isCustomer && n.skipCreditCheck) out.push("no credit check");
+    if (isCustomer && creditOn && n.creditLimit && Number(n.creditLimit) > 0) out.push(`credit ${showMoney(n.creditLimit)}`);
+    if (isCustomer && creditOn && n.skipCreditCheck) out.push("no credit check");
     return out;
   };
 
@@ -206,7 +209,7 @@ export function PartyGroupsPage({ kind }: { kind: PartyType }) {
               </option>
             ))}
           </SelectInput>
-          {isCustomer ? (
+          {isCustomer && creditOn ? (
             <>
               <TextInput id="pg-creditLimit" label="Default credit limit" value={form.creditLimit} onChange={(e) => setForm({ ...form, creditLimit: e.target.value })} error={errors.creditLimit} inputMode="decimal" className="mono" hint="0 = the company default applies." />
               <TextInput id="pg-overdueLimit" label="Default overdue limit" value={form.overdueLimit} onChange={(e) => setForm({ ...form, overdueLimit: e.target.value })} error={errors.overdueLimit} inputMode="decimal" className="mono" />

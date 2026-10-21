@@ -3,17 +3,19 @@
 // a number pad for quantity, price and discount, the customer, the salesperson
 // of the bill and of each line (plan 11 C1), home delivery (plan 11 B4), totals
 // with the offers used and the GST table, park / recall, return / exchange,
-// cash in/out, pay and print.
+// cash in/out, pay and print. Plan 12: buttons of switched-off optional modules
+// (salesperson, delivery, customer orders, alterations, coupons, credit sales) are not shown.
 // Every change is saved on the till at once (crash recovery, pos-offline §6).
 // Figures come from the shared calculations, the same as the server's.
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Decimal, hasPermission } from "shared";
+import { Decimal, hasPermission, type ModuleKey } from "shared";
 import { Alert, Button } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
+import { tillModuleOn, withoutSwitchedOff } from "@/lib/till/modules";
 import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
 import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillOrder } from "@/lib/till/types";
@@ -103,7 +105,14 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const results = useMemo(() => (search.trim().length >= 2 && !scan(snapshot, search) ? searchItems(snapshot, search, 12) : []), [snapshot, search]);
   const stock = useMemo(() => new Map(snapshot.stock.map((s) => [s.itemId, s.quantity])), [snapshot.stock]);
   const methods = till.paymentMethods.filter((m) => m.active);
-  const staff = snapshot.salesStaff ?? [];
+  // Plan 12: parts of switched-off modules are not offered (the map comes with the saved copy, so offline too).
+  const on = (key: ModuleKey) => tillModuleOn(snapshot, key);
+  const salespersonOn = on("salesperson");
+  const deliveryOn = on("delivery");
+  const ordersOn = on("customer_orders");
+  const alterationsOn = on("alterations");
+  const offersOn = on("offers");
+  const staff = salespersonOn ? (snapshot.salesStaff ?? []) : [];
   const staffOf = (id: string | null | undefined) => (id ? staff.find((s) => s.id === id) : undefined);
   const canReturn = hasPermission(state.user, "pos.return");
   const shiftOld = !!state.shift && state.shift.businessDate !== today;
@@ -232,7 +241,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     setPayError(null);
     try {
       // After a manager's approval the saved bill is sent again: same identity and numbers.
-      const input = again ?? (creditApprovalToken ? (await engine.loadDraft()).draft : draft);
+      const input = withoutSwitchedOff(again ?? (creditApprovalToken ? (await engine.loadDraft()).draft : draft), snapshot);
       const res = await engine.finish(input, { creditApprovalToken });
       const receipts = printable(res.receipts);
       setDialog(null);
@@ -389,6 +398,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           break;
         case "F3":
           e.preventDefault();
+          if (!salespersonOn) break;
           setStaffLine(null);
           setDialog("salesperson");
           break;
@@ -612,9 +622,15 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               {draft.delivery.address}
               {draft.delivery.deliverOn ? ` on ${draft.delivery.deliverOn}` : ""}
               {bill.delivery ? (bill.delivery.charge.gt(0) ? `, charge ${rupees(bill.delivery.charge)}` : ", no delivery charge") : ""}.{" "}
-              <Button size="small" variant="link" onClick={() => setDialog("delivery")}>
-                Change
-              </Button>
+              {deliveryOn ? (
+                <Button size="small" variant="link" onClick={() => setDialog("delivery")}>
+                  Change
+                </Button>
+              ) : (
+                <Button size="small" variant="link" onClick={() => change({ ...draft, delivery: null, payments: [] })}>
+                  Remove (home delivery is switched off)
+                </Button>
+              )}
             </p>
           ) : null}
           {draft.order ? (
@@ -802,23 +818,31 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               Return / exchange <kbd>F7</kbd>
             </button>
             <button type="button" className="till-action" onClick={() => setDialog("options")} disabled={!draft.lines.length}>
-              Coupon / bill discount
+              {offersOn ? "Coupon / bill discount" : "Bill discount"}
             </button>
-            <button type="button" className="till-action" onClick={() => setDialog("delivery")} disabled={!draft.lines.length}>
-              {draft.delivery ? "Delivery details" : "Home delivery"}
-            </button>
+            {deliveryOn ? (
+              <button type="button" className="till-action" onClick={() => setDialog("delivery")} disabled={!draft.lines.length}>
+                {draft.delivery ? "Delivery details" : "Home delivery"}
+              </button>
+            ) : null}
             <button type="button" className="till-action" onClick={() => setDialog("buyer")}>
               {draft.buyer?.gstin ? "Business invoice" : "Buyer GSTIN / details"}
             </button>
-            <button type="button" className="till-action" onClick={() => setDialog("orders")} disabled={!state.online}>
-              Customer orders
-            </button>
-            <button type="button" className="till-action" onClick={() => setDialog("alterations")} disabled={!state.online}>
-              Alterations
-            </button>
-            <button type="button" className="till-action" onClick={() => void applyCustomerCredit()} disabled={!state.online || !draft.customer?.id || !bill.sale}>
-              Use customer credit
-            </button>
+            {ordersOn ? (
+              <button type="button" className="till-action" onClick={() => setDialog("orders")} disabled={!state.online}>
+                Customer orders
+              </button>
+            ) : null}
+            {alterationsOn ? (
+              <button type="button" className="till-action" onClick={() => setDialog("alterations")} disabled={!state.online}>
+                Alterations
+              </button>
+            ) : null}
+            {ordersOn ? (
+              <button type="button" className="till-action" onClick={() => void applyCustomerCredit()} disabled={!state.online || !draft.customer?.id || !bill.sale}>
+                Use customer credit
+              </button>
+            ) : null}
             <button type="button" className="till-action" onClick={() => setDialog("cash")}>
               Cash in / out
             </button>
@@ -852,7 +876,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       </div>
 
       <footer className="till-keys" aria-label="Keyboard shortcuts">
-        {SHORTCUTS.map(([k, label]) => (
+        {SHORTCUTS.filter(([k]) => salespersonOn || k !== "F3").map(([k, label]) => (
           <span key={k}>
             <kbd>{k}</kbd> {label}
           </span>
@@ -902,6 +926,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         online={state.online && !state.signedOut}
         namedCustomer={hasNamedCustomer(draft, till.walkInCustomerId)}
         refundOnAccount={!!draft.ret?.paidOnAccount}
+        creditSales={on("credit_sales")}
         onChange={(payments) => change({ ...draft, payments })}
         onFinish={() => void finish()}
         onClose={() => setDialog(null)}
@@ -921,6 +946,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         <BillOptionsDialog
           open
           draft={draft}
+          coupons={offersOn}
           onSave={(p) => {
             change({ ...draft, ...p, payments: [] });
             setDialog(null);
@@ -928,7 +954,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           onClose={() => setDialog(null)}
         />
       ) : null}
-      {dialog === "salesperson" ? (
+      {dialog === "salesperson" && salespersonOn ? (
         <SalespersonDialog
           open
           staff={staff}
@@ -958,7 +984,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           onClose={() => setDialog(null)}
         />
       ) : null}
-      {dialog === "delivery" ? (
+      {dialog === "delivery" && deliveryOn ? (
         <DeliveryDialog
           open
           current={draft.delivery ?? null}
@@ -993,8 +1019,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           change({ ...draft, ret, customer, payments: [] });
         }}
       />
-      {dialog === "orders" ? <OrdersDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} onCollect={collectOrder} onClose={() => setDialog(null)} /> : null}
-      {dialog === "alterations" ? (
+      {dialog === "orders" && ordersOn ? <OrdersDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} onCollect={collectOrder} onClose={() => setDialog(null)} /> : null}
+      {dialog === "alterations" && alterationsOn ? (
         <AlterationsDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} customer={draft.customer} today={today} onCharge={chargeAlteration} onClose={() => setDialog(null)} />
       ) : null}
       <CashDialog open={dialog === "cash"} engine={engine} onClose={() => setDialog(null)} />

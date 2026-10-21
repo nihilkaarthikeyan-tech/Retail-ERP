@@ -31,6 +31,7 @@ import type { GoodsReceipt, Prisma, StockLedgerEntry, Supplier } from '../genera
 import { postingInstant, StockDocumentsService } from '../inventory/stock-documents.service.js';
 import { type Movement, StockEngine } from '../inventory/stock-engine.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { assertModuleOn, moduleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { PurchasePostings } from './purchase-postings.service.js';
@@ -242,8 +243,12 @@ export class GoodsReceiptsService {
     const interState = await this.common.interState(db, supplier, header.storeId);
     const lines: ResolvedReceiptLine[] = [];
     let withoutOrder = false;
+    // Plan 12: sale-or-return and purchase orders are optional modules.
+    if (header.isConsignment) await assertModuleOn(db, 'consignment');
+    const ordersOn = await moduleOn(db, 'purchase_orders');
 
     for (const l of inputs) {
+      if (l.orderLineId && !ordersOn) await assertModuleOn(db, 'purchase_orders');
       const orderLine = l.orderLineId ? await db.purchaseOrderLine.findUnique({ where: { id: l.orderLineId }, include: { order: true } }) : null;
       if (l.orderLineId && !orderLine) throw new BadRequestException('Purchase order line not found');
       // Plan 11 part 2: sale-or-return goods are agreed with the supplier, not ordered.
@@ -359,7 +364,8 @@ export class GoodsReceiptsService {
 
     // Decision 31: without an order only with the right and a reason (unless orders are required).
     // Sale-or-return goods never come from an order, so decision 31 does not apply to them.
-    if (withoutOrder && !opts.forBill && !header.isConsignment) {
+    // Nor does it while purchase orders are switched off (plan 12): there is no order to receive against.
+    if (withoutOrder && !opts.forBill && !header.isConsignment && ordersOn) {
       if (settings.requireOrderForReceipt) throw new BadRequestException('A purchase order is required before receiving goods');
       if (!hasPermission(user, 'purchase.receive_without_order')) throw new ForbiddenException('Receiving goods without a purchase order needs a Store Manager');
       if (!header.noOrderReason?.trim()) throw new BadRequestException('Give the reason for receiving goods without a purchase order');

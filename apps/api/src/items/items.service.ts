@@ -28,6 +28,7 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { Item, Prisma } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SeasonsService } from './seasons.service.js';
 
@@ -210,6 +211,11 @@ export class ItemsService {
       throw new BadRequestException('Brand not found or switched off');
     }
     this.checkFlags(input);
+    // Plan 12: the parts of a switched-off module are refused; the rest of the item is as usual.
+    if (input.variantAttributeIds?.length) await assertModuleOn(this.prisma, 'variants');
+    if (input.trackBatches) await assertModuleOn(this.prisma, 'batches');
+    if (input.trackSerials) await assertModuleOn(this.prisma, 'serials');
+    if (input.seasonId) await assertModuleOn(this.prisma, 'seasons');
     if (input.seasonId) await this.seasons.assertUsable(this.prisma, input.seasonId);
     const isParentStyle = (input.variantAttributeIds?.length ?? 0) > 0;
     if (isParentStyle) {
@@ -295,6 +301,11 @@ export class ItemsService {
     }
     if (input.seasonId && input.seasonId !== before.seasonId) await this.seasons.assertUsable(this.prisma, input.seasonId);
     if (input.applyToVariants && !before.isParentStyle) throw new BadRequestException(`${before.code} is not a style with sizes and colours`);
+    // Plan 12: only a change that uses a switched-off module is refused; unchanged values sent back by the form pass.
+    if (input.applyToVariants) await assertModuleOn(this.prisma, 'variants');
+    if (input.trackBatches && !before.trackBatches) await assertModuleOn(this.prisma, 'batches');
+    if (input.trackSerials && !before.trackSerials) await assertModuleOn(this.prisma, 'serials');
+    if (input.seasonId && input.seasonId !== before.seasonId) await assertModuleOn(this.prisma, 'seasons');
     const baseUnitChanged = !!input.baseUnitId && input.baseUnitId !== before.baseUnitId;
     // Plan 11 A1: once stock has moved, these would change the meaning of every past quantity.
     const changed = [

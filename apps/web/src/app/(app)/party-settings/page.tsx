@@ -7,6 +7,7 @@ import { Alert, Button, RadioInput, SelectInput, TextInput } from "@/components/
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups } from "@/lib/catalogue";
+import { useModules } from "@/lib/modules";
 import type { PartyGroupNode, PartySettingsDto, PaymentTermsDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -40,6 +41,8 @@ interface FormProps {
 
 function PartySettingsForm({ settings, customerGroups, supplierGroups, terms, canEdit, onSaved }: FormProps) {
   const [form, setForm] = useState<SettingsForm>(() => fromDto(settings));
+  // Plan 12: credit limits only while "Credit sales" is on (saved values are kept).
+  const creditOn = useModules().isOn("credit_sales");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -108,7 +111,7 @@ function PartySettingsForm({ settings, customerGroups, supplierGroups, terms, ca
               </option>
             ))}
           </SelectInput>
-          <TextInput id="ps-creditLimit" label="Default credit limit" value={form.defaultCreditLimit} onChange={(e) => setForm({ ...form, defaultCreditLimit: e.target.value })} error={errors.defaultCreditLimit} inputMode="decimal" className="mono" hint="0 = no credit until a credit controller sets a limit (agreed default)." />
+          {creditOn ? <TextInput id="ps-creditLimit" label="Default credit limit" value={form.defaultCreditLimit} onChange={(e) => setForm({ ...form, defaultCreditLimit: e.target.value })} error={errors.defaultCreditLimit} inputMode="decimal" className="mono" hint="0 = no credit until a credit controller sets a limit (agreed default)." /> : null}
         </div>
       </fieldset>
       <fieldset disabled={!canEdit}>

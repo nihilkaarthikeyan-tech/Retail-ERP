@@ -8,6 +8,7 @@ import { Alert, Button, CheckInput, SelectInput, TextInput, TextareaInput } from
 import { api, errorMessage } from "@/lib/api";
 import { flattenGroups } from "@/lib/catalogue";
 import { blankToNull, blankToUndefined } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import type { SeasonDto } from "@/lib/styles-seasons";
 import type { AttributeDto, BrandDto, CatalogueSettingsDto, ItemDto, ItemGroupNode, UnitDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -124,6 +125,12 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Plan 12: parts of switched-off modules are hidden; their saved values are sent back unchanged.
+  const { isOn } = useModules();
+  const showVariants = isOn("variants");
+  const showSeasons = isOn("seasons");
+  const showBatches = isOn("batches");
+  const showSerials = isOn("serials");
 
   type TextKey = "code" | "name" | "description" | "itemGroupId" | "brandId" | "seasonId" | "baseUnitId" | "mrp" | "maxDiscountPercent" | "endDate" | "shelfLifeDays" | "warrantyDays" | "sellingPrice";
   const set = (key: TextKey) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -228,17 +235,19 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
               </option>
             ))}
           </SelectInput>
-          <SelectInput id="item-season" label="Season" value={form.seasonId} onChange={set("seasonId")} error={errors.seasonId} hint="The season or collection, for reports and markdowns.">
-            <option value="">No season</option>
-            {seasons
-              .filter((s) => s.active || s.id === form.seasonId)
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                  {s.active ? "" : " (switched off)"}
-                </option>
-              ))}
-          </SelectInput>
+          {showSeasons ? (
+            <SelectInput id="item-season" label="Season" value={form.seasonId} onChange={set("seasonId")} error={errors.seasonId} hint="The season or collection, for reports and markdowns.">
+              <option value="">No season</option>
+              {seasons
+                .filter((s) => s.active || s.id === form.seasonId)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.active ? "" : " (switched off)"}
+                  </option>
+                ))}
+            </SelectInput>
+          ) : null}
           <SelectInput id="item-baseUnit" label="Basic unit" value={form.baseUnitId} onChange={set("baseUnitId")} error={errors.baseUnitId} required disabled={isVariant} hint={item ? "Changing it clears the other units of the item." : "The unit stock is counted in."}>
             <option value="">Choose a unit</option>
             {unitOptions.map((u) => (
@@ -255,7 +264,7 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
             <CheckInput id="item-isStockItem" label="Stock item" description="Off = service; no stock is kept." checked={form.isStockItem} onChange={setFlag("isStockItem")} disabled={isVariant || form.isStyle} />
             <CheckInput id="item-canBuy" label="Can be bought" checked={form.canBuy} onChange={setFlag("canBuy")} />
             <CheckInput id="item-canSell" label="Can be sold" checked={form.canSell} onChange={setFlag("canSell")} />
-            {item?.isParentStyle ? (
+            {item?.isParentStyle && showVariants ? (
               <CheckInput
                 id="item-applyToVariants"
                 label="Also change all its sizes and colours"
@@ -271,9 +280,11 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
 
       {!item ? (
         <fieldset disabled={readOnly}>
-          <legend>Style with variants</legend>
-          <CheckInput id="item-isStyle" label="This is a style with variants" description="A style (shirt) has variants (shirt red M). Prices, barcodes and stock belong to the variants, never to the style." checked={form.isStyle} onChange={setFlag("isStyle")} />
-          {form.isStyle ? (
+          <legend>{showVariants ? "Style with variants" : "Selling price"}</legend>
+          {showVariants ? (
+            <CheckInput id="item-isStyle" label="This is a style with variants" description="A style (shirt) has variants (shirt red M). Prices, barcodes and stock belong to the variants, never to the style." checked={form.isStyle} onChange={setFlag("isStyle")} />
+          ) : null}
+          {form.isStyle && showVariants ? (
             <>
               <p className="muted">Attributes the style varies by, in code order:</p>
               {errors.variantAttributeIds ? <p className="field-error">{errors.variantAttributeIds}</p> : null}
@@ -304,18 +315,22 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
         </fieldset>
       ) : null}
 
-      {!form.isStyle ? (
+      {!form.isStyle && (showBatches || showSerials) ? (
         <fieldset disabled={readOnly || !form.isStockItem}>
           <legend>Tracking</legend>
-          {!form.isStockItem ? <p className="muted">Only stock items can be tracked by batch or serial number.</p> : null}
+          {!form.isStockItem ? <p className="muted">Only stock items can be tracked by {showBatches && showSerials ? "batch or serial number" : showBatches ? "batch" : "serial number"}.</p> : null}
           <div className="form-grid">
             <div className="check-row span-2">
-              <CheckInput id="item-trackBatches" label="Track batches" description="Each receipt creates a batch with its own expiry." checked={form.trackBatches} onChange={setFlag("trackBatches")} />
-              <CheckInput id="item-autoNumberBatches" label="Number batches automatically" checked={form.autoNumberBatches} onChange={setFlag("autoNumberBatches")} disabled={!form.trackBatches} />
-              <CheckInput id="item-trackSerials" label="Track serial numbers" description="Every unit has its own serial number." checked={form.trackSerials} onChange={setFlag("trackSerials")} />
+              {showBatches ? (
+                <>
+                  <CheckInput id="item-trackBatches" label="Track batches" description="Each receipt creates a batch with its own expiry." checked={form.trackBatches} onChange={setFlag("trackBatches")} />
+                  <CheckInput id="item-autoNumberBatches" label="Number batches automatically" checked={form.autoNumberBatches} onChange={setFlag("autoNumberBatches")} disabled={!form.trackBatches} />
+                </>
+              ) : null}
+              {showSerials ? <CheckInput id="item-trackSerials" label="Track serial numbers" description="Every unit has its own serial number." checked={form.trackSerials} onChange={setFlag("trackSerials")} /> : null}
             </div>
-            <TextInput id="item-shelfLifeDays" label="Shelf life (days)" value={form.shelfLifeDays} onChange={set("shelfLifeDays")} error={errors.shelfLifeDays} inputMode="numeric" hint="Suggests the expiry date on receipts." />
-            <TextInput id="item-warrantyDays" label="Warranty (days)" value={form.warrantyDays} onChange={set("warrantyDays")} error={errors.warrantyDays} inputMode="numeric" />
+            {showBatches ? <TextInput id="item-shelfLifeDays" label="Shelf life (days)" value={form.shelfLifeDays} onChange={set("shelfLifeDays")} error={errors.shelfLifeDays} inputMode="numeric" hint="Suggests the expiry date on receipts." /> : null}
+            {showSerials ? <TextInput id="item-warrantyDays" label="Warranty (days)" value={form.warrantyDays} onChange={set("warrantyDays")} error={errors.warrantyDays} inputMode="numeric" /> : null}
           </div>
         </fieldset>
       ) : null}

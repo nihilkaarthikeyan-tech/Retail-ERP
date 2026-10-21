@@ -2,13 +2,16 @@
 "use client";
 
 import Link from "next/link";
-import type { CurrentUser } from "shared";
+import type { CurrentUser, ModuleKey } from "shared";
 import { Icon } from "@/components/icons";
 import { areaOf, isActive, type MenuEntry, visibleMenu } from "@/lib/menu";
+import { useModules } from "@/lib/modules";
 
 interface AppMenuProps {
   user: CurrentUser | null;
   pathname: string;
+  /** The company's modules (plan 12); defaults to the loaded map, where every module is on until known. */
+  modules?: Partial<Record<ModuleKey, boolean>>;
 }
 
 /** Entries grouped under their section heading, keeping the menu's order. */
@@ -22,9 +25,10 @@ function groupBySection(entries: MenuEntry[]): { section: string | undefined; en
   return groups;
 }
 
-/** Left-hand menu: only the pages the user has rights for, coloured by area of the shop. */
-export function AppMenu({ user, pathname }: AppMenuProps) {
-  const groups = groupBySection(visibleMenu(user));
+/** Left-hand menu: only the pages the user has rights for (and whose module is on), coloured by area of the shop. */
+export function AppMenu({ user, pathname, modules }: AppMenuProps) {
+  const loaded = useModules().modules;
+  const groups = groupBySection(visibleMenu(user, modules ?? loaded));
   return (
     <nav className="shell-nav" aria-label="Main menu">
       {groups.map((group, i) => {

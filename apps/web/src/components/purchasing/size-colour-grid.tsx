@@ -10,6 +10,7 @@ import { useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Button, Dialog, Field } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
+import { useModules } from "@/lib/modules";
 import { styleLayout } from "@/lib/styles-seasons";
 import type { AttributeDto, ItemDto, ItemPage } from "@/lib/types";
 
@@ -36,7 +37,13 @@ function quantityOf(text: string, allowsFractions: boolean): Decimal | null {
   return q.isZero() ? null : q;
 }
 
+/** Shown only while "Sizes and colours" is on (plan 12); the lines it adds are ordinary item lines. */
 export function SizeColourGrid({ onAdd }: { onAdd: (lines: GridLine[]) => void }) {
+  const { isOn } = useModules();
+  return isOn("variants") ? <SizeColourGridButton onAdd={onAdd} /> : null;
+}
+
+function SizeColourGridButton({ onAdd }: { onAdd: (lines: GridLine[]) => void }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [styles, setStyles] = useState<ItemDto[] | null>(null);

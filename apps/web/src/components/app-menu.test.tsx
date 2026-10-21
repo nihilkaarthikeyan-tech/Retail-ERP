@@ -76,10 +76,21 @@ describe("AppMenu", () => {
     expect(screen.queryByText("Catalogue")).toBeNull();
   });
 
-  it("shows catalogue settings only to an Owner/Admin", () => {
-    render(<AppMenu user={user({ isOwnerAdmin: true })} pathname="/catalogue/settings" />);
-    expect(screen.getByRole("link", { name: "Catalogue settings" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("link", { name: "Items" })).toBeTruthy();
+  it("has one Settings entry instead of a settings entry per area (plan 12 §5)", () => {
+    render(<AppMenu user={user({ isOwnerAdmin: true })} pathname="/settings" />);
+    expect(screen.getAllByRole("link", { name: "Settings" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("aria-current")).toBe("page");
+    for (const label of ["Catalogue settings", "Party settings", "Inventory settings", "Purchase settings", "Till settings", "GST settings", "Printing settings"]) {
+      expect(screen.queryByRole("link", { name: label })).toBeNull();
+    }
+    cleanup();
+
+    // Anyone who may change some setting sees it; a cashier does not.
+    render(<AppMenu user={user({ permissions: ["pos.setup"] })} pathname="/" />);
+    expect(screen.getByRole("link", { name: "Settings" })).toBeTruthy();
+    cleanup();
+    render(<AppMenu user={user({ permissions: ["pos.sell"] })} pathname="/" />);
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
   });
 
   it("shows the Parties entries only with the matching rights", () => {
@@ -102,7 +113,7 @@ describe("AppMenu", () => {
     cleanup();
 
     render(<AppMenu user={user({ isOwnerAdmin: true })} pathname="/" />);
-    for (const label of ["Customers", "Suppliers", "Customer groups", "Supplier groups", "Payment terms", "Party settings"]) {
+    for (const label of ["Customers", "Suppliers", "Customer groups", "Supplier groups", "Payment terms"]) {
       expect(screen.getByRole("link", { name: label })).toBeTruthy();
     }
     cleanup();
@@ -111,23 +122,23 @@ describe("AppMenu", () => {
     expect(screen.queryByText("Parties")).toBeNull();
   });
 
-  it("shows the Inventory entries only with stock.view, and settings only with stock.lock", () => {
+  it("shows the Inventory entries only with stock.view, and Settings only with stock.lock", () => {
     const inventory = ["Stock on hand", "Stock documents", "In transit", "Stock history", "Batches", "Negative stock", "Locations", "Reorder levels"];
     render(<AppMenu user={user({ permissions: ["stock.view"] })} pathname="/stock/documents/abc" />);
     expect(screen.getByText("Inventory")).toBeTruthy();
     for (const label of inventory) expect(screen.getByRole("link", { name: label })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Inventory settings" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
     expect(screen.getByRole("link", { name: "Stock documents" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getByRole("link", { name: "Stock on hand" }).getAttribute("aria-current")).toBeNull();
     cleanup();
 
     render(<AppMenu user={user({ permissions: ["catalogue.view", "customers.view"] })} pathname="/" />);
     expect(screen.queryByText("Inventory")).toBeNull();
-    for (const label of [...inventory, "Inventory settings"]) expect(screen.queryByRole("link", { name: label })).toBeNull();
+    for (const label of [...inventory, "Settings"]) expect(screen.queryByRole("link", { name: label })).toBeNull();
     cleanup();
 
     render(<AppMenu user={user({ permissions: ["stock.view", "stock.lock"] })} pathname="/stock" />);
-    expect(screen.getByRole("link", { name: "Inventory settings" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Stock on hand" }).getAttribute("aria-current")).toBe("page");
   });
 

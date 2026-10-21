@@ -37,6 +37,10 @@ model Company {
   fiscalYearStartMonth Int       @default(4)
   /// Set by the accounting module; nothing is dated on or before it.
   lockDate             DateTime? @db.Date
+  /// Plan 12: the shop type chosen at setup (fancy, clothing, footwear, cosmetics, mobiles, general).
+  shopType             String?
+  /// Plan 12: the owner hid the getting-started checklist.
+  checklistHidden      Boolean   @default(false)
   /// Module 10: the day the shop went live; once set, trial data can never be cleared (decision 72).
   goLiveDate           DateTime? @db.Date
   goLiveById           String?   @db.Uuid
@@ -3027,4 +3031,29 @@ model GstReturnUpload {
   createdById String?  @db.Uuid
 
   @@index([gstRegistrationId, kind, period])
+}
+
+// Plan 12 (docs/plans/12-setup-modules-settings.md).
+
+/// An optional module switched on or off for a company. No row = on (plan 12, existing companies keep everything).
+model CompanyModule {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @db.Uuid
+  moduleKey String
+  enabled   Boolean
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([companyId, moduleKey])
+}
+
+/// What the step-by-step first-time setup has saved so far, before the company exists. One row.
+model SetupProgress {
+  id        Int      @id @default(1)
+  step      Int      @default(1)
+  data      Json     @default("{}")
+  updatedAt DateTime @updatedAt
 }

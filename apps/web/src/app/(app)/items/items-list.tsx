@@ -10,6 +10,7 @@ import { ItemSearchBox } from "@/components/items/item-search-box";
 import { ActiveBadge, Alert, Button, DataTable, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useModules } from "@/lib/modules";
 import { flattenGroups, itemKindLabel, showMoney } from "@/lib/catalogue";
 import type { SeasonDto } from "@/lib/styles-seasons";
 import type { BrandDto, ItemDto, ItemGroupNode, ItemPage } from "@/lib/types";
@@ -30,12 +31,16 @@ export function ItemsList() {
   const params = useSearchParams();
   const { user } = useAuth();
   const canManage = hasPermission(user, "catalogue.manage");
+  // Plan 12: the season filter and the "styles" kind only while their modules are on.
+  const { isOn } = useModules();
+  const seasonsOn = isOn("seasons");
+  const variantsOn = isOn("variants");
   const [filters, setFilters] = useState<Filters>({ search: params.get("search") ?? "", groupId: "", brandId: "", seasonId: params.get("seasonId") ?? "", kind: "", active: "true" });
   const [page, setPage] = useState(1);
 
   const groups = useLoad(() => api.get<ItemGroupNode[]>("/catalogue/item-groups"));
   const brands = useLoad(() => api.get<BrandDto[]>("/catalogue/brands"));
-  const seasons = useLoad(() => api.get<SeasonDto[]>("/seasons"));
+  const seasons = useLoad(() => (seasonsOn ? api.get<SeasonDto[]>("/seasons").catch(() => [] as SeasonDto[]) : Promise.resolve([] as SeasonDto[])), [seasonsOn]);
   const items = useLoad(
     () => api.get<ItemPage>(`/items${query({ ...filters, page, pageSize: PAGE_SIZE })}`),
     [filters.search, filters.groupId, filters.brandId, filters.seasonId, filters.kind, filters.active, page],
@@ -62,7 +67,7 @@ export function ItemsList() {
     { key: "kind", header: "Kind", render: (i) => itemKindLabel(i) },
     { key: "unit", header: "Basic unit", render: (i) => i.baseUnit.code },
     { key: "mrp", header: "MRP", align: "right", render: (i) => showMoney(i.mrp) },
-    { key: "variants", header: "Variants", align: "right", render: (i) => (i.isParentStyle ? i.variantCount : "—") },
+    ...(variantsOn ? [{ key: "variants", header: "Variants", align: "right", render: (i) => (i.isParentStyle ? i.variantCount : "—") } satisfies Column<ItemDto>] : []),
     { key: "active", header: "Status", render: (i) => <ActiveBadge active={i.active} /> },
   ];
 
@@ -100,7 +105,7 @@ export function ItemsList() {
             </option>
           ))}
         </SelectInput>
-        {seasons.data?.length ? (
+        {seasonsOn && seasons.data?.length ? (
           <SelectInput id="items-season" label="Season" value={filters.seasonId} onChange={(e) => setFilter("seasonId", e.target.value)}>
             <option value="">All seasons</option>
             {seasons.data.map((s) => (
@@ -114,7 +119,7 @@ export function ItemsList() {
           <option value="">All kinds</option>
           <option value="stock">Stock items</option>
           <option value="service">Services</option>
-          <option value="style">Styles</option>
+          {variantsOn ? <option value="style">Styles</option> : null}
         </SelectInput>
         <SelectInput id="items-active" label="Status" value={filters.active} onChange={(e) => setFilter("active", e.target.value)}>
           <option value="">All</option>

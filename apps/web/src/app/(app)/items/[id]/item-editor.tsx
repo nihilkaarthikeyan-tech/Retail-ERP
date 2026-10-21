@@ -14,6 +14,7 @@ import { AuditTable } from "@/components/audit-table";
 import { ActiveBadge, Alert, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useModules } from "@/lib/modules";
 import { itemKindLabel } from "@/lib/catalogue";
 import type { SeasonDto } from "@/lib/styles-seasons";
 import type { AttributeDto, BrandDto, CatalogueSettingsDto, ItemDto, ItemGroupNode, UnitDto } from "@/lib/types";
@@ -29,14 +30,18 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
   const canManagePrices = hasPermission(user, "prices.manage");
   const canSeeHistory = hasPermission(user, "audit.view");
   const canSeeStock = hasPermission(user, "stock.view");
+  // Plan 12: a style's sizes and colours, attributes and seasons only while their modules are on.
+  const { isOn } = useModules();
+  const variantsOn = isOn("variants");
+  const seasonsOn = isOn("seasons");
 
   const item = useLoad(() => api.get<ItemDto>(`/items/${id}`), [id]);
   const groups = useLoad(() => api.get<ItemGroupNode[]>("/catalogue/item-groups"));
   const brands = useLoad(() => api.get<BrandDto[]>("/catalogue/brands"));
   const units = useLoad(() => api.get<UnitDto[]>("/catalogue/units"));
-  const attributes = useLoad(() => api.get<AttributeDto[]>("/catalogue/attributes"));
+  const attributes = useLoad(() => (variantsOn ? api.get<AttributeDto[]>("/catalogue/attributes").catch(() => [] as AttributeDto[]) : Promise.resolve([] as AttributeDto[])), [variantsOn]);
   const settings = useLoad(() => api.get<CatalogueSettingsDto>("/catalogue/settings"));
-  const seasons = useLoad(() => api.get<SeasonDto[]>("/seasons"));
+  const seasons = useLoad(() => (seasonsOn ? api.get<SeasonDto[]>("/seasons").catch(() => [] as SeasonDto[]) : Promise.resolve([] as SeasonDto[])), [seasonsOn]);
   const [tab, setTab] = useState<Tab>("details");
   const [saved, setSaved] = useState(false);
 
@@ -62,8 +67,8 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: "details", label: "Details" },
     // Units, barcodes and prices belong to variants, never to the style itself.
-    ...(it.isParentStyle ? [{ key: "variants" as const, label: `Variants (${it.variantCount})` }] : [{ key: "units" as const, label: "Units & barcodes" }]),
-    ...(it.isParentStyle && canSeeStock ? [{ key: "stock" as const, label: "Stock by size and colour" }] : []),
+    ...(it.isParentStyle ? (variantsOn ? [{ key: "variants" as const, label: `Variants (${it.variantCount})` }] : []) : [{ key: "units" as const, label: "Units & barcodes" }]),
+    ...(it.isParentStyle && canSeeStock && variantsOn ? [{ key: "stock" as const, label: "Stock by size and colour" }] : []),
     ...(canSeePrices && !it.isParentStyle ? [{ key: "prices" as const, label: "Prices" }] : []),
     ...(canSeeHistory ? [{ key: "history" as const, label: "History" }] : []),
   ];
@@ -95,6 +100,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
         ))}
       </div>
       {saved && tab === "details" ? <Alert kind="success">Item saved.</Alert> : null}
+      {it.isParentStyle && !variantsOn ? <Alert kind="info">Sizes and colours is switched off in Settings → My modules. This style and its variants are kept; the variants still sell as ordinary items.</Alert> : null}
 
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
         {tab === "details" ? (
@@ -119,7 +125,7 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
             <div>
               <h3 style={{ marginTop: 0 }}>Picture</h3>
               <ItemImage item={it} readOnly={!canManage} onChanged={(s) => item.setData(s)} />
-              {it.variantValues.length > 0 ? (
+              {it.variantValues.length > 0 && variantsOn ? (
                 <>
                   <h3>Variant values</h3>
                   <dl className="kv">
@@ -138,8 +144,8 @@ export function ItemEditor({ params }: { params: Promise<{ id: string }> }) {
           </div>
         ) : null}
         {tab === "units" ? <ItemUnitsBarcodes key={it.id + it.updatedAt} item={it} units={units.data} readOnly={!canManage} onChanged={(s) => item.setData(s)} /> : null}
-        {tab === "variants" ? <ItemVariants item={it} attributes={attributes.data} readOnly={!canManage} onChanged={() => item.reload()} /> : null}
-        {tab === "stock" ? <StyleStockGrid styleId={it.id} /> : null}
+        {tab === "variants" && variantsOn ? <ItemVariants item={it} attributes={attributes.data} readOnly={!canManage} onChanged={() => item.reload()} /> : null}
+        {tab === "stock" && variantsOn ? <StyleStockGrid styleId={it.id} /> : null}
         {tab === "prices" ? <ItemPrices item={it} canManage={canManagePrices} /> : null}
         {tab === "history" ? (
           <>

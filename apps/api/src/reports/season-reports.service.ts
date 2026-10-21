@@ -10,6 +10,7 @@ import { Injectable } from '@nestjs/common';
 import { type CurrentUser, Decimal } from 'shared';
 import { z } from 'zod';
 import { Prisma } from '../generated/prisma/client.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, qty, ReportsCommon, ZERO } from './reports-common.service.js';
 
@@ -54,6 +55,7 @@ export class SeasonReportsService {
     const company = await this.common.current();
     const scope = this.common.scope(user, q.storeId);
     const by = q.groupBy ?? (q.seasonId ? 'style' : 'season');
+    if (q.groupBy === 'style') await assertModuleOn(this.prisma, 'variants');
     const locations = scope.ids
       ? scope.ids.length
         ? Prisma.sql`AND "storeId" IN (${Prisma.join(scope.ids.map((s) => Prisma.sql`${s}::uuid`))})`

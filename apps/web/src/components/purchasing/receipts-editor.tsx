@@ -11,6 +11,7 @@ import { SizeColourGrid } from "./size-colour-grid";
 import { Alert, Button, CheckInput, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useModules } from "@/lib/modules";
 import { blankToNull } from "@/lib/format";
 import { type GoodsReceiptDto, type PurchaseOrderDto, type PurchaseOrderHeader, purchaseRights } from "@/lib/purchasing";
 import { defaultStoreId, storesFromLocations, useBusinessToday } from "@/lib/stock";
@@ -132,9 +133,14 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
   const [cancelOpen, setCancelOpen] = useState(false);
 
   const shelves = header.storeId ? shelvesOf(locations, header.storeId) : [];
+  // Plan 12: sale-or-return and purchase orders only while their modules are on.
+  const { isOn } = useModules();
+  const consignmentOn = isOn("consignment");
+  const ordersOn = isOn("purchase_orders");
   const hasOrderLines = lines.some((l) => l.orderLineId);
-  // Sale-or-return goods never come from an order, so no reason is asked for them.
-  const withoutOrder = lines.some((l) => !l.orderLineId) && !header.isConsignment;
+  // Sale-or-return goods never come from an order, so no reason is asked for them; nor while
+  // purchase orders are switched off (there is no order to receive against).
+  const withoutOrder = lines.some((l) => !l.orderLineId) && !header.isConsignment && ordersOn;
 
   function set<K extends keyof HeaderState>(key: K, value: HeaderState[K]) {
     setHeader((h) => ({ ...h, [key]: value }));
@@ -288,6 +294,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
           <TextInput id="grn-vehicle" label="Vehicle no." value={header.vehicleNo} onChange={(e) => set("vehicleNo", e.target.value)} disabled={!editable} error={errors.vehicleNo} maxLength={30} />
         </div>
         <TextareaInput id="grn-remarks" label="Remarks" value={header.remarks} onChange={(e) => set("remarks", e.target.value)} disabled={!editable} error={errors.remarks} maxLength={500} />
+        {consignmentOn || header.isConsignment ? (
         <CheckInput
           id="grn-consignment"
           label="Sale or return"
@@ -298,11 +305,12 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
           }
           checked={header.isConsignment}
           onChange={(e) => set("isConsignment", e.target.checked)}
-          disabled={!editable || hasOrderLines}
+          disabled={!editable || hasOrderLines || !consignmentOn}
         />
+        ) : null}
       </div>
 
-      {editable && supplier && !header.isConsignment ? (
+      {editable && supplier && !header.isConsignment && ordersOn ? (
         <>
           <h2>Orders waiting for goods</h2>
           <ReceiptsOrderPicker supplierId={supplier.id} usedOrderIds={orderIds} busyOrderId={addingOrder} onPick={addOrder} />
@@ -311,7 +319,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
       <Alert kind="info">{note}</Alert>
 
       <h2>Lines</h2>
-      {editable && (rights.receiveWithoutOrder || header.isConsignment) ? (
+      {editable && (rights.receiveWithoutOrder || header.isConsignment || !ordersOn) ? (
         <>
           <p className="muted">Goods that came without an order: scan or search for the item.</p>
           <StockItemAdder onAdd={(item, unitId) => setLines([...lines, lineWithoutOrder(item, unitId)])} />

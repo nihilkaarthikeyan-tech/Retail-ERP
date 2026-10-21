@@ -34,6 +34,7 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { InventoryMastersService } from './inventory-masters.service.js';
 import { StockDocumentsService } from './stock-documents.service.js';
 import { StockReportsService } from './stock-reports.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 @Controller('stock')
 export class InventoryController {
@@ -75,10 +76,10 @@ export class InventoryController {
   }
 
   // ---- Transfers ----
-  @Get('transfers/in-transit') @RequirePermission('stock.view') inTransit(@ReqUser() user: AuthUser) {
+  @Get('transfers/in-transit') @RequireModule('transfers') @RequirePermission('stock.view') inTransit(@ReqUser() user: AuthUser) {
     return this.documents.inTransit(user);
   }
-  @Post('transfers/:id/receive') @RequirePermission('stock.move') receive(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(receiveTransferSchema)) input: ReceiveTransferInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('transfers/:id/receive') @RequireModule('transfers') @RequirePermission('stock.move') receive(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(receiveTransferSchema)) input: ReceiveTransferInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.documents.receive(id, input, actor, user);
   }
 
@@ -95,7 +96,7 @@ export class InventoryController {
     return this.reports.balance(q, user);
   }
   /** Plan 11 C3: a style's stock as a size × colour grid per shop. */
-  @Get('style-grid') @RequirePermission('stock.view') styleGrid(@Query('itemId', ParseUUIDPipe) itemId: string, @ReqUser() user: AuthUser, @Query('storeId', new ParseUUIDPipe({ optional: true })) storeId?: string) {
+  @Get('style-grid') @RequireModule('variants') @RequirePermission('stock.view') styleGrid(@Query('itemId', ParseUUIDPipe) itemId: string, @ReqUser() user: AuthUser, @Query('storeId', new ParseUUIDPipe({ optional: true })) storeId?: string) {
     return this.reports.styleGrid(itemId, storeId, user);
   }
   @Get('ledger') @RequirePermission('stock.view') ledger(@Query(new ZodValidationPipe(stockLedgerQuerySchema)) q: StockLedgerQuery, @ReqUser() user: AuthUser) {
@@ -104,7 +105,7 @@ export class InventoryController {
   @Get('lookup/:code') @RequirePermission('stock.view') lookup(@Param('code') code: string, @ReqUser() user: AuthUser) {
     return this.reports.lookup(code, user);
   }
-  @Get('batches') @RequirePermission('stock.view') batches(@ReqUser() user: AuthUser, @Query('itemId') itemId?: string, @Query('expiringWithinDays') days?: string) {
+  @Get('batches') @RequireModule('batches') @RequirePermission('stock.view') batches(@ReqUser() user: AuthUser, @Query('itemId') itemId?: string, @Query('expiringWithinDays') days?: string) {
     return this.reports.batches(itemId || undefined, days ? Number(days) : undefined, user);
   }
   @Get('exceptions/negative') @RequirePermission('stock.view') negative(@ReqUser() user: AuthUser) {

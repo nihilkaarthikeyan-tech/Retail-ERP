@@ -104,23 +104,40 @@ export function CustomerDialog({ open, snapshot, current, newId, onPick, onClose
   );
 }
 
-export function BillOptionsDialog({ open, draft, onSave, onClose }: { open: boolean; draft: DraftBill; onSave: (patch: Pick<DraftBill, "couponCode" | "billDiscount">) => void; onClose: () => void }) {
+export function BillOptionsDialog({
+  open,
+  draft,
+  coupons = true,
+  onSave,
+  onClose,
+}: {
+  open: boolean;
+  draft: DraftBill;
+  /** Plan 12: "Offers and coupons" is on; when off only the bill discount is asked for. */
+  coupons?: boolean;
+  onSave: (patch: Pick<DraftBill, "couponCode" | "billDiscount">) => void;
+  onClose: () => void;
+}) {
   const [coupon, setCoupon] = useState(draft.couponCode ?? "");
   const [kind, setKind] = useState<"percent" | "amount">(draft.billDiscount?.amount ? "amount" : "percent");
   const [value, setValue] = useState(draft.billDiscount?.amount ?? draft.billDiscount?.percent ?? "");
   return (
-    <Dialog open={open} title="Coupon and bill discount" onClose={onClose}>
+    <Dialog open={open} title={coupons ? "Coupon and bill discount" : "Bill discount"} onClose={onClose}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
           const v = value.trim();
-          onSave({ couponCode: coupon.trim().toUpperCase() || null, billDiscount: v ? (kind === "amount" ? { amount: v } : { percent: v }) : null });
+          onSave({ couponCode: (coupons && coupon.trim().toUpperCase()) || null, billDiscount: v ? (kind === "amount" ? { amount: v } : { percent: v }) : null });
         }}
       >
-        <label className="till-pin-label" htmlFor="till-coupon">
-          Coupon code
-        </label>
-        <input id="till-coupon" className="input till-input-big" maxLength={40} value={coupon} onChange={(e) => setCoupon(e.target.value)} />
+        {coupons ? (
+          <>
+            <label className="till-pin-label" htmlFor="till-coupon">
+              Coupon code
+            </label>
+            <input id="till-coupon" className="input till-input-big" maxLength={40} value={coupon} onChange={(e) => setCoupon(e.target.value)} />
+          </>
+        ) : null}
         <h3>Discount on the whole bill</h3>
         <div className="till-row" role="radiogroup" aria-label="Discount kind">
           {(["percent", "amount"] as const).map((k) => (

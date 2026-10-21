@@ -9,6 +9,7 @@ import { Alert, Button, DataTable, SelectInput, TextInput, type Column } from "@
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { type PurchaseOrderDto, purchaseRights, type ReorderSuggestionDto } from "@/lib/purchasing";
 import { showQuantity, useBusinessToday } from "@/lib/stock";
 import { useLoad } from "@/lib/use-load";
@@ -17,6 +18,9 @@ import { issuesToFieldErrors } from "@/lib/validation";
 export default function ReorderSuggestionsPage() {
   const { user } = useAuth();
   const rights = purchaseRights(user);
+  // Plan 12: making purchase orders from the suggestions only while "Purchase orders" is on.
+  const { isOn } = useModules();
+  const canMakeOrders = rights.order && isOn("purchase_orders");
   const today = useBusinessToday();
   const stores = useOrderStores();
   const [storeId, setStoreId] = useState("");
@@ -92,7 +96,7 @@ export default function ReorderSuggestionsPage() {
   }
 
   const columns: Column<ReorderSuggestionDto>[] = [
-    ...(rights.order
+    ...(canMakeOrders
       ? ([
           {
             key: "tick",
@@ -152,8 +156,8 @@ export default function ReorderSuggestionsPage() {
         ) : null}
       </div>
       <p className="muted">
-        Items that have fallen below their reorder level in each store, with how many to buy; tick the ones you want and the system makes draft purchase orders, one per supplier
-        and store.
+        Items that have fallen below their reorder level in each store, with how many to buy
+        {canMakeOrders ? "; tick the ones you want and the system makes draft purchase orders, one per supplier and store." : "."}
       </p>
       <div className="filter-row">
         <SelectInput id="reorder-store" label="Store" value={storeId} onChange={(e) => setStoreId(e.target.value)}>
@@ -169,7 +173,7 @@ export default function ReorderSuggestionsPage() {
       <Alert kind="error">{suggestions.error ?? stores.error}</Alert>
       <DataTable columns={columns} rows={suggestions.data} rowKey={(r) => r.id} loading={suggestions.loading} empty="Nothing to reorder." />
 
-      {rights.order && orderable.length > 0 ? (
+      {canMakeOrders && orderable.length > 0 ? (
         <div className="card">
           <div className="form-grid">
             <TextInput

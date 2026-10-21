@@ -18,6 +18,7 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { Customer, Prisma } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ContactsService } from './contacts.service.js';
 import { PartyMastersService } from './party-masters.service.js';
@@ -173,6 +174,9 @@ export class CustomersService {
     if (before.isWalkIn && (input.status || (input.creditLimit && Number(input.creditLimit) > 0))) {
       throw new BadRequestException('The walk-in customer cannot be blocked, switched off or given credit');
     }
+    // Plan 12: changing the limits belongs to "Credit sales"; blocking or switching off a customer stays available.
+    const limitChanged = (v: string | undefined, old: { toString(): string }) => v !== undefined && !new Decimal(v).eq(old.toString());
+    if (limitChanged(input.creditLimit, before.creditLimit) || limitChanged(input.overdueLimit, before.overdueLimit)) await assertModuleOn(this.prisma, 'credit_sales');
     const updated = await this.prisma.$transaction(async (tx) => {
       const after = await tx.customer.update({
         where: { id },

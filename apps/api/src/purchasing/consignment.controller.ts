@@ -18,9 +18,11 @@ import { RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { ConsignmentService } from './consignment.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const id = () => new ParseUUIDPipe();
 
+@RequireModule('consignment')
 @Controller('purchase/consignment')
 export class ConsignmentController {
   constructor(private readonly consignment: ConsignmentService) {}

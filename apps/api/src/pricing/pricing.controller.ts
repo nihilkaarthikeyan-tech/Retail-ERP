@@ -21,6 +21,7 @@ import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { MarkdownsService } from './markdowns.service.js';
 import { PricingService } from './pricing.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 @Controller()
 export class PricingController {
@@ -79,12 +80,14 @@ export class PricingController {
   // ---- Markdowns (plan 11 C5) ----
 
   @Get('markdowns')
+  @RequireModule('seasons')
   @RequirePermission('prices.view')
   markdownList(@ReqUser() user: AuthUser) {
     return this.markdowns.list(user);
   }
 
   @Post('markdowns/preview')
+  @RequireModule('seasons')
   @HttpCode(200)
   @RequirePermission('prices.manage')
   markdownPreview(@Body(new ZodValidationPipe(markdownSchema)) input: MarkdownInput, @ReqUser() user: AuthUser) {
@@ -92,12 +95,14 @@ export class PricingController {
   }
 
   @Post('markdowns')
+  @RequireModule('seasons')
   @RequirePermission('prices.manage')
   markdownApply(@Body(new ZodValidationPipe(markdownSchema)) input: MarkdownInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.markdowns.apply(input, actor, user);
   }
 
   @Get('markdowns/:id')
+  @RequireModule('seasons')
   @RequirePermission('prices.view')
   markdown(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser) {
     return this.markdowns.get(id, user);

@@ -10,6 +10,7 @@ import { Alert, Button, DataTable, SelectInput, TextInput, type Column } from "@
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { KIND_LABELS, reasonLabel, STATUS_LABELS, storesFromLocations } from "@/lib/stock";
 import type { StockDocHeaderDto, StockDocKindDto, StockDocPage } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
@@ -20,6 +21,8 @@ export default function StockDocumentsPage() {
   const { user } = useAuth();
   const canCount = hasPermission(user, "stock.count");
   const canMove = hasPermission(user, "stock.move");
+  // Plan 12: transfers between shops only while that module is on (old transfers still list).
+  const transfersOn = useModules().isOn("transfers");
   const locations = useStockLocations();
   const [filters, setFilters] = useState({ kind: "", status: "", storeId: "", from: "", to: "" });
   const [page, setPage] = useState(1);
@@ -69,7 +72,7 @@ export default function StockDocumentsPage() {
     { href: "/stock/documents/new?kind=stock_in", label: "Stock in", show: canCount },
     { href: "/stock/documents/new?kind=stock_out", label: "Write-off", show: canCount },
     { href: "/stock/documents/new?kind=move", label: "Move within store", show: canMove },
-    { href: "/stock/documents/new?kind=transfer_send", label: "Transfer to another store", show: canMove },
+    { href: "/stock/documents/new?kind=transfer_send", label: "Transfer to another store", show: canMove && transfersOn },
     { href: "/stock/counts/new", label: "Stock count", show: canCount },
   ];
   const total = docs.data?.total ?? 0;

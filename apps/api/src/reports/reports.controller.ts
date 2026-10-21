@@ -15,6 +15,7 @@ import { SalesReportsService } from './sales-reports.service.js';
 import { type SeasonSellThroughQuery, seasonSellThroughQuerySchema, SeasonReportsService } from './season-reports.service.js';
 import { StockAnalysisService } from './stock-analysis.service.js';
 import { SummaryEmailService } from './summary-email.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const zod = <T>(schema: { parse: (v: unknown) => T }) => new ZodValidationPipe(schema as never);
 const storeQuery = z.object({ storeId: z.string().uuid().optional() });
@@ -73,7 +74,7 @@ export class ReportsController {
   }
 
   /** Plan 11 C4: bought, sold, in stock and share sold per season, or per style, group or item of one season. */
-  @Get('reports/season-sell-through') @RequirePermission('pos.reports') seasonSellThrough(@Query(zod(seasonSellThroughQuerySchema)) q: SeasonSellThroughQuery, @ReqUser() user: AuthUser) {
+  @Get('reports/season-sell-through') @RequireModule('seasons') @RequirePermission('pos.reports') seasonSellThrough(@Query(zod(seasonSellThroughQuerySchema)) q: SeasonSellThroughQuery, @ReqUser() user: AuthUser) {
     return this.seasons.sellThrough(q, user);
   }
 

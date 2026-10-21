@@ -8,6 +8,7 @@
 import { type PermissionKey } from "shared";
 import { SelectInput } from "@/components/ui";
 import { api, query } from "@/lib/api";
+import { useModules } from "@/lib/modules";
 import type { SeasonDto, SellThroughDto, SellThroughRow } from "@/lib/styles-seasons";
 import { useLoad } from "@/lib/use-load";
 import { col, csvName, OptionFilter, optionLabel, ReportPage, type ReportColumn, ReportTable, StoreFilter, storeName, tableCsv, useAllowed, useReport, useReportStores, useUrlFilters } from "./report-kit";
@@ -23,8 +24,10 @@ export function SeasonSellThroughReport() {
   const access = useAllowed(SALES);
   const seasons = useLoad<SeasonDto[]>(() => api.get<SeasonDto[]>("/seasons").catch(() => []));
   const seasonOptions = (seasons.data ?? []).map((s) => ({ id: s.id, label: s.name }));
+  // Plan 12: "by style" only while "Sizes and colours" is on.
+  const withinSeason: By[] = useModules().isOn("variants") ? ["style", "group", "item"] : ["group", "item"];
   // Without a season the report is per season; with one, per style unless chosen otherwise.
-  const by: By = v.seasonId ? ((["style", "group", "item"] as By[]).includes(v.groupBy as By) ? (v.groupBy as By) : "style") : "season";
+  const by: By = v.seasonId ? (withinSeason.includes(v.groupBy as By) ? (v.groupBy as By) : withinSeason[0]) : "season";
   const r = useReport<SellThroughDto>(`/reports/season-sell-through${query({ seasonId: v.seasonId, storeId: v.storeId, groupBy: by })}`, f.ready && access.allowed);
   const columns = (d: SellThroughDto): ReportColumn<SellThroughRow>[] => [
     { ...col.text<SellThroughRow>("code", "Code", (x) => x.code, (x) => (x.code ? <span className="mono">{x.code}</span> : "—")), nowrap: true },
@@ -48,7 +51,7 @@ export function SeasonSellThroughReport() {
           <OptionFilter id="rf-season" label="Season" all="Every season" options={seasonOptions} value={v.seasonId} onChange={(x) => f.set({ seasonId: x, groupBy: "" })} />
           {v.seasonId ? (
             <SelectInput id="rf-group-by" label="Show by" value={by} onChange={(e) => f.set({ groupBy: e.target.value })}>
-              {(["style", "group", "item"] as By[]).map((o) => (
+              {withinSeason.map((o) => (
                 <option key={o} value={o}>
                   {BY_LABELS[o]}
                 </option>

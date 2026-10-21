@@ -3,7 +3,7 @@
 // (module 9, plan 09). The shapes mirror apps/api/src/reports/*.service.ts.
 // Money and quantities arrive as decimal strings and stay Decimal (rule 1);
 // only the pixel position of a chart mark is ever a plain number.
-import { type CurrentUser, Decimal, hasPermission, INDIA_TIME_ZONE, type PermissionKey } from "shared";
+import { type CurrentUser, Decimal, hasPermission, INDIA_TIME_ZONE, type ModuleKey, type PermissionKey } from "shared";
 import { api } from "./api";
 import { formatDate } from "./format";
 import type { MenuArea } from "./menu";
@@ -196,6 +196,8 @@ export interface ReportEntry {
   anyOf: PermissionKey[];
   /** All of these are needed as well. */
   allOf?: PermissionKey[];
+  /** Plan 12: the optional module the report belongs to; hidden while it is switched off. */
+  module?: ModuleKey;
 }
 
 const pos = (tab: string) => `/pos/reports?tab=${tab}`;
@@ -214,26 +216,26 @@ export const REPORTS: ReportEntry[] = [
   { id: "till-payments", title: "Payments by method", question: "How much came in as cash, card, UPI and so on.", href: pos("payments"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-hourly", title: "Hourly sales", question: "Which hours of the day are busiest.", href: pos("hourly"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-cashier", title: "Sales per cashier", question: "How much each cashier billed, and their returns.", href: pos("by-cashier"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
-  { id: "till-salesperson", title: "Sales by salesperson", question: "How much each salesperson sold, net of returns, by day or month.", href: pos("by-salesperson"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
+  { id: "till-salesperson", title: "Sales by salesperson", question: "How much each salesperson sold, net of returns, by day or month.", href: pos("by-salesperson"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"], module: "salesperson" },
   { id: "till-shifts", title: "Shifts", question: "Each shift's sales, returns and the difference found when the cash was counted.", href: pos("shifts"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-offline", title: "Offline bills to check", question: "Bills made while a till was offline that need a second look.", href: pos("offline-check"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "till-sync", title: "Till sync problems", question: "Bills a till sent that the server could not save.", href: pos("sync-problems"), frequency: "daily", area: "sales", where: "Till reports", anyOf: ["pos.reports"] },
   { id: "stock-on-hand", title: "Stock on hand", question: "How much of each item is in each store right now.", href: "/stock", frequency: "daily", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
   { id: "negative-stock", title: "Negative stock", question: "Items sold beyond the stock the system knew about.", href: "/stock/exceptions", frequency: "daily", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
-  { id: "in-transit", title: "Goods in transit", question: "Stock sent from one store that has not been received at the other yet.", href: "/stock/transfers", frequency: "daily", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
-  { id: "order-follow-up", title: "Purchase order follow-up", question: "Which ordered goods are still to come, and which are late.", href: purchases("order-follow-up"), frequency: "daily", area: "purchase", where: "Purchase reports", anyOf: ["purchase.view"] },
+  { id: "in-transit", title: "Goods in transit", question: "Stock sent from one store that has not been received at the other yet.", href: "/stock/transfers", frequency: "daily", area: "stock", where: "Inventory", anyOf: ["stock.view"], module: "transfers" },
+  { id: "order-follow-up", title: "Purchase order follow-up", question: "Which ordered goods are still to come, and which are late.", href: purchases("order-follow-up"), frequency: "daily", area: "purchase", where: "Purchase reports", anyOf: ["purchase.view"], module: "purchase_orders" },
   { id: "day-book", title: "Day book", question: "Every accounts entry of a day, in order.", href: accounts("day-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
-  { id: "cash-book", title: "Cash book", question: "A store's cash in hand day by day: opening, money in, money out and closing, with each entry.", href: accounts("cash-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
-  { id: "bank-book", title: "Bank book", question: "A bank account day by day: opening, money in, money out and closing, with each entry.", href: accounts("bank-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
+  { id: "cash-book", title: "Cash book", question: "A store's cash in hand day by day: opening, money in, money out and closing, with each entry.", href: accounts("cash-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW, module: "expenses" },
+  { id: "bank-book", title: "Bank book", question: "A bank account day by day: opening, money in, money out and closing, with each entry.", href: accounts("bank-book"), frequency: "daily", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW, module: "expenses" },
 
   // ---- Weekly ----
   { id: "item-sales", title: "Item-wise sales", question: "What sold, by item, style, size, colour, season, group or brand, with quantity and value.", href: "/reports/item-sales", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
-  { id: "season-sell-through", title: "Season sell-through", question: "For each season, or each style of one season: how much came in, how much sold, what is left and the share sold.", href: "/reports/season-sell-through", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
+  { id: "season-sell-through", title: "Season sell-through", question: "For each season, or each style of one season: how much came in, how much sold, what is left and the share sold.", href: "/reports/season-sell-through", frequency: "weekly", area: "sales", anyOf: ["pos.reports"], module: "seasons" },
   { id: "best-sellers", title: "Best and worst sellers", question: "The top and bottom items by quantity, sales or margin.", href: "/reports/best-sellers", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
   { id: "sales-by-group", title: "Sales by group or brand", question: "Which item groups or brands sell, week by week.", href: "/reports/sales-by-group", frequency: "weekly", area: "sales", anyOf: ["pos.reports"] },
   { id: "stock-cover", title: "Stock cover and sell-through", question: "How many days of stock are left at the current rate of sale, and how much of what came in has sold.", href: "/reports/stock-cover", frequency: "weekly", area: "stock", anyOf: ["stock.view"] },
   { id: "stock-history", title: "Stock history", question: "Every stock movement of an item, with the balance after each.", href: "/stock/ledger", frequency: "weekly", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
-  { id: "batches", title: "Batches and expiry", question: "Stock by batch, with expiry dates.", href: "/stock/batches", frequency: "weekly", area: "stock", where: "Inventory", anyOf: ["stock.view"] },
+  { id: "batches", title: "Batches and expiry", question: "Stock by batch, with expiry dates.", href: "/stock/batches", frequency: "weekly", area: "stock", where: "Inventory", anyOf: ["stock.view"], module: "batches" },
   { id: "reorder", title: "Reorder suggestions", question: "Which items are at or below their reorder level and how many to order.", href: "/purchases/reorder", frequency: "weekly", area: "purchase", where: "Purchases", anyOf: ["purchase.view"] },
   { id: "received-not-billed", title: "Goods received not billed", question: "Goods that came in but have no supplier bill yet.", href: purchases("received-not-billed"), frequency: "weekly", area: "purchase", where: "Purchase reports", anyOf: ["purchase.view"] },
   { id: "statement", title: "Customer or supplier statement", question: "Everything with one customer or supplier, and what is still owed.", href: accounts("statement"), frequency: "weekly", area: "accounts", where: "Accounts reports", anyOf: ["accounts.view", "payments.post"] },
@@ -258,7 +260,7 @@ export const REPORTS: ReportEntry[] = [
   { id: "gst-gstr1", title: "GSTR-1 figures", question: "The outward return: B2B, B2C large and small, credit notes, HSN summary and documents issued, for Excel and the GST portal.", href: "/reports/gst/gstr1", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
   { id: "gst-gstr3b", title: "GSTR-3B figures", question: "Tax collected and input credit per head, the set-off, reverse charge, net GST payable and credit carried forward.", href: "/reports/gst/gstr3b", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
   { id: "gst-notes", title: "Credit and debit note register", question: "Every credit and debit note with its original bill, and whether it is within the 30 November deadline.", href: "/reports/gst/notes", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
-  { id: "tally-export", title: "Export to Tally", question: "The vouchers of a period as a file your accountant imports into TallyPrime, with the Tally ledger name of each account.", href: "/accounts/tally", frequency: "monthly", area: "accounts", where: "Accounts", anyOf: ["tally.export"] },
+  { id: "tally-export", title: "Export to Tally", question: "The vouchers of a period as a file your accountant imports into TallyPrime, with the Tally ledger name of each account.", href: "/accounts/tally", frequency: "monthly", area: "accounts", where: "Accounts", anyOf: ["tally.export"], module: "tally" },
 ];
 
 export const FREQUENCY_LABELS: Record<ReportFrequency, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", gst: "GST returns" };
@@ -267,8 +269,16 @@ export function canSeeReport(user: CurrentUser | null, entry: Pick<ReportEntry, 
   return entry.anyOf.some((k) => hasPermission(user, k)) && (entry.allOf ?? []).every((k) => hasPermission(user, k));
 }
 
-export function visibleReports(user: CurrentUser | null): ReportEntry[] {
-  return REPORTS.filter((r) => canSeeReport(user, r));
+/** The reports this user may run; a report of a switched-off module (plan 12) is left out. Without a map every module counts as on. */
+export function visibleReports(user: CurrentUser | null, modules?: Partial<Record<ModuleKey, boolean>>): ReportEntry[] {
+  return REPORTS.filter((r) => canSeeReport(user, r) && !(r.module && modules?.[r.module] === false));
+}
+
+/** The question as shown: the item-wise sales question names style, size, colour and season only while their modules are on (plan 12). */
+export function reportQuestion(entry: ReportEntry, modules?: Partial<Record<ModuleKey, boolean>>): string {
+  if (entry.id !== "item-sales") return entry.question;
+  const ways = ["item", ...(modules?.variants === false ? [] : ["style", "size", "colour"]), ...(modules?.seasons === false ? [] : ["season"]), "group"];
+  return `What sold, by ${ways.join(", ")} or brand, with quantity and value.`;
 }
 
 /** The report centre entry for a module 9 report page (title and question). */

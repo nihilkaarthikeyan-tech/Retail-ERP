@@ -8,7 +8,8 @@ import Link from "next/link";
 import { hasPermission } from "shared";
 import { Alert } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import { FREQUENCY_LABELS, type ReportFrequency, visibleReports } from "@/lib/reports";
+import { useModules } from "@/lib/modules";
+import { FREQUENCY_LABELS, type ReportFrequency, reportQuestion, visibleReports } from "@/lib/reports";
 
 const FREQUENCY_HINTS: Record<ReportFrequency, string> = {
   daily: "For keeping an eye on each day.",
@@ -19,8 +20,9 @@ const FREQUENCY_HINTS: Record<ReportFrequency, string> = {
 
 export function ReportCentre() {
   const { user, loading } = useAuth();
+  const { modules } = useModules();
   if (loading) return <p className="muted">Loading…</p>;
-  const reports = visibleReports(user);
+  const reports = visibleReports(user, modules);
   const canEmail = hasPermission(user, "reports.summary_email");
 
   return (
@@ -42,7 +44,7 @@ export function ReportCentre() {
                     {r.title}
                   </Link>
                   {r.where ? <span className="report-where">{r.where}</span> : null}
-                  <p className="muted">{r.question}</p>
+                  <p className="muted">{reportQuestion(r, modules)}</p>
                 </li>
               ))}
             </ul>

@@ -3,11 +3,13 @@
 // set-up, sellable items with barcodes, units and MRP, prices (with the next
 // 7 days of price changes), GST rates, offers, coupons, customers with a
 // mobile number, last known stock, the store's salespeople and delivery charge
-// (plan 11 C1, B4) and the till's last bill numbers. Never
+// (plan 11 C1, B4), the till's last bill numbers and which optional modules
+// are on (plan 12: the till hides switched-off buttons offline too). Never
 // passwords, PINs or cost prices.
 import { Injectable } from '@nestjs/common';
 import { addDays, businessDate, type CurrentUser, tillNumberSeries } from 'shared';
 import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
+import { currentModuleMap } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { fromIso, iso, PosCommon } from './pos-common.service.js';
 import { offerDto } from './offers.service.js';
@@ -45,8 +47,10 @@ export class PosSnapshotService {
       where: { priceListId: { in: listIds }, startDate: { lte: fromIso(addDays(today, 7)) }, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] },
     });
     const gstRates = await this.prisma.gstRate.findMany({ orderBy: [{ hsnCode: 'asc' }, { effectiveFrom: 'asc' }] });
-    const offers = await this.prisma.offer.findMany({ where: { companyId: company.id, active: true, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } });
-    const coupons = await this.prisma.coupon.findMany({ where: { companyId: company.id, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } });
+    // Plan 12: a switched-off module sends nothing to the till (offers, coupons, salespeople).
+    const { map: modules } = await currentModuleMap(this.prisma);
+    const offers = modules.offers ? await this.prisma.offer.findMany({ where: { companyId: company.id, active: true, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } }) : [];
+    const coupons = modules.offers ? await this.prisma.coupon.findMany({ where: { companyId: company.id, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } }) : [];
     const partySettings = await this.prisma.partySettings.findUnique({ where: { companyId: company.id } });
     const customers = await this.prisma.customer.findMany({
       where: { companyId: company.id, OR: [{ mobile: { not: null } }, { id: partySettings?.walkInCustomerId ?? '00000000-0000-0000-0000-000000000000' }], ...(changedSince ? { updatedAt: { gt: changedSince } } : {}) },
@@ -64,7 +68,7 @@ export class PosSnapshotService {
       }),
     );
     const store = await this.prisma.store.findUniqueOrThrow({ where: { id: till.storeId } });
-    const salesStaff = await this.prisma.salesStaff.findMany({ where: { storeId: till.storeId, active: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, name: true } });
+    const salesStaff = modules.salesperson ? await this.prisma.salesStaff.findMany({ where: { storeId: till.storeId, active: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, name: true } }) : [];
     // Plan 08: the seller's registration and the GST settings the till bills with offline too.
     const seller = await this.common.gst.sellerFor(this.prisma, till.storeId);
     const gstSettings = await this.common.gst.settingsFor(this.prisma, company.id);
@@ -72,6 +76,7 @@ export class PosSnapshotService {
     return {
       serverTime,
       full: !changedSince,
+      modules,
       till: {
         id: till.id,
         code: till.code,

@@ -6,9 +6,11 @@ import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { SalesStaffService } from './sales-staff.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const zod = <T>(schema: { parse: (v: unknown) => T }) => new ZodValidationPipe(schema as never);
 
+@RequireModule('salesperson')
 @Controller('sales-staff')
 export class SalesStaffController {
   constructor(private readonly staff: SalesStaffService) {}

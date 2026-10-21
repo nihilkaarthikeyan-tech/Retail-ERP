@@ -10,6 +10,7 @@ import { Alert, Button, DataTable, Field, SelectInput, TextInput, type Column } 
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { BILL_KIND_LABELS, downloadCsv, ORDER_STATUS_LABELS, purchaseRights, rupees, type PurchaseOrderStatus, type SupplierBillKind, toCsv } from "@/lib/purchasing";
 import { showQuantity, storesFromLocations } from "@/lib/stock";
 import type { ItemPage, ItemRef, PartyRef } from "@/lib/types";
@@ -197,15 +198,19 @@ export function PurchaseReports() {
   const rights = purchaseRights(user);
   const params = useSearchParams();
   // The report centre links straight to a tab (?tab=register).
-  const [tab, setTab] = useState<ReportTab>(() => REPORT_TABS.find((t) => t.id === params.get("tab"))?.id ?? "order-follow-up");
+  const [chosenTab, setTab] = useState<ReportTab>(() => REPORT_TABS.find((t) => t.id === params.get("tab"))?.id ?? "order-follow-up");
   const [filters, setFilters] = useState<Filters>({ from: "", to: "", supplier: null, storeId: "", item: null });
+  // Plan 12: order follow-up only while "Purchase orders" is on.
+  const ordersOn = useModules().isOn("purchase_orders");
+  const tabs = REPORT_TABS.filter((t) => t.id !== "order-follow-up" || ordersOn);
+  const tab = tabs.some((t) => t.id === chosenTab) ? chosenTab : tabs[0].id;
   const def = REPORT_TABS.find((t) => t.id === tab)!;
 
   return (
     <>
       <h1>Purchase reports</h1>
       <div className="tabs" role="tablist" aria-label="Reports">
-        {REPORT_TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} className="tab" onClick={() => setTab(t.id)}>
             {t.label}
           </button>

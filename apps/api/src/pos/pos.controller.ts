@@ -64,6 +64,7 @@ import { PosReportsService } from './pos-reports.service.js';
 import { PosSetupService } from './pos-setup.service.js';
 import { PosSnapshotService } from './pos-snapshot.service.js';
 import { ShiftsService } from './shifts.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const id = () => new ParseUUIDPipe();
 const zod = <T>(schema: { parse: (v: unknown) => T }) => new ZodValidationPipe(schema as never);
@@ -123,10 +124,10 @@ export class PosController {
   @Get('settings') @RequireAnyPermission('pos.setup', 'pos.sell', 'pos.reports') settings() {
     return this.setup.getSettings();
   }
-  @Get('delivery-charges') @RequireAnyPermission('pos.setup', 'deliveries.manage') deliveryCharges(@ReqUser() user: AuthUser) {
+  @Get('delivery-charges') @RequireModule('delivery') @RequireAnyPermission('pos.setup', 'deliveries.manage') deliveryCharges(@ReqUser() user: AuthUser) {
     return this.setup.deliveryCharges(user);
   }
-  @Patch('stores/:id/delivery-charges') @RequirePermission('pos.setup') updateDeliveryCharges(@Param('id', id()) storeId: string, @Body(zod(storeDeliveryChargesSchema)) input: StoreDeliveryChargesInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Patch('stores/:id/delivery-charges') @RequireModule('delivery') @RequirePermission('pos.setup') updateDeliveryCharges(@Param('id', id()) storeId: string, @Body(zod(storeDeliveryChargesSchema)) input: StoreDeliveryChargesInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.setup.updateDeliveryCharges(storeId, input, actor, user);
   }
   @Patch('settings') @RequirePermission('pos.setup') updateSettings(@Body(zod(posSettingsSchema)) input: PosSettingsInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
@@ -154,16 +155,16 @@ export class PosController {
   }
 
   // ---- Offers and coupons ----
-  @Get('offers') @RequireAnyPermission('offers.manage', 'pos.sell') listOffers() {
+  @Get('offers') @RequireModule('offers') @RequireAnyPermission('offers.manage', 'pos.sell') listOffers() {
     return this.offers.list();
   }
-  @Post('offers') @RequirePermission('offers.manage') createOffer(@Body(zod(offerSchema)) input: OfferInput, @ReqActor() actor: Actor) {
+  @Post('offers') @RequireModule('offers') @RequirePermission('offers.manage') createOffer(@Body(zod(offerSchema)) input: OfferInput, @ReqActor() actor: Actor) {
     return this.offers.createOffer(input, actor);
   }
-  @Patch('offers/:id') @RequirePermission('offers.manage') updateOffer(@Param('id', id()) offerId: string, @Body(zod(offerSchema)) input: OfferInput, @ReqActor() actor: Actor) {
+  @Patch('offers/:id') @RequireModule('offers') @RequirePermission('offers.manage') updateOffer(@Param('id', id()) offerId: string, @Body(zod(offerSchema)) input: OfferInput, @ReqActor() actor: Actor) {
     return this.offers.updateOffer(offerId, input, actor);
   }
-  @Post('coupons') @RequirePermission('offers.manage') createCoupon(@Body(zod(couponSchema)) input: CouponInput, @ReqActor() actor: Actor) {
+  @Post('coupons') @RequireModule('offers') @RequirePermission('offers.manage') createCoupon(@Body(zod(couponSchema)) input: CouponInput, @ReqActor() actor: Actor) {
     return this.offers.createCoupon(input, actor);
   }
 
@@ -206,18 +207,18 @@ export class PosController {
   }
 
   // ---- Home deliveries (plan 11 B4) ----
-  @Get('deliveries') @RequireAnyPermission('deliveries.manage', 'pos.reports') listDeliveries(@Query(zod(deliveryQuerySchema)) q: DeliveryQuery, @ReqUser() user: AuthUser) {
+  @Get('deliveries') @RequireModule('delivery') @RequireAnyPermission('deliveries.manage', 'pos.reports') listDeliveries(@Query(zod(deliveryQuerySchema)) q: DeliveryQuery, @ReqUser() user: AuthUser) {
     return this.deliveries.list(q, user);
   }
-  @Post('deliveries/:id/delivered') @HttpCode(200) @RequirePermission('deliveries.manage') delivered(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('deliveries/:id/delivered') @RequireModule('delivery') @HttpCode(200) @RequirePermission('deliveries.manage') delivered(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.deliveries.markDelivered(deliveryId, input, actor, user);
   }
-  @Post('deliveries/:id/cancel') @HttpCode(200) @RequirePermission('deliveries.manage') cancelDelivery(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('deliveries/:id/cancel') @RequireModule('delivery') @HttpCode(200) @RequirePermission('deliveries.manage') cancelDelivery(@Param('id', id()) deliveryId: string, @Body(zod(deliveryUpdateSchema)) input: DeliveryUpdateInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.deliveries.cancel(deliveryId, input, actor, user);
   }
 
   // ---- Reports ----
-  @Get('reports/by-salesperson') @RequirePermission('pos.reports') bySalesperson(@Query(zod(salespersonReportQuerySchema)) q: SalespersonReportQuery, @ReqUser() user: AuthUser) {
+  @Get('reports/by-salesperson') @RequireModule('salesperson') @RequirePermission('pos.reports') bySalesperson(@Query(zod(salespersonReportQuerySchema)) q: SalespersonReportQuery, @ReqUser() user: AuthUser) {
     return this.reports.bySalesperson(q, user);
   }
   @Get('reports/register') @RequirePermission('pos.reports') registerReport(@Query(zod(posReportQuerySchema)) q: PosReportQuery, @ReqUser() user: AuthUser) {

@@ -10,6 +10,8 @@ Deferred features from the launch scope are listed in `docs/decisions.md`; this 
 To build, in this order. Each money, stock or tax item gets a plan in `docs/plans/` approved by the owner first.
 
 **First: a smooth start for a new shop (our own design)**
+**DONE 21 October 2026 (plan 12): guided setup, modules on and off, shop types, getting-started checklist, settings centre.** Still to do from it: the AI "Describe your shop" helper (later, by owner decision); the owner reviews the 75 proposed new settings in `docs/settings-inventory.md`; screens for the security settings, state e-way limits and ageing bands (shown read-only today); default shelf-life and warranty settings for the cosmetics and mobiles shop types (need a schema change).
+
 **NEXT after GST (owner, 18 October 2026): one system, made to fit each shop.** The approach: one complete system for every business; a new shop first goes through the setup wizard, which asks only what the shop alone knows and then configures the system for that shop; afterwards every module has its own easy settings so the shop can adjust it to how it works.
 
 - **Review and improve the setup wizard:** check whether the current one-page setup is good enough; make it step by step with a shop-type question; consider an optional AI helper that asks "tell me about your shop" and suggests the set-up for the owner to confirm (AI only suggests; the rules and money and tax set-up stay fixed and checked).

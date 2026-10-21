@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { hasPermission } from "shared";
 import { ItemSearchBox } from "@/components/items/item-search-box";
+import { GettingStarted } from "@/components/getting-started";
 import { Dashboards } from "@/components/reports/dashboards";
 import { SystemStatus } from "@/components/system-status";
 import { api } from "@/lib/api";
@@ -49,6 +50,8 @@ export default function DashboardPage() {
               : (company.error ?? "")}
         </p>
       ) : null}
+
+      <GettingStarted />
 
       <Dashboards />
 

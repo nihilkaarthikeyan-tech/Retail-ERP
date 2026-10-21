@@ -23,6 +23,7 @@ import {
   hasPermission,
   hsnForPrint,
   type InclusiveTax,
+  type ModuleKey,
   INDIAN_STATES,
   isCountedOffer,
   isCreditNoteLate,
@@ -58,6 +59,7 @@ import { CustomersService } from '../parties/customers.service.js';
 import { PartySettingsService } from '../parties/party-settings.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { assertModuleOn, currentModuleMap, moduleOffError, moduleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
 import { D, fromIso, iso, type PendingApproval, PosCommon, type TillWithRefs } from './pos-common.service.js';
@@ -268,6 +270,7 @@ export class PosBillsService {
     const seller = await this.common.gst.sellerFor(this.prisma, till.storeId);
     const buyer = await this.buyerFor(input, customer);
     const supply = resolveSupply({ sellerState: seller.stateCode, scheme: gstSettings.scheme, buyerGstin: buyer.gstin, buyerState: buyer.stateCode, deliveryState: input.delivery?.stateCode ?? null, taxSituation: buyer.taxSituation });
+    await this.checkModules(input, flags);
     const coupon = input.couponCode && input.sale ? await this.offers.couponFor(this.prisma, company.id, input.couponCode, date, customer.id) : null;
     const offerCtx = { companyId: company.id, storeId: till.storeId, date, customerGroupId: customer.customerGroupId, couponOfferId: coupon?.offerId ?? null };
     const year = await this.years.forDate(this.prisma, company.id, date);
@@ -434,6 +437,27 @@ export class PosBillsService {
       { timeout: 60_000, maxWait: 30_000 },
     );
     return { ...(await this.transactionDto(saved, user, false)), warnings };
+  }
+
+  /**
+   * Plan 12: the part of a bill that belongs to a switched-off module is refused
+   * online (an old till still offering a hidden button). A bill made offline has
+   * already been sold, so it is kept as sold and flagged for checking.
+   */
+  private async checkModules(input: PosTransactionInput, flags: Set<string>) {
+    const { map } = await currentModuleMap(this.prisma);
+    const lines = [...(input.sale?.lines ?? []), ...(input.ret?.lines ?? [])];
+    const used: ModuleKey[] = [];
+    if (input.salesStaffId || lines.some((l) => l.salesStaffId)) used.push('salesperson');
+    if (input.delivery) used.push('delivery');
+    if (input.orderId || lines.some((l) => l.orderLineId) || (input.useCredit && !D(input.useCredit).isZero())) used.push('customer_orders');
+    if (input.alteration) used.push('alterations');
+    if (input.couponCode) used.push('offers');
+    for (const k of used) {
+      if (map[k]) continue;
+      if (!input.offline) throw moduleOffError(k);
+      flags.add('module_off');
+    }
   }
 
   // ---- Plan 11 part 2: customer orders, credit and alteration charges on a sale ----
@@ -636,6 +660,8 @@ export class PosBillsService {
     const onAccount = input.payments.filter((p) => methods.get(p.paymentMethodId)?.kind === 'on_account').reduce((s, p) => s.add(D(p.amount)), new Decimal(0));
     if (onAccount.isZero()) return;
     if (input.offline) throw new BadRequestException('On account needs the connection: the customer’s balance is checked on the server');
+    // Plan 12: selling on account is the "Credit sales" module; a refund on account only reduces what is owed.
+    if (onAccount.gt(0)) await assertModuleOn(this.prisma, 'credit_sales');
     if (customer.isWalkIn) throw new BadRequestException('Choose the customer to sell on account');
     if (customer.status !== 'active') throw new BadRequestException(`${customer.name} is ${customer.status === 'blocked' ? 'blocked' : 'switched off'}; they cannot buy on account`);
     if (onAccount.lt(0)) return; // A refund on account only reduces what they owe.
@@ -718,7 +744,8 @@ export class PosBillsService {
   private async buildSale(ctx: BuildContext, offerCtx: Parameters<OffersService['activeOffers']>[1], couponId: string | null): Promise<BuiltBill> {
     const { till, date, input, user, flags } = ctx;
     const part = input.sale!;
-    const offers = await this.offers.activeOffers(this.prisma, offerCtx);
+    // Plan 12: with "Offers and coupons" switched off no offer applies.
+    const offers = (await moduleOn(this.prisma, 'offers')) ? await this.offers.activeOffers(this.prisma, offerCtx) : [];
     const billStaff = input.salesStaffId ?? null;
     const lines: BuiltLine[] = [];
     // Online, free lines are worked out here from the offers; offline the till's free lines are kept as sold.

@@ -52,6 +52,7 @@ import { PurchaseReportsService } from './purchase-reports.service.js';
 import { PurchaseSettingsService } from './purchase-settings.service.js';
 import { ReorderService } from './reorder.service.js';
 import { SupplierBillsService } from './supplier-bills.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const id = () => new ParseUUIDPipe();
 const reason = () => new ZodValidationPipe(reasonSchema);
@@ -69,37 +70,37 @@ export class PurchasingController {
   ) {}
 
   // ---- Purchase orders ----
-  @Get('orders') @RequirePermission('purchase.view') listOrders(@Query(new ZodValidationPipe(purchaseOrderQuerySchema)) q: PurchaseOrderQuery, @ReqUser() user: AuthUser) {
+  @Get('orders') @RequireModule('purchase_orders') @RequirePermission('purchase.view') listOrders(@Query(new ZodValidationPipe(purchaseOrderQuerySchema)) q: PurchaseOrderQuery, @ReqUser() user: AuthUser) {
     return this.orders.list(q, user);
   }
-  @Post('orders') @RequirePermission('purchase.order') createOrder(@Body(new ZodValidationPipe(createPurchaseOrderSchema)) input: CreatePurchaseOrderInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders') @RequireModule('purchase_orders') @RequirePermission('purchase.order') createOrder(@Body(new ZodValidationPipe(createPurchaseOrderSchema)) input: CreatePurchaseOrderInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.create(input, actor, user);
   }
-  @Get('orders/:id') @RequirePermission('purchase.view') getOrder(@Param('id', id()) orderId: string, @ReqUser() user: AuthUser) {
+  @Get('orders/:id') @RequireModule('purchase_orders') @RequirePermission('purchase.view') getOrder(@Param('id', id()) orderId: string, @ReqUser() user: AuthUser) {
     return this.orders.get(orderId, user);
   }
-  @Get('orders/:id/open-lines') @RequirePermission('purchase.view') openLines(@Param('id', id()) orderId: string, @ReqUser() user: AuthUser) {
+  @Get('orders/:id/open-lines') @RequireModule('purchase_orders') @RequirePermission('purchase.view') openLines(@Param('id', id()) orderId: string, @ReqUser() user: AuthUser) {
     return this.orders.openLines(orderId, user);
   }
-  @Patch('orders/:id') @RequirePermission('purchase.order') updateOrder(@Param('id', id()) orderId: string, @Body(new ZodValidationPipe(updatePurchaseOrderSchema)) input: UpdatePurchaseOrderInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Patch('orders/:id') @RequireModule('purchase_orders') @RequirePermission('purchase.order') updateOrder(@Param('id', id()) orderId: string, @Body(new ZodValidationPipe(updatePurchaseOrderSchema)) input: UpdatePurchaseOrderInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.update(orderId, input, actor, user);
   }
-  @Post('orders/:id/finalise') @HttpCode(200) @RequirePermission('purchase.order') finaliseOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/finalise') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.order') finaliseOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.finalise(orderId, actor, user);
   }
-  @Post('orders/:id/hold') @HttpCode(200) @RequirePermission('purchase.approve') holdOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/hold') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.approve') holdOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.hold(orderId, input.reason, actor, user);
   }
-  @Post('orders/:id/release') @HttpCode(200) @RequirePermission('purchase.approve') releaseOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/release') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.approve') releaseOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.release(orderId, actor, user);
   }
-  @Post('orders/:id/close') @HttpCode(200) @RequirePermission('purchase.approve') closeOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/close') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.approve') closeOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.close(orderId, input.reason, actor, user);
   }
-  @Post('orders/:id/reopen') @HttpCode(200) @RequirePermission('purchase.approve') reopenOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/reopen') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.approve') reopenOrder(@Param('id', id()) orderId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.reopen(orderId, actor, user);
   }
-  @Post('orders/:id/cancel') @HttpCode(200) @RequirePermission('purchase.order') cancelOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('orders/:id/cancel') @RequireModule('purchase_orders') @HttpCode(200) @RequirePermission('purchase.order') cancelOrder(@Param('id', id()) orderId: string, @Body(reason()) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.orders.cancel(orderId, input.reason, actor, user);
   }
 
@@ -188,12 +189,12 @@ export class PurchasingController {
   @Post('reorder-suggestions/run') @HttpCode(200) @RequirePermission('purchase.order') runSuggestions(@ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.reorder.runNow(actor, user);
   }
-  @Post('reorder-suggestions/create-orders') @RequirePermission('purchase.order') ordersFromSuggestions(@Body(new ZodValidationPipe(createOrdersFromSuggestionsSchema)) input: CreateOrdersFromSuggestionsInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('reorder-suggestions/create-orders') @RequireModule('purchase_orders') @RequirePermission('purchase.order') ordersFromSuggestions(@Body(new ZodValidationPipe(createOrdersFromSuggestionsSchema)) input: CreateOrdersFromSuggestionsInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.reorder.createOrders(input, actor, user);
   }
 
   // ---- Reports and settings ----
-  @Get('reports/order-follow-up') @RequirePermission('purchase.view') followUp(@Query(new ZodValidationPipe(purchaseReportQuerySchema)) q: PurchaseReportQuery, @ReqUser() user: AuthUser) {
+  @Get('reports/order-follow-up') @RequireModule('purchase_orders') @RequirePermission('purchase.view') followUp(@Query(new ZodValidationPipe(purchaseReportQuerySchema)) q: PurchaseReportQuery, @ReqUser() user: AuthUser) {
     return this.reports.orderFollowUp(q, user);
   }
   @Get('reports/received-not-billed') @RequirePermission('purchase.view') notBilled(@Query(new ZodValidationPipe(purchaseReportQuerySchema)) q: PurchaseReportQuery, @ReqUser() user: AuthUser) {

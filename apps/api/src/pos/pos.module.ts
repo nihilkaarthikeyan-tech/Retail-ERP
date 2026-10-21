@@ -27,6 +27,6 @@ import { ShiftsService } from './shifts.service.js';
   imports: [CatalogueModule, CompanyModule, FinancialYearsModule, GstCoreModule, ItemsModule, InventoryModule, PartiesModule, PricingModule],
   controllers: [PosController, SalesStaffController],
   providers: [PosCommon, PosCredit, PosPostings, PosSetupService, PinService, OffersService, ShiftsService, PosBillsService, PosSnapshotService, PosReportsService, SalesStaffService, DeliveriesService],
-  exports: [PosBillsService, PosPostings, PosCommon, PosCredit],
+  exports: [PosBillsService, PosPostings, PosCommon, PosCredit, PosSetupService],
 })
 export class PosModule {}

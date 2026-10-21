@@ -248,6 +248,7 @@ export const FLAG_LABELS: Record<string, string> = {
   before_lock: "Stock posted on the next open day (month was locked)",
   sales_staff_changed: "Salesperson was switched off or moved to another store while the till was offline",
   delivery_charge_changed: "Delivery charge changed while the till was offline; the till's charge was kept",
+  module_off: "Used a module that was switched off in Settings → My modules while the till was offline",
 };
 
 export function flagLabel(flag: string): string {

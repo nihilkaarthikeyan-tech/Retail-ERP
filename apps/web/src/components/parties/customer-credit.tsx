@@ -7,6 +7,7 @@ import { PartyStatusBadge } from "@/components/parties/status-badge";
 import { Alert, Button, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { blankToNull } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { STATUS_LABELS } from "@/lib/parties";
 import type { CustomerDto, PartyStatus } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -28,6 +29,8 @@ export function CustomerCredit({ customer, canEdit, onSaved }: CustomerCreditPro
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Plan 12: limits only while "Credit sales" is on; their saved values are sent back unchanged.
+  const creditOn = useModules().isOn("credit_sales");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -68,11 +71,12 @@ export function CustomerCredit({ customer, canEdit, onSaved }: CustomerCreditPro
   return (
     <form onSubmit={onSubmit} noValidate>
       <div className="toolbar">
-        <h2 style={{ margin: 0 }}>Credit and status</h2>
+        <h2 style={{ margin: 0 }}>{creditOn ? "Credit and status" : "Status"}</h2>
         <PartyStatusBadge status={customer.status} />
       </div>
       <Alert kind="error">{error}</Alert>
-      {saved ? <Alert kind="success">Credit settings saved.</Alert> : null}
+      {saved ? <Alert kind="success">{creditOn ? "Credit settings saved." : "Status saved."}</Alert> : null}
+      {creditOn ? (
       <fieldset disabled={!canEdit}>
         <legend>Limits</legend>
         <div className="form-grid">
@@ -80,6 +84,7 @@ export function CustomerCredit({ customer, canEdit, onSaved }: CustomerCreditPro
           <TextInput id="credit-overdue" label="Overdue limit" value={overdueLimit} onChange={(e) => setOverdueLimit(e.target.value)} error={errors.overdueLimit} inputMode="decimal" className="mono" hint="Overdue amount above which new sales on credit are refused. 0 = no overdue allowed." />
         </div>
       </fieldset>
+      ) : null}
       <fieldset disabled={!canEdit}>
         <legend>Status</legend>
         <div className="form-grid">
@@ -96,7 +101,7 @@ export function CustomerCredit({ customer, canEdit, onSaved }: CustomerCreditPro
       {canEdit ? (
         <div className="actions">
           <Button type="submit" variant="primary" busy={busy}>
-            Save credit settings
+            {creditOn ? "Save credit settings" : "Save status"}
           </Button>
         </div>
       ) : (

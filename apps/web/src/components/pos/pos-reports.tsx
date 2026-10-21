@@ -10,6 +10,7 @@ import { Alert, Badge, Button, CheckInput, DataTable, Dialog, SelectInput, Texta
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { downloadCsv, rupees, toCsv } from "@/lib/purchasing";
 import { indianTime } from "@/lib/stock";
 import { useLoad } from "@/lib/use-load";
@@ -207,14 +208,18 @@ export function PosReports() {
   const tills = useTills();
   const params = useSearchParams();
   // The report centre links straight to a tab (?tab=hourly).
-  const [tab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === params.get("tab"))?.id ?? "register");
+  const [chosenTab, setTab] = useState<Tab>(() => TABS.find((t) => t.id === params.get("tab"))?.id ?? "register");
   const [filters, setFilters] = useState({ from: "", to: "", tillId: "", groupBy: "day" });
+  // Plan 12: sales by salesperson only while "Salesperson" is on.
+  const salespersonOn = useModules().isOn("salesperson");
+  const tabs = TABS.filter((t) => t.id !== "by-salesperson" || salespersonOn);
+  const tab = tabs.some((t) => t.id === chosenTab) ? chosenTab : "register";
 
   return (
     <>
       <h1>Till reports</h1>
       <div className="tabs" role="tablist" aria-label="Reports">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.id} type="button" role="tab" id={`tab-${t.id}`} aria-selected={tab === t.id} aria-controls={`panel-${t.id}`} className="tab" onClick={() => setTab(t.id)}>
             {t.label}
           </button>

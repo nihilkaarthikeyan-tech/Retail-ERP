@@ -44,3 +44,8 @@ export * from './schemas/tally.js';
 export * from './stock-costing.js';
 export * from './units.js';
 export * from './variants.js';
+export * from './modules.js';
+export * from './schemas/modules.js';
+export * from './setup.js';
+export * from './schemas/setup.js';
+export * from './settings-centre.js';

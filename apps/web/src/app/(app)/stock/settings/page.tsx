@@ -7,6 +7,7 @@ import { Alert, Button, CheckInput, SelectInput, TextInput } from "@/components/
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import type { InventorySettingsDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -17,6 +18,8 @@ function SettingsForm({ settings, canEdit, onSaved }: { settings: InventorySetti
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Plan 12: the batch setting only while "Batches and expiry" is on (its value is kept).
+  const batchesOn = useModules().isOn("batches");
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -58,10 +61,12 @@ function SettingsForm({ settings, canEdit, onSaved }: { settings: InventorySetti
         disabled={!canEdit}
         onChange={(e) => setForm({ ...form, allowNegativeAtTill: e.target.checked })}
       />
+      {batchesOn ? (
       <SelectInput id="inv-batch-order" label="Batch picked first at the till" value={form.batchPickOrder} disabled={!canEdit} onChange={(e) => setForm({ ...form, batchPickOrder: e.target.value as InventorySettingsDto["batchPickOrder"] })} error={errors.batchPickOrder}>
         <option value="earliest_expiry">Earliest expiry first</option>
         <option value="oldest_first">Oldest batch first</option>
       </SelectInput>
+      ) : null}
       {canEdit ? (
         <div className="actions">
           <Button type="submit" variant="primary" busy={busy}>

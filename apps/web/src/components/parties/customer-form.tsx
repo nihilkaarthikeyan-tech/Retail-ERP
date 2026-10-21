@@ -11,6 +11,7 @@ import { Alert, Button, CheckInput, SelectInput, TextInput, TextareaInput } from
 import { api, errorMessage } from "@/lib/api";
 import { flattenGroups } from "@/lib/catalogue";
 import { blankToNull } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { duplicateMobile } from "@/lib/parties";
 import type { CustomerDto, DuplicateMobileBody, PartyGroupNode, PartyRef, PartySettingsDto, PaymentTermsDto, PriceListDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -83,6 +84,8 @@ interface CustomerFormProps {
 
 export function CustomerForm({ customer, groups, priceLists, terms, settings, readOnly = false, onSaved }: CustomerFormProps) {
   const [form, setForm] = useState<CustomerFormValues>(() => fromCustomer(customer, settings));
+  // Plan 12: credit limits only while "Credit sales" is on (saved values are kept).
+  const creditOn = useModules().isOn("credit_sales");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateMobileBody | null>(null);
@@ -178,7 +181,7 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
           <TextareaInput id="cus-notes" label="Notes" rows={2} value={form.notes} onChange={set("notes")} error={errors.notes} className="span-2" />
           <div className="span-2 check-row">
             <CheckInput id="cus-isBusiness" label="Business (B2B)" description="Off = a person. A customer with a GSTIN is a business." checked={form.isBusiness} onChange={setFlag("isBusiness")} />
-            <CheckInput id="cus-creditCheckAtDelivery" label="Credit check at delivery" description="Check the credit limit when goods leave, not only when the order is taken." checked={form.creditCheckAtDelivery} onChange={setFlag("creditCheckAtDelivery")} />
+            {creditOn ? <CheckInput id="cus-creditCheckAtDelivery" label="Credit check at delivery" description="Check the credit limit when goods leave, not only when the order is taken." checked={form.creditCheckAtDelivery} onChange={setFlag("creditCheckAtDelivery")} /> : null}
           </div>
         </div>
       </fieldset>

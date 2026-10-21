@@ -715,3 +715,49 @@ Amounts use test rates entered for these scenarios; the CA approves the real rat
 ### 8.14 Input credit matching (GSTR-2B)
 - **Given** three bills of a supplier (₹2,000, ₹3,000, ₹4,000 at 5%) and a GSTR-2B file from the portal with the first (number typed differently), the second at ₹3,200, and one bill we never recorded
 - **Then** the first is matched, the second shows the taxable and tax differences, the unknown one is "only on the portal" and the third bill is "only in our books"; a file for another GSTIN, or not a GSTR-2B, is refused with a plain message.
+
+## Module 12 — Guided setup, modules on and off, settings centre (plan 12)
+
+### 12.1 A fancy shop sees only what it needs
+- **Given** a new company set up through the wizard as "Fancy and gift"
+- **Then** nothing about sizes and colours, batches and expiry, serial numbers, seasons, alterations or sale-or-return appears anywhere: menus, item form, purchase screens, till, reports, settings.
+- **Then** the API refuses those modules' actions with a plain "switched off" message.
+
+### 12.2 Switching a module on and off keeps the data
+- **Given** a clothing shop with 3 styles in sizes and colours
+- **When** "Sizes and colours" is switched off, then on again
+- **Then:**
+  - while off, the variants still sell at the till as ordinary items and their stock stays correct;
+  - when back on, the styles, sizes and colours are exactly as before.
+- Nothing is deleted at any point.
+
+### 12.3 Warnings and dependencies
+- **Then:**
+  - switching off "Customer orders" with 3 open orders warns "3 customer orders are still open" before going ahead;
+  - switching on "Alterations" also switches on "Salesperson", and says so;
+  - only the Owner can switch modules, and every change is in the history.
+
+### 12.4 Existing companies
+- **Then** after the update, an existing company has every optional module on and nothing disappears.
+
+### 12.5 Shop types fill in settings
+- **Then:**
+  - "Clothing" switches on sizes and colours, seasons and markdowns, salesperson, alterations, customer orders and offers, and creates the starting size and colour lists and item groups;
+  - "Cosmetics" switches on batches and expiry;
+  - "Mobiles" switches on serial numbers.
+- Re-applying a different shop type asks first and deletes nothing.
+
+### 12.6 Guided setup
+- **Then:**
+  - the wizard saves each step; closing the browser after step 3 and coming back resumes at step 4 with the earlier answers kept;
+  - finishing it creates the company, owner, GST registration, first shop and tills, and switches on the chosen modules.
+
+### 12.7 Getting-started checklist
+- **Then** the checklist shows the open steps; adding a till, importing items and making a test bill tick their steps automatically; the owner can hide it.
+
+### 12.8 Settings centre
+- **Then:**
+  - every setting shows a plain label, an explanation and its default;
+  - "back to default" restores it;
+  - settings of switched-off modules are hidden;
+  - search finds a setting by name.

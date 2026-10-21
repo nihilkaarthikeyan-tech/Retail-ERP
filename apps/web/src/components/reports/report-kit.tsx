@@ -15,8 +15,9 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
 import type { MenuArea } from "@/lib/menu";
+import { useModules } from "@/lib/modules";
 import { rupees } from "@/lib/purchasing";
-import { type CsvCell, downloadReport, formatWorkedOut, type LogFilters, percentText, reportEntry } from "@/lib/reports";
+import { type CsvCell, downloadReport, formatWorkedOut, type LogFilters, percentText, reportEntry, reportQuestion } from "@/lib/reports";
 import { isNegative, showQuantity, useBusinessToday } from "@/lib/stock";
 import type { BrandDto, CompanyDto, ItemGroupNode, StoreRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
@@ -290,6 +291,7 @@ interface ReportPageProps<D extends { workedOutAt: string }> {
 
 export function ReportPage<D extends { workedOutAt: string }>({ id, area, needs, filters, summary, logFilters, ready, state, csv, fileName, note, children }: ReportPageProps<D>) {
   const entry = reportEntry(id);
+  const { modules } = useModules();
   const access = useAllowed(needs);
   const heading = usePrintHeading();
   const [saving, setSaving] = useState(false);
@@ -329,7 +331,7 @@ export function ReportPage<D extends { workedOutAt: string }>({ id, area, needs,
         <Link href="/reports">All reports</Link>
       </p>
       <h1>{entry.title}</h1>
-      <p className="muted report-question">{entry.question}</p>
+      <p className="muted report-question">{reportQuestion(entry, modules)}</p>
       {note ? <p className="report-note">{note}</p> : null}
       <p className="report-print-only report-summary">{summary}</p>
       <div className="filter-row report-no-print">{filters}</div>

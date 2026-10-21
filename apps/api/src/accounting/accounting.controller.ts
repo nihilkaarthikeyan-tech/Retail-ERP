@@ -58,6 +58,7 @@ import { JournalsService } from './journals.service.js';
 import { LedgerReportsService } from './ledger-reports.service.js';
 import { PaymentsService } from './payments.service.js';
 import { TallyExportService } from './tally-export.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const id = () => new ParseUUIDPipe();
 const zod = <T>(schema: { parse: (v: unknown) => T }) => new ZodValidationPipe(schema as never);
@@ -171,19 +172,19 @@ export class AccountingController {
   }
 
   // ---- Simple expenses (plan 11 C8): the store is checked inside the service ----
-  @Get('expenses/options') @RequireAnyPermission('expenses.post', 'accounts.view') expenseOptions(@ReqUser() user: AuthUser) {
+  @Get('expenses/options') @RequireModule('expenses') @RequireAnyPermission('expenses.post', 'accounts.view') expenseOptions(@ReqUser() user: AuthUser) {
     return this.expenses.options(user);
   }
-  @Get('expenses') @RequireAnyPermission('expenses.post', 'accounts.view') listExpenses(@Query(zod(expenseListQuerySchema)) q: ExpenseListQuery, @ReqUser() user: AuthUser) {
+  @Get('expenses') @RequireModule('expenses') @RequireAnyPermission('expenses.post', 'accounts.view') listExpenses(@Query(zod(expenseListQuerySchema)) q: ExpenseListQuery, @ReqUser() user: AuthUser) {
     return this.expenses.list(q, user);
   }
-  @Get('expenses/:id') @RequireAnyPermission('expenses.post', 'accounts.view') expense(@Param('id', id()) expenseId: string, @ReqUser() user: AuthUser) {
+  @Get('expenses/:id') @RequireModule('expenses') @RequireAnyPermission('expenses.post', 'accounts.view') expense(@Param('id', id()) expenseId: string, @ReqUser() user: AuthUser) {
     return this.expenses.get(expenseId, user);
   }
-  @Post('expenses') @RequirePermission('expenses.post') createExpense(@Body(zod(expenseSchema)) input: ExpenseInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('expenses') @RequireModule('expenses') @RequirePermission('expenses.post') createExpense(@Body(zod(expenseSchema)) input: ExpenseInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.expenses.create(input, actor, user);
   }
-  @Post('expenses/:id/cancel') @HttpCode(200) @RequirePermission('expenses.post') cancelExpense(@Param('id', id()) expenseId: string, @Body(zod(cancelSchema)) input: { reason: string }, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('expenses/:id/cancel') @RequireModule('expenses') @HttpCode(200) @RequirePermission('expenses.post') cancelExpense(@Param('id', id()) expenseId: string, @Body(zod(cancelSchema)) input: { reason: string }, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.expenses.cancel(expenseId, input.reason, actor, user);
   }
 
@@ -220,7 +221,7 @@ export class AccountingController {
   @Get('reports/general-ledger') @RequirePermission('accounts.view') generalLedger(@Query(zod(ledgerQuerySchema)) q: LedgerQuery, @ReqUser() user: AuthUser) {
     return this.reports.generalLedger(q, user);
   }
-  @Get('reports/cash-book') @RequireAnyPermission('accounts.view', 'expenses.post') cashBook(@Query(zod(cashBookQuerySchema)) q: CashBookQuery, @ReqUser() user: AuthUser) {
+  @Get('reports/cash-book') @RequireModule('expenses') @RequireAnyPermission('accounts.view', 'expenses.post') cashBook(@Query(zod(cashBookQuerySchema)) q: CashBookQuery, @ReqUser() user: AuthUser) {
     return this.cashBooks.cashBook(q, user);
   }
   @Get('reports/day-book') @RequirePermission('accounts.view') dayBook(@Query(zod(periodQuerySchema)) q: PeriodQuery, @ReqUser() user: AuthUser) {
@@ -257,16 +258,16 @@ export class AccountingController {
   }
 
   // ---- Tally export (plan 11 part 2 §4) ----
-  @Get('tally/ledger-map') @RequireAnyPermission('tally.export', 'accounts.view') tallyLedgerMap(@ReqUser() user: AuthUser) {
+  @Get('tally/ledger-map') @RequireModule('tally') @RequireAnyPermission('tally.export', 'accounts.view') tallyLedgerMap(@ReqUser() user: AuthUser) {
     return this.tally.ledgerMap(user);
   }
-  @Put('tally/ledger-map') @RequireAnyPermission('tally.export', 'accounts.manage') saveTallyLedgerMap(@Body(zod(tallyLedgerMapSchema)) input: TallyLedgerMapInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Put('tally/ledger-map') @RequireModule('tally') @RequireAnyPermission('tally.export', 'accounts.manage') saveTallyLedgerMap(@Body(zod(tallyLedgerMapSchema)) input: TallyLedgerMapInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.tally.saveMap(input, actor, user);
   }
-  @Get('tally/vouchers') @RequirePermission('tally.export') async tallyVouchers(@Query(zod(tallyExportQuerySchema)) q: TallyExportQuery, @ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
+  @Get('tally/vouchers') @RequireModule('tally') @RequirePermission('tally.export') async tallyVouchers(@Query(zod(tallyExportQuerySchema)) q: TallyExportQuery, @ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
     sendXml(res, await this.tally.exportVouchers(q, actor, user));
   }
-  @Get('tally/ledgers') @RequirePermission('tally.export') async tallyLedgers(@ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
+  @Get('tally/ledgers') @RequireModule('tally') @RequirePermission('tally.export') async tallyLedgers(@ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
     sendXml(res, await this.tally.exportMasters(actor, user));
   }
 }

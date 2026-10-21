@@ -11,6 +11,7 @@ import { CompanyService } from '../company/company.service.js';
 import type { LabelTemplate } from '../generated/prisma/client.js';
 import { MarkdownsService } from '../pricing/markdowns.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
+import { assertModuleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const MAX_LABELS = 2000;
@@ -93,6 +94,7 @@ export class LabelsService {
         wanted.push({ itemId: l.itemId, copies, batch: b?.batchNumber ?? l.newBatchNumber, expiry: iso(b?.expiryDate ?? l.newExpiryOn), packed: iso(b?.manufactureDate ?? l.newManufactureOn) });
       }
     } else if (req.markdownId) {
+      await assertModuleOn(this.prisma, 'seasons');
       const md = await this.markdowns.get(req.markdownId, user);
       for (const l of md.lines) {
         markedDown.set(l.itemId, { was: l.oldPrice, now: l.newPrice });

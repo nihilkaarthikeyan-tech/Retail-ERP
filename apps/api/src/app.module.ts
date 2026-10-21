@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { ModulesModule } from './modules/modules.module.js';
 import { PosModule } from './pos/pos.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { PurchasingModule } from './purchasing/purchasing.module.js';
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module.js';
     ScheduleModule.forRoot(),
     PrismaModule,
     AuditModule,
+    ModulesModule,
     LedgerModule,
     AuthModule,
     HealthModule,

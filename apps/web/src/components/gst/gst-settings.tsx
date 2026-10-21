@@ -10,6 +10,7 @@ import { Alert, Badge, Button, CheckInput, Dialog, SelectInput, TextInput, Texta
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDateTime } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { useLoad } from "@/lib/use-load";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 
@@ -47,6 +48,8 @@ const FREE_SAMPLE_LABELS: Record<GstSettingsDto["freeSampleTax"], string> = {
 
 function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; onSaved: (s: GstSettingsDto) => void }) {
   const [form, setForm] = useState(s);
+  // Plan 12: e-invoice and e-way bill settings only while those modules are on (their values are kept).
+  const { isOn } = useModules();
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -125,7 +128,7 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
         </SelectInput>
       </div>
       <h2>Documents</h2>
-      <CheckInput id="gst-einvoice" label="E-invoicing applies to this business" description="Business invoices are registered on the e-invoice portal (turnover above ₹5 crore)." checked={form.eInvoiceApplies} disabled={!canEdit} onChange={(e) => set("eInvoiceApplies", e.target.checked)} />
+      {isOn("einvoice") ? <CheckInput id="gst-einvoice" label="E-invoicing applies to this business" description="Business invoices are registered on the e-invoice portal (turnover above ₹5 crore)." checked={form.eInvoiceApplies} disabled={!canEdit} onChange={(e) => set("eInvoiceApplies", e.target.checked)} /> : null}
       <CheckInput id="gst-tax-table" label="Show the GST table on till receipts" checked={form.receiptTaxTable} disabled={!canEdit} onChange={(e) => set("receiptTaxTable", e.target.checked)} />
       <CheckInput id="gst-small-sales" label="Show sales under ₹200 as one combined daily invoice in the reports" description="Every bill is still recorded; this only changes the report." checked={form.combineSmallSales} disabled={!canEdit} onChange={(e) => set("combineSmallSales", e.target.checked)} />
       <SelectInput id="gst-free-samples" label="Free samples" value={form.freeSampleTax} disabled={!canEdit} error={errors.freeSampleTax} onChange={(e) => set("freeSampleTax", e.target.value as GstSettingsDto["freeSampleTax"])}>
@@ -135,12 +138,16 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
           </option>
         ))}
       </SelectInput>
+      {isOn("eway") ? (
+      <>
       <h2>Moving goods</h2>
       <div className="form-grid">
         <TextInput id="gst-eway-limit" label="E-way bill needed above (₹)" inputMode="decimal" value={form.eWayLimit} disabled={!canEdit} error={errors.eWayLimit} onChange={(e) => set("eWayLimit", e.target.value)} />
         <TextInput id="gst-transporter-id" label="Usual transporter's GSTIN or id" value={form.defaultTransporterId ?? ""} disabled={!canEdit} error={errors.defaultTransporterId} onChange={(e) => set("defaultTransporterId", e.target.value)} />
         <TextInput id="gst-transporter-name" label="Usual transporter's name" value={form.defaultTransporterName ?? ""} disabled={!canEdit} error={errors.defaultTransporterName} onChange={(e) => set("defaultTransporterName", e.target.value)} />
       </div>
+      </>
+      ) : null}
       {canEdit ? (
         <div className="actions">
           <Button type="submit" variant="primary" busy={busy}>

@@ -32,6 +32,7 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { CatalogueSettingsService } from './catalogue-settings.service.js';
 import { MastersService } from './masters.service.js';
 import { UnitsService } from './units.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const VIEW = 'catalogue.view' as const;
 const MANAGE = 'catalogue.manage' as const;
@@ -117,16 +118,16 @@ export class CatalogueController {
   }
 
   // ---- Variant attributes ----
-  @Get('attributes') @RequirePermission(VIEW) listAttributes() {
+  @Get('attributes') @RequireModule('variants') @RequirePermission(VIEW) listAttributes() {
     return this.masters.listAttributes();
   }
-  @Post('attributes') @RequirePermission(MANAGE) createAttribute(
+  @Post('attributes') @RequireModule('variants') @RequirePermission(MANAGE) createAttribute(
     @Body(new ZodValidationPipe(createAttributeSchema)) input: CreateAttributeInput,
     @ReqActor() actor: Actor,
   ) {
     return this.masters.createAttribute(input, actor);
   }
-  @Patch('attributes/:id') @RequirePermission(MANAGE) updateAttribute(
+  @Patch('attributes/:id') @RequireModule('variants') @RequirePermission(MANAGE) updateAttribute(
     @Param('id', ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(updateAttributeSchema)) input: UpdateAttributeInput,
     @ReqActor() actor: Actor,

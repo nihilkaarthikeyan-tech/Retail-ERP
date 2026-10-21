@@ -9,6 +9,7 @@ import { AuditService } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { ImportJob } from '../generated/prisma/client.js';
+import { assertModuleOn, moduleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { type Importer, type ImportContext, matchColumns, parseRow, type ParsedRow } from './importers.js';
 import { ImportKindsService } from './kinds.service.js';
@@ -41,13 +42,22 @@ export class ImportsService implements OnApplicationBootstrap {
     return i;
   }
 
+  /** Plan 12: styles and variants are imported only while "Sizes and colours" is on. */
+  private async checkModule(kind: ImportKind) {
+    if (kind === 'styles_variants') await assertModuleOn(this.prisma, 'variants');
+  }
+
   /** The kind's columns as they are now (fixed for most kinds). */
   private async shape(i: Importer): Promise<{ fields: Importer['fields']; example: Importer['example'] }> {
     return i.columns ? i.columns() : { fields: i.fields, example: i.example };
   }
 
   async kindsFor(user: CurrentUser) {
-    const allowed = (Object.keys(IMPORT_KINDS) as ImportKind[]).map((k) => this.kinds.get(k)).filter((i) => hasPermission(user, i.importRight) && i.rights.every((r) => hasPermission(user, r)));
+    const variantsOn = await moduleOn(this.prisma, 'variants');
+    const allowed = (Object.keys(IMPORT_KINDS) as ImportKind[])
+      .filter((k) => variantsOn || k !== 'styles_variants')
+      .map((k) => this.kinds.get(k))
+      .filter((i) => hasPermission(user, i.importRight) && i.rights.every((r) => hasPermission(user, r)));
     const out = [];
     for (const i of allowed) out.push({ kind: i.kind, label: IMPORT_KINDS[i.kind], fields: (await this.shape(i)).fields, exportable: !!i.exportRows });
     return out;
@@ -56,6 +66,7 @@ export class ImportsService implements OnApplicationBootstrap {
   /** The template: headings, one example row, and text columns formatted as text (leading zeros kept). */
   async template(kind: string, user: CurrentUser): Promise<{ fileName: string; data: Buffer }> {
     const i = this.importer(kind, user);
+    await this.checkModule(i.kind);
     const { fields, example } = await this.shape(i);
     const headings = fields.map((f) => `${f.label}${f.required ? ' *' : ''}`);
     // A birthday column is text too, so a typed 15-08 is not turned into a date of this year.
@@ -71,6 +82,7 @@ export class ImportsService implements OnApplicationBootstrap {
   /** Reads the file and checks every row; saves the job as "previewed". */
   async preview(fileName: string, buf: Buffer, options: ImportOptions, actor: Actor, user: CurrentUser) {
     const i = this.importer(options.kind, user);
+    await this.checkModule(i.kind);
     const { fields } = await this.shape(i);
     const company = await this.company.current();
     let sheet: Cell[][];
@@ -138,6 +150,7 @@ export class ImportsService implements OnApplicationBootstrap {
   async run(jobId: string, actor: Actor, user: CurrentUser) {
     const job = await this.job(jobId);
     const i = this.importer(job.kind, user);
+    await this.checkModule(i.kind);
     if (job.status !== 'previewed') throw new BadRequestException(job.status === 'running' ? 'This import is already running' : 'This import has already been run; upload the file again');
     const mapped = (job.mapping as { heading: string; field: string }[]).map((m) => m.field);
     const missing = job.mode === 'change' ? [] : (await this.shape(i)).fields.filter((f) => f.required && !mapped.includes(f.key));

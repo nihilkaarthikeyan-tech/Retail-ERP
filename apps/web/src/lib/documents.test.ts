@@ -94,8 +94,8 @@ describe("menu", () => {
     expect(labels({ ...base, permissions: ["labels.print"] })).toContain("Labels");
     expect(labels({ ...base, permissions: ["labels.print"] })).not.toContain("Label templates");
     expect(labels({ ...base, permissions: ["import.opening"] })).toContain("Import from Excel");
-    expect(labels({ ...base, permissions: ["print.settings"] })).toEqual(expect.arrayContaining(["Printing settings", "Label templates"]));
+    expect(labels({ ...base, permissions: ["print.settings"] })).toEqual(expect.arrayContaining(["Settings", "Label templates"]));
     expect(labels({ ...base, permissions: ["golive.manage"] })).not.toContain("Going live");
-    expect(labels({ ...base, isOwnerAdmin: true })).toEqual(expect.arrayContaining(["Labels", "Import from Excel", "Printing settings", "Label templates", "Going live"]));
+    expect(labels({ ...base, isOwnerAdmin: true })).toEqual(expect.arrayContaining(["Labels", "Import from Excel", "Settings", "Label templates", "Going live"]));
   });
 });

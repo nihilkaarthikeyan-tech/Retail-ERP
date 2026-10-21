@@ -13,6 +13,7 @@ import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups, showMoney } from "@/lib/catalogue";
 import { STATUS_LABELS } from "@/lib/parties";
+import { useModules } from "@/lib/modules";
 import type { CustomerDto, CustomerPage, PartyGroupNode } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
@@ -25,6 +26,8 @@ interface Filters {
 }
 
 export function CustomersList() {
+  // Plan 12: credit limits only while "Credit sales" is on (saved values are kept).
+  const creditOn = useModules().isOn("credit_sales");
   const params = useSearchParams();
   const router = useRouter();
   const { user } = useAuth();
@@ -71,7 +74,7 @@ export function CustomersList() {
     { key: "mobile", header: "Mobile", render: (c) => (c.mobile ? <span className="mono">{c.mobile}</span> : "—") },
     { key: "group", header: "Group", render: (c) => c.customerGroup.name },
     { key: "gstin", header: "GSTIN", render: (c) => (c.gstin ? <span className="mono">{c.gstin}</span> : "—") },
-    { key: "credit", header: "Credit limit", align: "right", render: (c) => (c.isWalkIn ? "—" : showMoney(c.creditLimit)) },
+    ...(creditOn ? [{ key: "credit", header: "Credit limit", align: "right", render: (c) => (c.isWalkIn ? "—" : showMoney(c.creditLimit)) } satisfies Column<CustomerDto>] : []),
     { key: "status", header: "Status", render: (c) => <PartyStatusBadge status={c.status} /> },
   ];
 

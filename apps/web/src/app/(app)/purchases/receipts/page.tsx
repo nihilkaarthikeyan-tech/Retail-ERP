@@ -11,6 +11,7 @@ import { Alert, Button, DataTable, SelectInput, TextInput, type Column } from "@
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { type GoodsReceiptHeader, type GoodsReceiptStatus, type Page, purchaseRights, RECEIPT_STATUS_LABELS, rupees } from "@/lib/purchasing";
 import { showQuantity, storesFromLocations } from "@/lib/stock";
 import type { PartyRef } from "@/lib/types";
@@ -22,6 +23,8 @@ export default function GoodsReceiptsPage() {
   const { user } = useAuth();
   const rights = purchaseRights(user);
   const locations = useStockLocations();
+  // Plan 12: the sale-or-return filter only while that module is on.
+  const consignmentOn = useModules().isOn("consignment");
   const [filters, setFilters] = useState({ status: "", storeId: "", isReturn: "", isConsignment: "", from: "", to: "" });
   const [supplier, setSupplier] = useState<PartyRef | null>(null);
   const [page, setPage] = useState(1);
@@ -104,11 +107,13 @@ export default function GoodsReceiptsPage() {
           <option value="false">Receipts only</option>
           <option value="true">Returns only</option>
         </SelectInput>
-        <SelectInput id="grn-terms" label="Terms" value={filters.isConsignment} onChange={(e) => setFilter("isConsignment", e.target.value)}>
-          <option value="">All</option>
-          <option value="false">Bought outright</option>
-          <option value="true">Sale or return</option>
-        </SelectInput>
+        {consignmentOn ? (
+          <SelectInput id="grn-terms" label="Terms" value={filters.isConsignment} onChange={(e) => setFilter("isConsignment", e.target.value)}>
+            <option value="">All</option>
+            <option value="false">Bought outright</option>
+            <option value="true">Sale or return</option>
+          </SelectInput>
+        ) : null}
         <TextInput id="grn-from" label="From" type="date" value={filters.from} onChange={(e) => setFilter("from", e.target.value)} />
         <TextInput id="grn-to" label="To" type="date" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} />
         <PartyPicker

@@ -27,6 +27,7 @@ import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { ItemsService } from './items.service.js';
 import { SeasonsService } from './seasons.service.js';
+import { RequireModule } from '../modules/require-module.js';
 
 const imageSchema = z.object({ mimeType: z.string().max(40), dataBase64: z.string().min(1).max(800_000) });
 type ImageInput = z.infer<typeof imageSchema>;
@@ -103,6 +104,7 @@ export class ItemsController {
 
   /** Plan 11 B2: copies the style's MRP, HSN, brand, group, maximum discount, description and season to all its variants. */
   @Post('items/:id/apply-to-variants')
+  @RequireModule('variants')
   @HttpCode(200)
   @RequirePermission('catalogue.manage')
   applyToVariants(@Param('id', ParseUUIDPipe) id: string, @ReqActor() actor: Actor) {
@@ -110,12 +112,14 @@ export class ItemsController {
   }
 
   @Get('items/:id/variants')
+  @RequireModule('variants')
   @RequirePermission('catalogue.view')
   variants(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser) {
     return this.items.listVariants(id, user);
   }
 
   @Post('items/:id/variants')
+  @RequireModule('variants')
   @RequirePermission('catalogue.manage')
   createVariants(
     @Param('id', ParseUUIDPipe) id: string,
@@ -129,18 +133,21 @@ export class ItemsController {
   // ---- Seasons (plan 11 C4) ----
 
   @Get('seasons')
+  @RequireModule('seasons')
   @RequirePermission('catalogue.view')
   listSeasons() {
     return this.seasons.list();
   }
 
   @Post('seasons')
+  @RequireModule('seasons')
   @RequirePermission('catalogue.manage')
   createSeason(@Body(new ZodValidationPipe(createSeasonSchema)) input: CreateSeasonInput, @ReqActor() actor: Actor) {
     return this.seasons.create(input, actor);
   }
 
   @Patch('seasons/:id')
+  @RequireModule('seasons')
   @RequirePermission('catalogue.manage')
   updateSeason(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(updateSeasonSchema)) input: UpdateSeasonInput, @ReqActor() actor: Actor) {
     return this.seasons.update(id, input, actor);

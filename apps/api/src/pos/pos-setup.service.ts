@@ -158,37 +158,40 @@ export class PosSetupService {
   async createTill(input: TillInput, actor: Actor, user: CurrentUser) {
     const company = await this.common.currentCompany();
     assertStoreAccess(user, input.storeId);
-    await this.checkTill(this.prisma, company.id, input.storeId, input);
-    if (await this.prisma.till.findUnique({ where: { companyId_code: { companyId: company.id, code: input.code } } })) throw new ConflictException(`Till ${input.code} already exists`);
-    const store = await this.prisma.store.findUniqueOrThrow({ where: { id: input.storeId } });
+    return this.prisma.$transaction((tx) => this.createTillIn(tx, company.id, input, actor));
+  }
+
+  /** Shared with the guided setup (plan 12), which makes the first tills in its own transaction. */
+  async createTillIn(tx: Db, companyId: string, input: TillInput, actor: Actor) {
+    await this.checkTill(tx, companyId, input.storeId, input);
+    if (await tx.till.findUnique({ where: { companyId_code: { companyId, code: input.code } } })) throw new ConflictException(`Till ${input.code} already exists`);
+    const store = await tx.store.findUniqueOrThrow({ where: { id: input.storeId } });
     // Plan 08 (CGST rule 46(b)): bill numbers PREFIX/2627/000001 stay within 16 characters.
-    if (input.numberPrefix && (await this.common.invoicePrefixTaken(this.prisma, company.id, input.numberPrefix, null))) throw new ConflictException(`Invoice prefix ${input.numberPrefix} is used by another till`);
-    const numberPrefix = input.numberPrefix ?? (await this.common.freeInvoicePrefix(this.prisma, company.id, store.code, input.code, null));
-    return this.prisma.$transaction(async (tx) => {
-      const t = await tx.till.create({
-        data: {
-          companyId: company.id,
-          storeId: input.storeId,
-          code: input.code,
-          name: input.name,
-          locationId: input.locationId,
-          priceListId: input.priceListId,
-          // Bill numbers: PREFIX/2627/000001, made by the till itself (pos-offline §3).
-          seriesKind: numberPrefix,
-          cashierDiscountPercent: input.cashierDiscountPercent ?? '5',
-          allowPriceChange: input.allowPriceChange ?? false,
-          autoPrint: input.autoPrint ?? true,
-          receiptFooter: input.receiptFooter ?? null,
-          active: input.active ?? true,
-          paymentMethods: { create: input.paymentMethods.map((m) => ({ paymentMethodId: m.paymentMethodId, isDefault: !!m.isDefault })) },
-          createdById: actor.userId,
-          updatedById: actor.userId,
-        },
-        include: { store: { select: { id: true, code: true, name: true } }, paymentMethods: true, devices: true },
-      });
-      await this.audit.record(tx, actor, { action: 'create', entityType: 'till', entityId: t.id, changes: { code: t.code, store: store.code } });
-      return tillDto(t);
+    if (input.numberPrefix && (await this.common.invoicePrefixTaken(tx, companyId, input.numberPrefix, null))) throw new ConflictException(`Invoice prefix ${input.numberPrefix} is used by another till`);
+    const numberPrefix = input.numberPrefix ?? (await this.common.freeInvoicePrefix(tx, companyId, store.code, input.code, null));
+    const t = await tx.till.create({
+      data: {
+        companyId,
+        storeId: input.storeId,
+        code: input.code,
+        name: input.name,
+        locationId: input.locationId,
+        priceListId: input.priceListId,
+        // Bill numbers: PREFIX/2627/000001, made by the till itself (pos-offline §3).
+        seriesKind: numberPrefix,
+        cashierDiscountPercent: input.cashierDiscountPercent ?? '5',
+        allowPriceChange: input.allowPriceChange ?? false,
+        autoPrint: input.autoPrint ?? true,
+        receiptFooter: input.receiptFooter ?? null,
+        active: input.active ?? true,
+        paymentMethods: { create: input.paymentMethods.map((m) => ({ paymentMethodId: m.paymentMethodId, isDefault: !!m.isDefault })) },
+        createdById: actor.userId,
+        updatedById: actor.userId,
+      },
+      include: { store: { select: { id: true, code: true, name: true } }, paymentMethods: true, devices: true },
     });
+    await this.audit.record(tx, actor, { action: 'create', entityType: 'till', entityId: t.id, changes: { code: t.code, store: store.code } });
+    return tillDto(t);
   }
 
   async updateTill(id: string, input: UpdateTillInput, actor: Actor, user: CurrentUser) {

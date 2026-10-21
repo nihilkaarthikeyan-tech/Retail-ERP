@@ -28,6 +28,8 @@ interface PayDialogProps {
   namedCustomer?: boolean;
   /** A refund may go back on account (the original bill was paid on account). */
   refundOnAccount?: boolean;
+  /** Plan 12: "Credit sales" is on, so a sale may be put on account. Refunds on account stay possible. */
+  creditSales?: boolean;
   onChange: (payments: DraftPayment[]) => void;
   onFinish: () => void;
   onClose: () => void;
@@ -45,10 +47,10 @@ function sum(rows: DraftPayment[]): Decimal {
 
 export const ON_ACCOUNT_WALK_IN = "On account is only for a named customer. Close this and choose the customer with F6 Customer.";
 
-export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, onChange, onFinish, onClose }: PayDialogProps) {
+export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, creditSales = true, onChange, onFinish, onClose }: PayDialogProps) {
   const refund = net.isNegative();
   const due = net.abs();
-  const usable = methods.filter((m) => m.active && (!refund || m.allowRefund) && (m.kind !== "on_account" || !refund || (refundOnAccount && namedCustomer)));
+  const usable = methods.filter((m) => m.active && (!refund || m.allowRefund) && (m.kind !== "on_account" || (refund ? refundOnAccount && namedCustomer : creditSales)));
   const rows = draft.payments;
   const check = checkPayments(net, rows, methods);
   const [notice, setNotice] = useState<string | null>(null);

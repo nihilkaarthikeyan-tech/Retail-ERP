@@ -13,6 +13,7 @@ import { api, query } from "@/lib/api";
 import { type AccountDto, accountRights, type CashBookDto, documentHref, documentLabel, fyStart, type PartyKind } from "@/lib/accounts";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { useModules } from "@/lib/modules";
 import { downloadCsv, rupees } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
 import type { PartyRef } from "@/lib/types";
@@ -732,7 +733,9 @@ export function AccountsReports() {
   const rights = accountRights(user);
   const chart = useChart();
   const { stores } = useOrderStores();
-  const tabs = ACCOUNTS_REPORT_TABS.filter((t) => rights.view || (!t.viewOnly && rights.payments));
+  // Plan 12: the cash and bank books belong to "Expenses and cash book".
+  const booksOn = useModules().isOn("expenses");
+  const tabs = ACCOUNTS_REPORT_TABS.filter((t) => (rights.view || (!t.viewOnly && rights.payments)) && (booksOn || (t.id !== "cash-book" && t.id !== "bank-book")));
   const requested = params.get("tab") as AccountsReportTab | null;
   const [chosenTab, setTab] = useState<AccountsReportTab | null>(requested);
   // The rights are known once the user has loaded; a tab the user may not see falls back to the first allowed.

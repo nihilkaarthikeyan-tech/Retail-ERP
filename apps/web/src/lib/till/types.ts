@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Shapes the till works with: what GET /pos/till/:id/snapshot sends, what
 // POST /pos/bills answers, and the till's own records (pos-offline plan §2).
+import type { ModuleKey } from "shared";
 
 export interface SnapPaymentMethod {
   id: string;
@@ -175,6 +176,8 @@ export interface TillSnapshot {
   reserved?: { itemId: string; quantity: string }[];
   /** Plan 11 C1: the store's salespeople in use. */
   salesStaff?: SnapSalesStaff[];
+  /** Plan 12: which optional modules are on; a missing map or key means on (older saved copies keep everything). */
+  modules?: Partial<Record<ModuleKey, boolean>>;
 }
 
 /** The snapshot as kept on the till, with when it was last refreshed. */
