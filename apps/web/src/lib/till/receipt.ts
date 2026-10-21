@@ -10,9 +10,9 @@
 //   POST /drawer/open  opens the cash drawer through the printer
 //   GET  /status       → { ok, printer, drawer }
 //   Every request carries the header x-helper-token (paired once).
-import { Decimal } from "shared";
-import { type ComputedBill, type ComputedPart, type DraftDelivery, offersUsed } from "./pricing";
-import type { Receipt, SnapPaymentMethod, SnapSalesStaff, SnapTill } from "./types";
+import { BILL_OF_SUPPLY_DECLARATION, Decimal, gstDocumentTitle, hsnForPrint, INDIAN_STATES } from "shared";
+import { type ComputedBill, type ComputedPart, type DraftBuyer, type DraftDelivery, offersUsed } from "./pricing";
+import type { Receipt, ReceiptGst, SnapPaymentMethod, SnapSalesStaff, SnapTill } from "./types";
 
 /** Plan 11 B4 and C1: what the till's own receipt shows about the salesperson and the delivery. */
 export interface LocalReceiptExtras {
@@ -20,6 +20,34 @@ export interface LocalReceiptExtras {
   salesStaffId?: string | null;
   delivery?: DraftDelivery | null;
   deliveryCharge?: Decimal | null;
+  /** Plan 08 G4, G5: the buyer typed on the bill (the customer's GSTIN is used when none was typed). */
+  buyer?: DraftBuyer | null;
+  customer?: { name: string; gstin: string | null } | null;
+  /** Plan 08 G6: the bill a return is against. */
+  originalNumber?: string | null;
+}
+
+const stateOf = (code: string | null | undefined) => (code ? { code, name: INDIAN_STATES[code] ?? code } : null);
+
+/** Plan 08: the GST part of the till's own receipt, shaped like the server's. */
+function localGst(bill: ComputedBill, kind: "sale" | "return", till: SnapTill, extras: LocalReceiptExtras): ReceiptGst {
+  const supply = bill.supply;
+  const b = extras.buyer;
+  const gstin = kind === "sale" ? (b?.gstin.trim().toUpperCase() || (supply.invoiceKind === "business" || supply.invoiceKind === "bill_of_supply" ? (extras.customer?.gstin ?? null) : null)) : null;
+  const name = b?.name.trim() || (gstin ? (extras.customer?.name ?? null) : null);
+  const invoiceKind = kind === "sale" ? supply.invoiceKind : (bill.ret?.lines.some((l) => !l.tax.igst.isZero()) ? "business" : "consumer");
+  return {
+    title: gstDocumentTitle(kind, invoiceKind),
+    invoiceKind,
+    sellerGstin: till.company.gstin,
+    buyer: kind === "sale" && (gstin || name || b?.address.trim()) ? { name, gstin, address: b?.address.trim() || null, state: stateOf(gstin ? gstin.slice(0, 2) : b?.stateCode) } : null,
+    placeOfSupply: kind === "sale" ? stateOf(supply.placeOfSupply) : null,
+    interState: kind === "sale" ? supply.interState : !!bill.ret?.igst && !bill.ret.igst.isZero(),
+    reverseCharge: false,
+    original: kind === "return" && extras.originalNumber ? { number: extras.originalNumber, date: "" } : null,
+    declaration: kind === "sale" && supply.invoiceKind === "bill_of_supply" ? BILL_OF_SUPPLY_DECLARATION : null,
+    creditNoteLate: false,
+  };
 }
 
 export const HELPER_URL = "http://127.0.0.1:47120";
@@ -44,7 +72,7 @@ export function withHeader(r: Receipt, till: SnapTill, extra: { cashier?: string
   };
 }
 
-function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string, o: { soldAt: string; till: SnapTill; provisional: boolean; payments: Receipt["payments"]; change: Decimal; extras: LocalReceiptExtras }): Receipt {
+function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string, o: { soldAt: string; till: SnapTill; provisional: boolean; payments: Receipt["payments"]; change: Decimal; extras: LocalReceiptExtras; gst: ReceiptGst }): Receipt {
   const staff = new Map((o.extras.staff ?? []).map((x) => [x.id, x]));
   const d = kind === "sale" ? o.extras.delivery : null;
   const byRate = new Map<string, { taxable: Decimal; cgst: Decimal; sgst: Decimal; igst: Decimal }>();
@@ -62,10 +90,11 @@ function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string
     soldAt: o.soldAt,
     till: o.till.code,
     footer: o.till.receiptFooter,
+    gst: o.gst,
     lines: part.lines.map((l) => ({
       name: l.item.name,
       code: l.item.code,
-      hsn: l.item.hsnCode,
+      hsn: hsnForPrint(l.item.hsnCode, o.till.gst?.hsnDigits ?? 4) || null,
       quantity: l.quantity.toString(),
       price: l.price.toFixed(2),
       discount: l.discountAmount.toFixed(2),
@@ -78,7 +107,7 @@ function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string
     offers: kind === "sale" ? offersUsed(part.lines).map((u) => ({ name: u.offer.name, saving: u.saving.toFixed(2) })) : [],
     salesStaff: kind === "sale" && o.extras.salesStaffId ? (staff.get(o.extras.salesStaffId)?.name ?? null) : null,
     delivery: d ? { name: d.name.trim() || null, address: d.address.trim(), phone: d.phone.trim() || null, deliverOn: d.deliverOn || null, chargeAmount: (o.extras.deliveryCharge ?? new Decimal(0)).toFixed(2) } : null,
-    gstTable: [...byRate.entries()].map(([rate, r]) => ({ rate, taxable: r.taxable.toFixed(2), cgst: r.cgst.toFixed(2), sgst: r.sgst.toFixed(2), igst: r.igst.toFixed(2) })),
+    gstTable: o.gst.invoiceKind === "bill_of_supply" || o.till.gst?.receiptTaxTable === false ? [] : [...byRate.entries()].map(([rate, r]) => ({ rate, taxable: r.taxable.toFixed(2), cgst: r.cgst.toFixed(2), sgst: r.sgst.toFixed(2), igst: r.igst.toFixed(2) })),
     totals: { gross: part.gross.toFixed(2), discount: part.discount.toFixed(2), taxable: part.taxable.toFixed(2), rounding: part.rounding.toFixed(2), total: part.total.toFixed(2) },
     payments: o.payments,
     change: o.change.toFixed(2),
@@ -97,8 +126,8 @@ export function localReceipts(
   // The bill that carries the payments, as on the server: the sale unless money goes back.
   const holder = bill.net.gte(0) ? (bill.sale ? "sale" : "return") : bill.ret ? "return" : "sale";
   const out: Receipt[] = [];
-  if (bill.ret && numbers.ret) out.push(partReceipt(bill.ret, "return", numbers.ret, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "return" ? pays : [], change: holder === "return" ? o.change : new Decimal(0), extras }));
-  if (bill.sale && numbers.sale) out.push(partReceipt(bill.sale, "sale", numbers.sale, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "sale" ? pays : [], change: holder === "sale" ? o.change : new Decimal(0), extras }));
+  if (bill.ret && numbers.ret) out.push(partReceipt(bill.ret, "return", numbers.ret, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "return" ? pays : [], change: holder === "return" ? o.change : new Decimal(0), extras, gst: localGst(bill, "return", o.till, extras) }));
+  if (bill.sale && numbers.sale) out.push(partReceipt(bill.sale, "sale", numbers.sale, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "sale" ? pays : [], change: holder === "sale" ? o.change : new Decimal(0), extras, gst: localGst(bill, "sale", o.till, extras) }));
   return out;
 }
 

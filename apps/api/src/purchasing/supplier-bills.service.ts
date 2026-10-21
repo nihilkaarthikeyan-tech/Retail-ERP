@@ -20,6 +20,8 @@ import {
   QUANTITY_TOLERANCE,
   roundMoney,
   type SupplierBillLineInput,
+  taxSituationOf,
+  unitCostPerBasicUnit,
   type SupplierBillQuery,
   type UpdateSupplierBillInput,
 } from 'shared';
@@ -28,6 +30,7 @@ import { assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma, SupplierBill, SupplierBillKind, Supplier } from '../generated/prisma/client.js';
 import { postingInstant } from '../inventory/stock-documents.service.js';
+import { StockEngine } from '../inventory/stock-engine.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -62,6 +65,9 @@ interface ResolvedBillLine {
   priced: ReturnType<PurchaseCommon['price']>;
   priceDifference: Decimal;
   accountRole: string;
+  /** Plan 08 G8: false = the tax goes into the cost of the goods. */
+  creditClaimable: boolean;
+  hsnCode: string | null;
 }
 
 interface PreparedBill {
@@ -71,6 +77,10 @@ interface PreparedBill {
   dueDate: string;
   paymentTermsId: string | null;
   lines: ResolvedBillLine[];
+  /** Plan 08 G1 and G8. */
+  reverseCharge: boolean;
+  placeOfSupply: string;
+  gstRegistrationId: string | null;
   /** Bills that receive goods: the receipt lines to create on finalising. */
   receipt?: { header: ReceiptHeader; lines: ResolvedReceiptLine[] };
 }
@@ -88,6 +98,7 @@ export class SupplierBillsService {
     private readonly receipts: GoodsReceiptsService,
     private readonly postings: PurchasePostings,
     private readonly ledger: LedgerService,
+    private readonly engine: StockEngine,
   ) {}
 
   // ---- Reading ----
@@ -151,8 +162,9 @@ export class SupplierBillsService {
           paymentTermsId: prepared.paymentTermsId,
           dueDate: fromIso(prepared.dueDate),
           remarks: input.remarks ?? null,
-          ...this.totalsOf(prepared.lines),
-          lines: { create: prepared.lines.map((l, i) => billLineData(l, i)) },
+          ...this.gstOf(prepared),
+          ...this.totalsOf(prepared.lines, prepared.reverseCharge),
+          lines: { create: prepared.lines.map((l, i) => billLineData(l, i, prepared.reverseCharge)) },
           createdById: actor.userId,
           updatedById: actor.userId,
         },
@@ -176,6 +188,7 @@ export class SupplierBillsService {
       storeId: input.storeId !== undefined ? input.storeId : before.storeId,
       paymentTermsId: input.paymentTermsId !== undefined ? input.paymentTermsId : before.paymentTermsId,
       remarks: input.remarks !== undefined ? input.remarks : before.remarks,
+      reverseCharge: input.reverseCharge !== undefined ? input.reverseCharge : before.reverseCharge,
       lines: input.lines ?? (await this.storedLineInputs(this.prisma, before)),
     };
     const prepared = await this.prepare(this.prisma, before.companyId, before.kind as CreateSupplierBillInput['kind'], merged, user, id);
@@ -193,9 +206,10 @@ export class SupplierBillsService {
           paymentTermsId: prepared.paymentTermsId,
           dueDate: fromIso(prepared.dueDate),
           remarks: merged.remarks ?? null,
-          ...this.totalsOf(prepared.lines),
+          ...this.gstOf(prepared),
+          ...this.totalsOf(prepared.lines, prepared.reverseCharge),
           updatedById: actor.userId,
-          lines: { deleteMany: {}, create: prepared.lines.map((l, i) => billLineData(l, i)) },
+          lines: { deleteMany: {}, create: prepared.lines.map((l, i) => billLineData(l, i, prepared.reverseCharge)) },
         },
       });
       if (prepared.receipt) await this.linkDraftReceipt(tx, before.companyId, id, prepared.receipt, actor, before.receiptId);
@@ -211,7 +225,7 @@ export class SupplierBillsService {
     db: Db,
     companyId: string,
     kind: CreateSupplierBillInput['kind'],
-    input: { supplierId: string; supplierBillNo: string; supplierBillDate: string; postingDate: string; storeId?: string | null; paymentTermsId?: string | null; lines: SupplierBillLineInput[] },
+    input: { supplierId: string; supplierBillNo: string; supplierBillDate: string; postingDate: string; storeId?: string | null; paymentTermsId?: string | null; reverseCharge?: boolean | null; lines: SupplierBillLineInput[] },
     user: CurrentUser,
     selfId: string | null,
   ): Promise<PreparedBill> {
@@ -222,7 +236,18 @@ export class SupplierBillsService {
     const financialYearId = billYear?.id ?? postingYear.id;
     await this.assertBillNoFree(db, companyId, supplier.id, input.supplierBillNo, financialYearId, selfId);
 
-    const interState = await this.common.interState(db, supplier, input.storeId ?? null);
+    // Plan 08 G1: the place of supply is the receiving store (for bills against receipts, the receipts' store).
+    let placeStore = input.storeId ?? null;
+    if (!placeStore && kind === 'against_receipt') {
+      const first = input.lines.find((l) => l.receiptLineId);
+      if (first) placeStore = (await db.goodsReceiptLine.findUnique({ where: { id: first.receiptLineId! }, select: { receipt: { select: { storeId: true } } } }))?.receipt.storeId ?? null;
+    }
+    const place = await this.common.placeOfSupply(db, supplier, placeStore);
+    const interState = place.interState;
+    // Plan 08 G7, G8: a composition company claims no input credit; a reverse-charge supplier's bills are reverse charge unless changed.
+    const composition = await this.common.isComposition(db, companyId);
+    const reverseCharge = input.reverseCharge ?? taxSituationOf(supplier.gstin, supplier.taxSituation) === 'reverse_charge';
+    const claimable = (l: SupplierBillLineInput | undefined) => !composition && (l?.creditClaimable ?? true);
     const lines: ResolvedBillLine[] = [];
     let storeId: string | null = input.storeId ?? null;
     let receipt: PreparedBill['receipt'];
@@ -259,8 +284,10 @@ export class SupplierBillsService {
         { forBill: true },
       );
       receipt = { header, lines: resolved.lines };
-      for (const r of resolved.lines) {
+      for (const [i, r] of resolved.lines.entries()) {
         lines.push({
+          creditClaimable: claimable(input.lines[i]),
+          hsnCode: null,
           receiptLineId: null,
           orderLineId: r.orderLineId,
           itemId: r.itemId,
@@ -311,6 +338,8 @@ export class SupplierBillsService {
           const receiptBasic = D(rl.basicAcceptedQuantity).add(D(rl.basicRejectedQuantity));
           const receiptTaxable = roundMoney(D(rl.taxableAmount).mul(basicQuantity).div(receiptBasic));
           lines.push({
+            creditClaimable: claimable(l),
+            hsnCode: rl.item.hsnCode,
             receiptLineId: rl.id,
             orderLineId: rl.orderLineId,
             itemId: rl.itemId,
@@ -333,6 +362,8 @@ export class SupplierBillsService {
           if (rate == null) throw new BadRequestException(`${info.item.code}: give the price`);
           const priced = this.common.price({ quantity: l.quantity, rate, discountPercent: l.discountPercent, discountAmount: l.discountAmount, gstRate: l.gstRate ?? (await this.common.lastGstRate(db, info.item.id)), cgst: l.cgst, sgst: l.sgst, igst: l.igst }, interState, label);
           lines.push({
+            creditClaimable: claimable(l),
+            hsnCode: info.item.hsnCode,
             receiptLineId: null,
             orderLineId: orderLine?.id ?? null,
             itemId: info.item.id,
@@ -357,9 +388,15 @@ export class SupplierBillsService {
       if (input.supplierBillDate < iso(ol.order.orderDate)!) throw new BadRequestException(`The bill cannot be dated before order ${ol.order.number}`);
     }
 
+    // HSN code on every line (plan 08 G1), as on the item when billed.
+    const missing = lines.filter((l) => l.hsnCode === null).map((l) => l.itemId);
+    if (missing.length) {
+      const hsn = new Map((await db.item.findMany({ where: { id: { in: missing } }, select: { id: true, hsnCode: true } })).map((i) => [i.id, i.hsnCode]));
+      for (const l of lines) if (l.hsnCode === null) l.hsnCode = hsn.get(l.itemId) ?? null;
+    }
     const paymentTermsId = input.paymentTermsId ?? supplier.paymentTermsId ?? null;
     const dueDate = await this.dueDate(db, paymentTermsId, input.supplierBillDate, input.postingDate);
-    return { supplier, storeId, financialYearId, dueDate, paymentTermsId, lines, receipt };
+    return { supplier, storeId, financialYearId, dueDate, paymentTermsId, lines, receipt, reverseCharge, placeOfSupply: place.placeOfSupply, gstRegistrationId: place.gstRegistrationId };
   }
 
   private async dueDate(db: Db, paymentTermsId: string | null, billDate: string, postingDate: string): Promise<string> {
@@ -394,7 +431,10 @@ export class SupplierBillsService {
     const financialYearId = billYear?.id ?? postingYear.id;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${supplier.id}|${input.supplierBillNo.trim().toLowerCase()}`}))`;
     await this.assertBillNoFree(tx, input.companyId, supplier.id, input.supplierBillNo, financialYearId, null);
-    const interState = await this.common.interState(tx, supplier, input.storeId);
+    const place = await this.common.placeOfSupply(tx, supplier, input.storeId);
+    const interState = place.interState;
+    const composition = await this.common.isComposition(tx, input.companyId);
+    const reverseCharge = taxSituationOf(supplier.gstin, supplier.taxSituation) === 'reverse_charge';
 
     const lines: ResolvedBillLine[] = [];
     for (const l of [...input.lines].sort((a, b) => a.receiptLineId.localeCompare(b.receiptLineId))) await tx.$queryRaw`SELECT 1 FROM "GoodsReceiptLine" WHERE "id" = ${l.receiptLineId}::uuid FOR UPDATE`;
@@ -406,6 +446,8 @@ export class SupplierBillsService {
       // Quantities in the item's own unit; the rate is the agreed rate per unit (discounts already in it).
       const priced = this.common.price({ quantity: l.quantity.toString(), rate: l.rate.toString(), gstRate: rl.gstRate.toString() }, interState, rl.item.code);
       lines.push({
+        creditClaimable: !composition,
+        hsnCode: rl.item.hsnCode,
         receiptLineId: rl.id,
         orderLineId: null,
         itemId: rl.itemId,
@@ -441,8 +483,11 @@ export class SupplierBillsService {
         dueDate: fromIso(dueDate),
         status: 'unpaid',
         remarks: input.remarks,
-        ...this.totalsOf(lines),
-        lines: { create: lines.map((l, i) => billLineData(l, i)) },
+        reverseCharge,
+        placeOfSupply: place.placeOfSupply,
+        gstRegistrationId: place.gstRegistrationId,
+        ...this.totalsOf(lines, reverseCharge),
+        lines: { create: lines.map((l, i) => billLineData(l, i, reverseCharge)) },
         finalisedAt: new Date(),
         finalisedById: actor.userId,
         createdById: actor.userId,
@@ -485,10 +530,90 @@ export class SupplierBillsService {
     if (clash) throw new BadRequestException(`Bill number ${clash.supplierBillNo} from this supplier is already recorded as ${clash.number}`);
   }
 
-  private totalsOf(lines: ResolvedBillLine[]) {
-    const t = this.common.totals(lines.map((l) => l.priced));
+  /**
+   * Under reverse charge (plan 08 G8) the supplier is owed the bill without
+   * tax: the total and its rounding leave the tax out, and the tax amount
+   * shown is what the shop pays the government itself.
+   */
+  private totalsOf(lines: ResolvedBillLine[], reverseCharge = false) {
     const priceDifference = lines.reduce((s, l) => s.add(l.priceDifference), new Decimal(0));
-    return { ...t, priceDifference: priceDifference.toFixed(2) };
+    if (!reverseCharge) return { ...this.common.totals(lines.map((l) => l.priced)), priceDifference: priceDifference.toFixed(2) };
+    const zero = new Decimal(0);
+    const owed = this.common.totals(lines.map((l) => ({ taxable: l.priced.taxable, cgst: zero, sgst: zero, igst: zero })));
+    const tax = lines.reduce((s, l) => s.add(l.priced.cgst).add(l.priced.sgst).add(l.priced.igst), zero);
+    return { ...owed, taxAmount: tax.toFixed(2), priceDifference: priceDifference.toFixed(2) };
+  }
+
+  private gstOf(p: PreparedBill) {
+    return { reverseCharge: p.reverseCharge, placeOfSupply: p.placeOfSupply, gstRegistrationId: p.gstRegistrationId };
+  }
+
+  /**
+   * Plan 08 G8: tax that cannot be claimed is added to the cost of the goods.
+   * For goods already received (a bill against a receipt, or a bill that
+   * received them), the receipt line's cost goes up by the tax, the stock
+   * engine re-costs everything after it (what was sold since moves to cost of
+   * goods sold), and goods received not billed takes the other side, which
+   * the bill then clears. Kept with the line's other added costs
+   * (`extraCharges`). Cancelling the bill takes it back (sign −1).
+   * Sale-or-return lines are already sold, so their tax goes to cost of goods
+   * sold in the bill's own posting instead.
+   */
+  private async applyBlockedTax(tx: Db, b: BillRow, sign: 1 | -1, actor: Actor): Promise<void> {
+    if (b.kind === 'debit_note') return;
+    const changes: { entryId: bigint; incomingCost: string }[] = [];
+    const receiptIds = new Set<string>();
+    let wanted = new Decimal(0);
+    let before = new Decimal(0);
+    const entryIds: bigint[] = [];
+    for (const l of [...b.lines].sort((x, y) => (x.receiptLineId ?? '').localeCompare(y.receiptLineId ?? ''))) {
+      if (l.creditClaimable || !l.receiptLineId || l.accountRole === PURCHASE_ACCOUNT_ROLES.consignment) continue;
+      const tax = D(l.cgst).add(D(l.sgst)).add(D(l.igst)).mul(sign);
+      if (tax.isZero()) continue;
+      await tx.$queryRaw`SELECT 1 FROM "GoodsReceiptLine" WHERE "id" = ${l.receiptLineId}::uuid FOR UPDATE`;
+      const rl = await tx.goodsReceiptLine.findUniqueOrThrow({ where: { id: l.receiptLineId } });
+      const extra = D(rl.extraCharges).add(tax);
+      if (extra.lt(0)) throw new BadRequestException('The tax added to the cost of these goods cannot go below zero');
+      const basic = D(rl.basicAcceptedQuantity).add(D(rl.basicRejectedQuantity));
+      const cost = unitCostPerBasicUnit({ taxable: rl.taxableAmount.toString(), extraCharges: extra, basicQuantity: basic });
+      await tx.goodsReceiptLine.update({ where: { id: rl.id }, data: { extraCharges: extra.toFixed(2), unitCost: cost.toFixed(4) } });
+      const entries = await tx.stockLedgerEntry.findMany({ where: { documentId: rl.receiptId, documentLineId: rl.id, kind: 'in', isCancellation: false } });
+      for (const e of entries) {
+        changes.push({ entryId: e.id, incomingCost: cost.toFixed(4) });
+        entryIds.push(e.id);
+        before = before.add(D(e.valueChange));
+      }
+      if (entries.length) wanted = wanted.add(tax);
+      receiptIds.add(rl.receiptId);
+    }
+    if (!changes.length) return;
+    await this.engine.revalueIncoming(tx, changes, { allowNegative: true, actorId: actor.userId, counterRole: 'goods_received_not_billed', ledgerRemark: `${sign > 0 ? 'GST not claimable added to cost' : 'GST not claimable taken out of cost'}: ${b.number}` });
+    // Per-unit rounding: the few paise between the tax and the change in stock value go to cost of goods sold, so goods received not billed clears exactly.
+    const after = (await tx.stockLedgerEntry.findMany({ where: { id: { in: entryIds } }, select: { valueChange: true } })).reduce((s, e) => s.add(D(e.valueChange)), new Decimal(0));
+    const rounding = wanted.sub(after.sub(before));
+    // When cancelling, the bill's own entries (with this rounding) are already reversed.
+    if (sign > 0 && !rounding.isZero()) {
+      const storeId = (await tx.goodsReceipt.findUniqueOrThrow({ where: { id: [...receiptIds][0] }, select: { storeId: true } })).storeId;
+      await this.ledger.post(tx, {
+        companyId: b.companyId,
+        date: iso(b.postingDate)!,
+        documentType: 'supplier_bill',
+        documentId: b.id,
+        documentNumber: b.number,
+        storeId,
+        actorId: actor.userId,
+        whenLocked: 'next_open',
+        remark: 'Rounding of GST added to cost',
+        lines: [
+          { role: 'cost_of_goods_sold', storeId, debit: rounding },
+          { role: 'goods_received_not_billed', storeId, credit: rounding },
+        ],
+      });
+    }
+    for (const rid of receiptIds) {
+      const sum = await tx.stockLedgerEntry.aggregate({ where: { documentId: rid, isCancellation: false }, _sum: { valueChange: true } });
+      await tx.goodsReceipt.update({ where: { id: rid }, data: { stockValue: D(sum._sum.valueChange ?? '0').toFixed(2) } });
+    }
   }
 
   // ---- Finalising ----
@@ -520,7 +645,7 @@ export class SupplierBillsService {
       this.prisma,
       b.companyId,
       b.kind as CreateSupplierBillInput['kind'],
-      { supplierId: b.supplierId, supplierBillNo: b.supplierBillNo, supplierBillDate: iso(b.supplierBillDate)!, postingDate: iso(b.postingDate)!, storeId: b.storeId, paymentTermsId: b.paymentTermsId, lines: await this.storedLineInputs(this.prisma, b) },
+      { supplierId: b.supplierId, supplierBillNo: b.supplierBillNo, supplierBillDate: iso(b.supplierBillDate)!, postingDate: iso(b.postingDate)!, storeId: b.storeId, paymentTermsId: b.paymentTermsId, reverseCharge: b.reverseCharge, lines: await this.storedLineInputs(this.prisma, b) },
       user,
       id,
     );
@@ -568,6 +693,7 @@ export class SupplierBillsService {
 
         warnings = warnings.concat(await this.applyToOrders(tx, b, 1, user));
         await tx.supplierBill.update({ where: { id }, data: { receiptId } });
+        await this.applyBlockedTax(tx, await this.getRow(tx, id), 1, actor);
         await this.postings.supplierBill(tx, id, actor.userId);
         await tx.supplierBill.update({
           where: { id },
@@ -651,6 +777,7 @@ export class SupplierBillsService {
           }
           if (b.kind === 'debit_note') await this.undoDebitNote(tx, b, reason, actor, user);
           else {
+            await this.applyBlockedTax(tx, b, -1, actor);
             if (b.kind === 'against_receipt') {
               for (const l of b.lines) {
                 const rl = await tx.goodsReceiptLine.findUniqueOrThrow({ where: { id: l.receiptLineId! } });
@@ -772,12 +899,17 @@ export class SupplierBillsService {
             cgst: cgst.neg().toFixed(2),
             sgst: sgst.neg().toFixed(2),
             igst: igst.neg().toFixed(2),
-            lineTotal: taxable.add(cgst).add(sgst).add(igst).neg().toFixed(2),
+            // Under reverse charge the supplier is owed nothing for the tax (plan 08 G8).
+            lineTotal: (original.reverseCharge ? taxable : taxable.add(cgst).add(sgst).add(igst)).neg().toFixed(2),
             accountRole: p.line.accountRole,
             returnOfLineId: p.line.id,
+            creditClaimable: p.line.creditClaimable,
+            hsnCode: p.line.hsnCode,
           };
         });
-        const totals = this.common.totals(lineData.map((l) => ({ taxable: D(l.taxableAmount), cgst: D(l.cgst), sgst: D(l.sgst), igst: D(l.igst) })));
+        const zero = new Decimal(0);
+        const totals = this.common.totals(lineData.map((l) => ({ taxable: D(l.taxableAmount), ...(original.reverseCharge ? { cgst: zero, sgst: zero, igst: zero } : { cgst: D(l.cgst), sgst: D(l.sgst), igst: D(l.igst) }) })));
+        if (original.reverseCharge) totals.taxAmount = lineData.reduce((s, l) => s.add(D(l.cgst)).add(D(l.sgst)).add(D(l.igst)), zero).toFixed(2);
         let returnReceiptId: string | null = null;
         // A bill that received the goods: the goods physically go back, at their original cost.
         if (original.kind === 'receives_goods' && original.receiptId) {
@@ -807,6 +939,9 @@ export class SupplierBillsService {
             returnOfId: original.id,
             receiptId: returnReceiptId,
             remarks: input.reason,
+            reverseCharge: original.reverseCharge,
+            placeOfSupply: original.placeOfSupply,
+            gstRegistrationId: original.gstRegistrationId,
             taxableAmount: totals.taxableAmount,
             taxAmount: totals.taxAmount,
             roundingAdjustment: totals.roundingAdjustment,
@@ -867,7 +1002,10 @@ export class SupplierBillsService {
   private async storedLineInputs(db: Db, b: BillRow): Promise<SupplierBillLineInput[]> {
     if (b.kind !== 'receives_goods' || !b.receiptId) return b.lines.map((l) => billLineInputOf(l));
     const receipt = await this.receipts.getRow(db, b.receiptId);
+    // The bill line keeps whether its tax can be claimed (plan 08 G8); the receipt line keeps the stock details.
+    const claimable = new Map(b.lines.filter((l) => l.receiptLineId).map((l) => [l.receiptLineId!, l.creditClaimable]));
     return receipt.lines.map((rl) => ({
+      creditClaimable: claimable.get(rl.id) ?? true,
       orderLineId: rl.orderLineId,
       itemId: rl.itemId,
       unitId: rl.unitId,
@@ -921,6 +1059,10 @@ export class SupplierBillsService {
       receiptId: b.receiptId,
       remarks: b.remarks,
       cancelReason: b.cancelReason,
+      // Plan 08 G1, G8.
+      reverseCharge: b.reverseCharge,
+      placeOfSupply: b.placeOfSupply,
+      gstRegistrationId: b.gstRegistrationId,
       createdAt: b.createdAt,
       finalisedAt: b.finalisedAt,
     };
@@ -945,6 +1087,8 @@ export class SupplierBillsService {
         orderLineId: l.orderLineId,
         order: l.orderLine ? { id: l.orderLine.order.id, number: l.orderLine.order.number } : null,
         accountRole: l.accountRole,
+        hsnCode: l.hsnCode,
+        creditClaimable: l.creditClaimable,
         ...(prices
           ? {
               rate: l.rate.toFixed(2),
@@ -964,7 +1108,7 @@ export class SupplierBillsService {
   }
 }
 
-function billLineData(l: ResolvedBillLine, i: number) {
+function billLineData(l: ResolvedBillLine, i: number, reverseCharge = false) {
   return {
     lineNo: i + 1,
     receiptLineId: l.receiptLineId,
@@ -983,9 +1127,12 @@ function billLineData(l: ResolvedBillLine, i: number) {
     cgst: l.priced.cgst.toFixed(2),
     sgst: l.priced.sgst.toFixed(2),
     igst: l.priced.igst.toFixed(2),
-    lineTotal: l.priced.lineTotal.toFixed(2),
+    // Under reverse charge the supplier is owed the line without tax (plan 08 G8).
+    lineTotal: (reverseCharge ? l.priced.taxable : l.priced.lineTotal).toFixed(2),
     priceDifference: l.priceDifference.toFixed(2),
     accountRole: l.accountRole,
+    creditClaimable: l.creditClaimable,
+    hsnCode: l.hsnCode,
   };
 }
 
@@ -1004,6 +1151,7 @@ function billLineInputOf(l: BillRow['lines'][number]): SupplierBillLineInput {
     cgst: l.cgst.toString(),
     sgst: l.sgst.toString(),
     igst: l.igst.toString(),
+    creditClaimable: l.creditClaimable,
   };
 }
 

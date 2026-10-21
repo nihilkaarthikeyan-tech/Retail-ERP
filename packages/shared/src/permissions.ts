@@ -87,6 +87,13 @@ export const PERMISSIONS = {
   'alterations.manage': 'Take alteration jobs, move them through the tailor and hand them back',
   // Plan 11 part 2
   'tally.export': 'Export vouchers and ledgers for Tally, and set the Tally ledger name of each account',
+  // Module 8 (GST on purchases)
+  'gst.input_credit': 'See the purchase tax register, upload the GST portal’s inward statement (GSTR-2B) and match input credit',
+  // Module 8 (GST returns)
+  'gst.returns': 'See the sales tax register, GSTR-1 and GSTR-3B figures, the credit note register and GST payable; download GSTR-1 for the GST portal',
+  // Module 8 (e-invoice and e-way bill files)
+  'einvoice.manage': 'See e-invoices, export them for the e-invoice portal, import its answer and record cancellations',
+  'eway.manage': 'Make e-way bills for bills and transfers, export them for the e-way bill portal and record their numbers',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -150,6 +157,10 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'export.masters',
     'expenses.post',
     'tally.export',
+    'gst.input_credit',
+    'einvoice.manage',
+    'eway.manage',
+    'gst.returns',
   ],
   store_manager: [
     'company.view',
@@ -189,6 +200,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'expenses.post',
     'orders.manage',
     'alterations.manage',
+    'eway.manage',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
   cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close', 'orders.manage', 'alterations.manage'],
@@ -210,6 +222,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'pos.reports',
     'accounts.view',
     'export.masters',
+    'gst.returns',
   ],
 };
 

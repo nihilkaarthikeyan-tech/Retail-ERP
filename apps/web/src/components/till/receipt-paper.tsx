@@ -12,17 +12,21 @@ import type { PrintableReceipt } from "@/lib/till/receipt";
 export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
   const r = receipt;
   const igst = r.gstTable.some((g) => nonZero(g.igst));
+  // Plan 08 (CBIC invoice rules): title, seller and buyer GSTIN, place of supply, original bill, declaration.
+  const gst = r.gst;
+  const sellerGstin = gst?.sellerGstin ?? r.company.gstin;
   return (
     <article className="till-receipt" aria-label={`Receipt ${r.number}`}>
       <header className="till-receipt-head">
         <strong>{r.store.name}</strong>
         {r.company.legalName && r.company.legalName !== r.store.name ? <div>{r.company.legalName}</div> : null}
-        {r.company.gstin ? <div>GSTIN: {r.company.gstin}</div> : null}
+        {sellerGstin ? <div>GSTIN: {sellerGstin}</div> : null}
         {r.store.address ? <div>{r.store.address}</div> : null}
         {r.store.phone ? <div>Phone: {r.store.phone}</div> : null}
       </header>
       {r.duplicate ? <p className="till-receipt-mark">DUPLICATE</p> : null}
-      <p className="till-receipt-mark">{r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
+      <p className="till-receipt-mark">{gst ? gst.title.toUpperCase() : r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
+      {gst?.declaration ? <p className="till-receipt-small">{gst.declaration}</p> : null}
       <div className="till-receipt-meta">
         <div>No: {r.number}</div>
         <div>{dateTimeIn(typeof r.soldAt === "string" ? r.soldAt : new Date(r.soldAt).toISOString())}</div>
@@ -30,6 +34,30 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         {r.cashier ? <div>Cashier: {r.cashier}</div> : null}
         {r.customer ? <div>Customer: {r.customer}</div> : null}
         {r.salesStaff ? <div>Salesperson: {r.salesStaff}</div> : null}
+        {gst?.original ? (
+          <div>
+            Against bill {gst.original.number}
+            {gst.original.date ? ` dated ${gst.original.date}` : ""}
+          </div>
+        ) : null}
+        {gst?.buyer ? (
+          <div>
+            Buyer: {gst.buyer.name ?? ""}
+            {gst.buyer.gstin ? <div>Buyer GSTIN: {gst.buyer.gstin}</div> : null}
+            {gst.buyer.address ? <div>{gst.buyer.address}</div> : null}
+            {gst.buyer.state ? (
+              <div>
+                State: {gst.buyer.state.name} ({gst.buyer.state.code})
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {gst?.placeOfSupply ? (
+          <div>
+            Place of supply: {gst.placeOfSupply.name} ({gst.placeOfSupply.code})
+          </div>
+        ) : null}
+        {gst && gst.invoiceKind === "business" ? <div>Reverse charge: {gst.reverseCharge ? "Yes" : "No"}</div> : null}
       </div>
       <table className="till-receipt-lines">
         <thead>
@@ -46,6 +74,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
               <td>
                 {l.name}
                 {l.free ? " (free)" : ""}
+                {l.hsn ? <div className="till-receipt-small">HSN {l.hsn}</div> : null}
                 {l.offer ? <div className="till-receipt-small">{l.offer}</div> : null}
                 {nonZero(l.discount) && !l.free ? <div className="till-receipt-small">Discount {rupees(l.discount)}</div> : null}
                 {l.salesStaff ? <div className="till-receipt-small">Sold by {l.salesStaff}</div> : null}
@@ -127,7 +156,9 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
           {r.delivery.phone ? <div>Phone: {r.delivery.phone}</div> : null}
         </div>
       ) : null}
+      {gst?.creditNoteLate ? <p className="till-receipt-small">Issued after the GST time limit: the tax of the original bill is not reduced in the return.</p> : null}
       {r.provisional ? <p className="till-receipt-small">GST rates not yet approved (provisional)</p> : null}
+      {gst ? <p className="till-receipt-small">Authorised signatory</p> : null}
       {r.footer ? <p className="till-receipt-foot">{r.footer}</p> : null}
     </article>
   );

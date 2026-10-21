@@ -8,6 +8,7 @@ import { addDays, businessDate, changePercent, type CurrentUser, Decimal, grossM
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { GstReturnsService } from './gst-returns.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
 import { D, fromIso, iso, money, pctText, qty, ReportsCommon, ZERO } from './reports-common.service.js';
 import { type SaleLineRow, SalesReportsService } from './sales-reports.service.js';
@@ -34,6 +35,7 @@ export class DashboardsService {
     private readonly money: MoneyReportsService,
     private readonly ledgerReports: LedgerReportsService,
     private readonly ledger: LedgerService,
+    private readonly gst: GstReturnsService,
   ) {}
 
   /** Which dashboards this user may open. */
@@ -165,6 +167,11 @@ export class DashboardsService {
       const dues = await this.dues(company.id);
       tiles.push(this.tile('customer_dues', 'Customers owe', dues.customers, 'money', null, `₹${money(dues.customersOverdue)} overdue`));
       tiles.push(this.tile('supplier_dues', 'The shop owes suppliers', dues.suppliers, 'money', null, `₹${money(dues.suppliersOverdue)} overdue`));
+    }
+    // Plan 08 §3: the GST payable position for this return period (module 8), from the same code as GSTR-3B.
+    if (hasPermission(user, 'gst.returns')) {
+      const gst = await this.gst.payable(user).catch(() => null);
+      if (gst && gst.registrations.length) tiles.push(this.tile('gst_payable', `GST to pay for ${gst.label}`, D(gst.payable), 'money', null, `₹${gst.creditCarriedForward} input credit carried forward`));
     }
     // Sales by store per month, the last six months.
     const sixStart = `${addDays(monthStart, -150).slice(0, 7)}-01`;

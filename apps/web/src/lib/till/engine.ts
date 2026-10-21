@@ -590,7 +590,15 @@ export class TillEngine {
       till: snapshot.till,
       payments: tx.payments,
       change: pay.change,
-      extras: { staff: snapshot.salesStaff, salesStaffId: draft.salesStaffId, delivery: draft.delivery, deliveryCharge: bill.delivery?.charge ?? null },
+      extras: {
+        staff: snapshot.salesStaff,
+        salesStaffId: draft.salesStaffId,
+        delivery: draft.delivery,
+        deliveryCharge: bill.delivery?.charge ?? null,
+        buyer: draft.buyer,
+        customer: draft.customer ? { name: draft.customer.name, gstin: draft.customer.gstin } : null,
+        originalNumber: draft.ret?.originalNumber ?? null,
+      },
     });
     for (const r of receipts) await this.store.set(`${RECENT}${r.number}`, { number: r.number, savedAt: this.now().toISOString(), bill: null, receipts: [r] } satisfies RecentBill);
     await this.store.set(LAST_RECEIPTS_KEY, receipts);

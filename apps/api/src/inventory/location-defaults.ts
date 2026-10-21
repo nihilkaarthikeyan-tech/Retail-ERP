@@ -12,7 +12,8 @@ export const STOCK_NUMBER_SERIES: Record<string, string> = {
   stock_in: 'SIN-{STORE}-{FY}-',
   stock_out: 'SOT-{STORE}-{FY}-',
   move: 'MOV-{STORE}-{FY}-',
-  transfer_send: 'TRS-{STORE}-{FY}-',
+  // Plan 08 (CGST rule 46(b), rule 55): a send between GSTINs is a tax invoice, and every send a challan; their numbers stay within 16 characters.
+  transfer_send: 'TRS/{FYS}/',
   transfer_receive: 'TRR-{STORE}-{FY}-',
   count: 'CNT-{STORE}-{FY}-',
 };

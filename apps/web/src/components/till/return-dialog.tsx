@@ -129,7 +129,9 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
     }
     if (!lines.length) return setError("Choose what comes back");
     const paidOnAccount = bill.payments.some((p) => p.paymentMethod.kind === "on_account");
-    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null, paidOnAccount }, bill);
+    // Plan 08 G6: the credit note keeps the original bill's GST (IGST when it was to another state; none on a bill of supply).
+    const supply = { interState: !!bill.igst && !new Decimal(bill.igst).isZero(), noTax: bill.invoiceKind === "bill_of_supply" };
+    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null, paidOnAccount, supply }, bill);
     setBill(null);
     setNumber("");
     setCounts({});

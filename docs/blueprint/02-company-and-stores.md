@@ -87,7 +87,7 @@ flowchart TD
     N --> O[Setup complete]
 ```
 
-The reference system also creates manufacturing warehouses here; a retail product should not.
+A retail product creates no manufacturing locations here.
 
 ### 2. Adding a store
 
@@ -193,7 +193,7 @@ flowchart TD
 - **Corrected document number** = original number + dash + (previous revision + 1).
 - **Exchange rate used** = newest stored rate dated on or before the document date for that pair and purpose; if old rates are not allowed, it must also be newer than (document date − allowed days).
 - **Rounding** (applies to every money and quantity figure):
-  - *Banker's rounding*: an exact half goes to the even neighbour (2.5 → 2, 3.5 → 4). The reference system uses this by default.
+  - *Banker's rounding*: an exact half goes to the even neighbour (2.5 → 2, 3.5 → 4). Not used by this product (see open question 5).
   - *Normal (commercial) rounding*: an exact half goes up, away from zero (2.5 → 3, −2.5 → −3).
   - Use normal rounding; it is what customers and tax officers expect on bills.
 - **Decimal places**: money to 2 places; quantities to 3 places unless the preference says otherwise.
@@ -224,7 +224,7 @@ flowchart TD
 
 - **Starting mid-year:** the first financial year can be short, starting on the go-live date and ending at the normal year end. Opening balances are dated the day before go-live (Data import).
 - **Several stores, one company:** the usual Indian retail case. One GSTIN, one set of books, one currency; stores differ only by warehouse, cost centre and tills. Reports filter by store.
-- **Stores with separate GST registrations:** the reference system handles this through the store's address rather than separate companies. Keep one company and record each store's GSTIN on its address (open question).
+- **Stores with separate GST registrations:** keep one company and record each store's GSTIN on its address (open question).
 - **Several companies (franchise, separate legal entities):** each has its own books; stock moving between them must be sold and bought, not transferred. Not needed in the first version unless the owner decides otherwise.
 - **Importing from abroad:** supplier bill in foreign currency, converted at the stored or fetched rate; differences when paying go to the exchange difference account (Accounting).
 - **Rate service unreachable:** the rate comes back as zero and must be typed by hand; the document cannot be finalised with a zero rate.

@@ -4,7 +4,7 @@
 
 Connects the retail system to the outside world: online stores and marketplaces, payment gateways and card or UPI terminals, government tax portals, banks, messages (email, SMS, WhatsApp), printers and scanners, maps for deliveries, sign-in with another account, and any other system through a programming interface and event messages. This module describes what each connection does and what the core system must offer so connections can be built without changing core logic.
 
-**Finding from the reference:** in the studied version, the online store (shopping cart and web catalogue), payment-gateway connectors (card, UPI and wallet providers) and most outside connectors have been moved out of the core into separate add-ons. The core keeps only general building blocks: payment requests and gateway accounts, event messages to other systems, alerts, email and SMS, a programming interface with keys and sign-in tokens, direct and network printing, a bank-feed connector for one provider, and map routing for delivery trips. The descriptions below cover both the building blocks and the retail connections a product needs, in terms of behaviour.
+**Approach:** the online store (shopping cart and web catalogue), payment-gateway connectors (card, UPI and wallet providers) and most outside connectors are kept out of the core as separate add-ons. The core keeps only general building blocks: payment requests and gateway accounts, event messages to other systems, alerts, email and SMS, a programming interface with keys and sign-in tokens, direct and network printing, a bank-feed connector for one provider, and map routing for delivery trips. The descriptions below cover both the building blocks and the retail connections a product needs, in terms of behaviour.
 
 ## Who uses it
 
@@ -66,7 +66,7 @@ A request asking a customer to pay (or a record of the shop paying out) an amoun
 
 ### Bank feeds
 
-The connection details for a bank-data provider and whether it fetches every hour. Linked bank accounts pull transactions in as bank statement lines automatically (Accounting). Indian banks need a domestic provider (the Account Aggregator framework or bank interfaces). The reference connector is built for a foreign provider.
+The connection details for a bank-data provider and whether it fetches every hour. Linked bank accounts pull transactions in as bank statement lines automatically (Accounting). Indian banks need a domestic provider (the Account Aggregator framework or bank interfaces).
 
 ### Printers and devices
 
@@ -74,7 +74,7 @@ The connection details for a bank-data provider and whether it fetches every hou
 - **Receipt and label printers** driven directly through a small print helper on the till computer.
 - **Barcode scanners** act as keyboards and need no setup.
 - **Cash drawer** opens through the receipt printer.
-- **Customer display and weighing scale** need a small device helper on the till computer (not in the reference).
+- **Customer display and weighing scale** need a small device helper on the till computer (needs a device helper).
 
 ### Maps
 
@@ -86,7 +86,7 @@ Sign-in with Google and similar accounts, matched to existing users. The system 
 
 ### Government portals
 
-E-invoice registration and e-way bills (Tax) go through a GST Suvidha Provider or the portals' own interfaces. In the reference this sits in a separate India add-on. The core must supply the data, keep the results (registration number, acknowledgement, QR code, e-way bill number and validity), and queue and retry when the portal fails.
+E-invoice registration and e-way bills (Tax) go through a GST Suvidha Provider or the portals' own interfaces. The core must supply the data, keep the results (registration number, acknowledgement, QR code, e-way bill number and validity), and queue and retry when the portal fails.
 
 Not needed by a small retailer: company directory sign-in for large offices, and custom server actions for outside systems.
 
@@ -128,7 +128,7 @@ flowchart TD
     H --> I[Settlement reaches the bank less fees; matched per batch]
 ```
 
-The reference supports a phone payment method that sends a UPI collect request and stops the bill from being finalised until exactly that amount is paid (Point of sale).
+A phone payment method can send a UPI collect request and stops the bill from being finalised until exactly that amount is paid (Point of sale).
 
 ### 3. Payment link for an invoice or order
 
@@ -212,7 +212,7 @@ The bank connection fetches statement lines every hour, or on request, for linke
 - **Gateway confirmation lost:** the payment request stays at payment started. A scheduled check with the gateway settles it. Marking it paid by hand needs the gateway's reference.
 - **Repeated confirmation:** ignored once the request is paid.
 - **Terminal approved but the till crashed:** the money reached the bank but no bill shows it. Bank matching flags an unmatched settlement line, and the cashier bills again with the approval code.
-- **Receiving system down:** failed event messages are logged and the business decides whether to send them again by hand. The reference does not retry automatically.
+- **Receiving system down:** failed event messages are logged and the business decides whether to send them again by hand.
 - **Government portal down:** invoices queue for registration, and business invoices print only as proforma until registered (Tax).
 - **Internet down at the store:** connected terminals and online payments fail. Separate terminals and cash carry on. Queued connections catch up when the internet returns (Point of sale offline question).
 - **Several stores, one online store:** choose the dispatch location per order (nearest store or central store) and publish stock combined or per store.

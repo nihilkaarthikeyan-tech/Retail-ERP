@@ -5,6 +5,38 @@ Deferred features from the launch scope are listed in `docs/decisions.md`; this 
 
 ---
 
+## 0. Roadmap agreed with the owner (16 October 2026)
+
+To build, in this order. Each money, stock or tax item gets a plan in `docs/plans/` approved by the owner first.
+
+**First: a smooth start for a new shop (our own design)**
+**NEXT after GST (owner, 18 October 2026): one system, made to fit each shop.** The approach: one complete system for every business; a new shop first goes through the setup wizard, which asks only what the shop alone knows and then configures the system for that shop; afterwards every module has its own easy settings so the shop can adjust it to how it works.
+
+- **Review and improve the setup wizard:** check whether the current one-page setup is good enough; make it step by step with a shop-type question; consider an optional AI helper that asks "tell me about your shop" and suggests the set-up for the owner to confirm (AI only suggests; the rules and money and tax set-up stay fixed and checked).
+- **A settings centre for every module, user-friendly:** one place, grouped by module (company and shops, items and catalogue, prices and offers, customers, suppliers and buying, stock, billing counter, GST, accounts, reports, printing and labels, users and rights), plain words, a sensible default for every setting, a short explanation next to each, and a "reset to the shop type's default" option. First list every setting each module already has and what more each module should offer (GST is the example: scheme, filing frequency, turnover band, HSN digits, invoice layout, e-invoice, e-way bill limits).
+- **Shop-type templates** fill in all the settings at setup (fancy, clothing, footwear, cosmetics, mobiles, general), and hide the menus a shop does not need.
+- **Modules on and off (owner, 21 October 2026):** core modules are always on (users, items, stock, billing counter, customers, suppliers, accounts, GST, reports). Optional modules can be switched on or off by the shop: sizes and colours, batches and expiry, serial numbers, purchase orders, customer orders, alterations, sale-or-return, home delivery, salesperson, offers and markdowns, transfers between shops, e-invoice, e-way bill, Tally export (later loyalty and gift cards). The wizard switches them on from the shop type, or an optional AI helper suggests them from a plain description for the owner to confirm. Settings has a "My modules" list with on/off switches and one line on each. Switching off only hides a module and never deletes data; the owner is warned when something is still in use (for example open customer orders); modules that need another switch it on automatically.
+
+0. **Guided first-time setup:** step by step with Back and Next (owner → company → GST → shop → shop type → done) instead of one long page; the **shop type** chosen here switches on only the features that shop needs (see section 1); then a **getting-started checklist** on the dashboard until finished — add tills and payment methods, import items from Excel, load opening stock, add staff, set the letterhead, make a test bill, set the go-live date — each step linking to its screen and ticking itself off when done.
+
+**Must have before a real shop goes live**
+1. **GST (module 8): BUILT 19 October 2026** (`docs/plans/08-gst.md`). Before a real shop uses it, the CA must approve the GST settings and check: the GSTR-2B and portal JSON file layouts against real portal files; one real GSTR-1 upload; the price band measured on the GST-inclusive price per piece; IGST for a walk-in registered buyer from another state; the GSTIN check-character rule; the bill-of-supply declaration wording; on transfers between GSTINs, input credit at sending and valuation at stock cost; how blocked tax is spread when a bill covers part of a receipt line. Not built: cess at the till, outward debit notes, e-way bills for returns to suppliers, the bulk e-invoice cancellation file.
+
+**Soon after**
+2. **Loyalty points and gift cards** (decisions 14–16, now wanted).
+3. **WhatsApp or SMS bills and offers** (decisions 67, 74, now wanted).
+4. **Matching card and UPI settlements** against bank deposits (decision 54, now wanted).
+5. **Small gaps:** reopening a closed shift, emailing a bill, customer reports (credit position, inactive customers), stock reports (on hand plus on order, shortages).
+
+**Later, only if needed**
+6. **Quotations** for wholesale and bulk buyers (decision 45).
+7. **Bank statement matching** (decision 53).
+8. **Customer display and weighing scale** (decisions 9, 81).
+9. **Label designer** (decision 73).
+10. **Importing from Tally, Marg or Busy** (decision 77).
+
+---
+
 ## 1. Shop type and feature switches (new idea, not in the blueprint yet)
 
 **Agreed:** build after everything else is finished (owner, 16 October 2026).

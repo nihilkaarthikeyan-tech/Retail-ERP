@@ -22,7 +22,7 @@ export const PARLE = "10000000-0000-4000-8000-000000000004";
 export const BISCUITS_GROUP = "20000000-0000-4000-8000-000000000001";
 export const B2G1 = "30000000-0000-4000-8000-000000000001";
 export const TEN_OFF = "30000000-0000-4000-8000-000000000002";
-export const PREFIX = "MAIN-T1-2026-27-";
+export const PREFIX = "MAT1/2627/";
 
 function item(id: string, code: string, name: string, hsn: string, mrp: string, group = "20000000-0000-4000-8000-0000000000ff") {
   return {
@@ -56,7 +56,7 @@ export function sampleSnapshot(over: Partial<TillSnapshot> = {}): StoredSnapshot
       id: TILL_ID,
       code: "T1",
       name: "Till 1",
-      numberPrefix: "MAIN-T1",
+      numberPrefix: "MAT1",
       locationId: "f0000000-0000-4000-8000-000000000001",
       priceListId: "f0000000-0000-4000-8000-000000000002",
       pricesPerUnit: false,

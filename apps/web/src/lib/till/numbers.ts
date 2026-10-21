@@ -1,8 +1,10 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Bill numbers the till gives itself (pos-offline plan §3): the till's own
-// series STORE-TILL-FY-000001. The counter is saved BEFORE a number is used,
+// series PREFIX/2627/000001, at most 16 characters as GST requires (plan 08;
+// tills set up before keep STORE-TILL-FY-000001 until their prefix is set). The counter is saved BEFORE a number is used,
 // so a crash can never hand out the same number twice, and it never goes
 // below the last number the server has from this till.
+import { tillNumberSeries } from "shared";
 import type { KeyValueStore } from "./storage";
 import type { TillSnapshot } from "./types";
 
@@ -19,11 +21,11 @@ export function numberPart(prefix: string, number: string | null | undefined): n
   return /^\d+$/.test(tail) ? Number(tail) : 0;
 }
 
-/** The series prefix for a business date: `${numberPrefix}-${financialYear}-`. */
+/** The series prefix for a business date: `${numberPrefix}/2627/` (shared tillNumberSeries). */
 export function prefixFor(snapshot: TillSnapshot, date: string): { prefix: string; serverLast: string | null } {
   const year = snapshot.financialYears.find((y) => y.startDate <= date && date <= y.endDate);
   if (!year) throw new Error(`No open financial year covers ${date}; the accountant must open it`);
-  const prefix = `${snapshot.till.numberPrefix}-${year.name}-`;
+  const prefix = tillNumberSeries(snapshot.till.numberPrefix, year.name);
   const last = snapshot.lastNumbers.find((n) => n.prefix === prefix);
   return { prefix, serverLast: last?.lastNumber ?? null };
 }

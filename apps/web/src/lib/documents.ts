@@ -33,6 +33,10 @@ export interface PrintDocumentDto {
   terms: string[];
   signatures: string[];
   printedAt: string;
+  /** Plan 08 §4: a warning across the top, e.g. an e-invoice not yet registered. */
+  notice?: string | null;
+  /** Plan 08 §4: the e-invoice's signed QR code as an SVG path (one unit per module). */
+  qr?: { label: string; path: string; size: number } | null;
 }
 
 export const PRINT_KIND_LABELS: Record<PrintKind, string> = {
@@ -46,6 +50,7 @@ export const PRINT_KIND_LABELS: Record<PrintKind, string> = {
   customer_order: "Customer order slip",
   alteration_job: "Alteration job slip",
   alteration_tag: "Alteration garment tag",
+  pos_bill: "Till bill: tax invoice, bill of supply or credit note (A4)",
 };
 
 /** Where a document's print page is. A statement's id is "customer:<id>" or "supplier:<id>". */

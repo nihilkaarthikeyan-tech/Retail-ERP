@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AccountingModule } from '../accounting/accounting.module.js';
 import { CatalogueModule } from '../catalogue/catalogue.module.js';
 import { CompanyModule } from '../company/company.module.js';
+import { GstPortalModule } from '../gst-portal/gst-portal.module.js';
 import { ImportKindsService } from '../imports/kinds.service.js';
 import { ImportsService } from '../imports/imports.service.js';
 import { InventoryModule } from '../inventory/inventory.module.js';
@@ -16,7 +17,7 @@ import { LabelsService } from './labels.service.js';
 import { PrintService } from './print.service.js';
 
 @Module({
-  imports: [CompanyModule, AccountingModule, CatalogueModule, InventoryModule, ItemsModule, OrdersModule, PartiesModule, PricingModule],
+  imports: [CompanyModule, GstPortalModule, AccountingModule, CatalogueModule, InventoryModule, ItemsModule, OrdersModule, PartiesModule, PricingModule],
   controllers: [DocumentsController],
   providers: [PrintService, LabelsService, GoLiveService, ImportsService, ImportKindsService],
 })

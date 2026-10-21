@@ -32,7 +32,7 @@ export function BillEditor(props: BillEditorProps) {
   const receiptId = bill?.kind === "receives_goods" ? bill.receiptId : null;
   const initial = useLoad<BillLineDraft[]>(async () => {
     if (!bill) return [];
-    if (receiptId) return linesFromDraftReceipt(await api.get<GoodsReceiptDto>(`/purchase/receipts/${receiptId}`));
+    if (receiptId) return linesFromDraftReceipt(await api.get<GoodsReceiptDto>(`/purchase/receipts/${receiptId}`), bill);
     return linesFromBill(bill);
   }, [bill?.id, receiptId]);
   if (initial.error) return <Alert kind="error">{`Could not load the bill's lines: ${initial.error}`}</Alert>;
@@ -48,6 +48,8 @@ interface HeaderState {
   paymentTermsId: string;
   storeId: string;
   remarks: string;
+  /** Plan 08 G8: "" = as the supplier's tax situation says; "yes" or "no" for this bill. */
+  reverseCharge: "" | "yes" | "no";
 }
 
 function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorProps & { initialLines: BillLineDraft[] }) {
@@ -65,6 +67,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
     paymentTermsId: bill?.paymentTermsId ?? "",
     storeId: bill?.storeId ?? "",
     remarks: bill?.remarks ?? "",
+    reverseCharge: bill ? (bill.reverseCharge ? "yes" : "no") : "",
   }));
   const [lines, setLines] = useState<BillLineDraft[]>(initialLines);
   const [problems, setProblems] = useState<Record<string, string>>({});
@@ -74,7 +77,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
 
   const storeId = header.storeId || (kind === "receives_goods" ? defaultStoreId(user, stores) : "");
   const shelves = storeId ? stockLocationsOf(locations.data ?? [], storeId) : [];
-  const preview = previewBill(lines);
+  const preview = previewBill(lines, header.reverseCharge === "yes");
 
   function set<K extends keyof HeaderState>(key: K, value: HeaderState[K]) {
     setHeader((h) => ({ ...h, [key]: value }));
@@ -116,6 +119,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
       ...(kind === "receives_goods" ? { storeId } : {}),
       paymentTermsId: header.paymentTermsId || null,
       remarks: blankToNull(header.remarks),
+      ...(header.reverseCharge ? { reverseCharge: header.reverseCharge === "yes" } : {}),
       lines: lines.filter((l) => l.include).map((l) => billLineToInput(l, kind)),
     };
     setBusy(true);
@@ -174,6 +178,17 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
             </SelectInput>
           ) : null}
         </div>
+        <SelectInput
+          id="bill-reverse-charge"
+          label="Reverse charge"
+          value={header.reverseCharge}
+          onChange={(e) => set("reverseCharge", e.target.value as HeaderState["reverseCharge"])}
+          hint="Under reverse charge the supplier's bill has no GST: the shop pays the GST to the government itself and claims it back where allowed."
+        >
+          <option value="">As set on the supplier</option>
+          <option value="yes">Yes, the shop pays the GST</option>
+          <option value="no">No</option>
+        </SelectInput>
         <TextareaInput id="bill-remarks" label="Remarks" value={header.remarks} onChange={(e) => set("remarks", e.target.value)} />
       </div>
 
@@ -195,7 +210,8 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
       <h2>Lines</h2>
       {rights.prices ? (
         <p className="muted">
-          Type the GST exactly as written on the supplier&apos;s bill. Leave CGST, SGST and IGST blank and they will be worked out from the GST rate.
+          Type the GST exactly as written on the supplier&apos;s bill. Leave CGST, SGST and IGST blank and they will be worked out from the GST rate. Untick
+          &quot;Input credit&quot; on a line when its GST cannot be claimed back; that GST is then added to the cost of the goods.
         </p>
       ) : null}
       <BillLineGrid kind={kind} lines={lines} onChange={setLines} problems={problems} shelves={shelves} prices={rights.prices} />
@@ -210,7 +226,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
           <dl className="kv">
             <dt>Before GST</dt>
             <dd>{rupees(preview.taxable.toFixed(2))}</dd>
-            <dt>GST</dt>
+            <dt>{header.reverseCharge === "yes" ? "GST paid by the shop (reverse charge)" : "GST"}</dt>
             <dd>{rupees(preview.tax.toFixed(2))}</dd>
             <dt>Rounding</dt>
             <dd>{rupees(preview.roundingAdjustment.toFixed(2))}</dd>

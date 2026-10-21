@@ -6,6 +6,7 @@ import { businessDate } from '../business-date.js';
 import { GSTIN_RE, PAN_RE } from '../company.js';
 import { dayMonthYearProblem, EARLIEST_CUSTOMER_YEAR, isDayMonth } from '../customer-dates.js';
 import { isIsoDate } from '../financial-year.js';
+import { TAX_SITUATIONS } from '../gst-core.js';
 import { isStateCode } from '../india.js';
 import { DUE_BASES } from '../payment-terms.js';
 import { itemCode, nonNegativeDecimalString } from './catalogue.js';
@@ -18,6 +19,8 @@ const mobile = z.string().trim().regex(/^[0-9]{10}$/, 'Mobile number must be 10 
 const gstin = z.string().trim().toUpperCase().regex(GSTIN_RE, 'Not a valid GSTIN');
 const pan = z.string().trim().toUpperCase().regex(PAN_RE, 'Not a valid PAN');
 const stateCode = z.string().refine(isStateCode, 'Unknown GST state code');
+/** Plan 08 G3: empty = worked out from the GSTIN. */
+const taxSituation = z.enum(TAX_SITUATIONS).optional().nullable();
 
 export const PARTY_STATUSES = ['active', 'blocked', 'off'] as const;
 export type PartyStatus = (typeof PARTY_STATUSES)[number];
@@ -36,6 +39,7 @@ export const addressSchema = z.object({
   phone: optionalText(20),
   email: email.optional().nullable(),
   gstin: gstin.optional().nullable(),
+  taxSituation,
   isBilling: z.boolean().optional(),
   isDelivery: z.boolean().optional(),
   isMain: z.boolean().optional(),
@@ -140,6 +144,7 @@ const customerBody = z.object({
   notes: optionalText(1000),
   customerGroupId: z.string().uuid().optional(),
   gstin: gstin.optional().nullable(),
+  taxSituation,
   stateCode: stateCode.optional().nullable(),
   priceListId: z.string().uuid().optional().nullable(),
   paymentTermsId: z.string().uuid().optional().nullable(),
@@ -204,6 +209,7 @@ const supplierBody = z.object({
   supplierGroupId: z.string().uuid().optional(),
   isTransporter: z.boolean().optional(),
   gstin: gstin.optional().nullable(),
+  taxSituation,
   pan: pan.optional().nullable(),
   stateCode: stateCode.optional().nullable(),
   priceListId: z.string().uuid().optional().nullable(),

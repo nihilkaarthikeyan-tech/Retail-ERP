@@ -39,7 +39,7 @@ const till: TillDto = {
   store: MAIN,
   locationId: "c1111111-1111-4111-8111-111111111111",
   priceListId: "p1111111-1111-4111-8111-111111111111",
-  numberPrefix: "MAIN-T1",
+  numberPrefix: "MAT1",
   cashierDiscountPercent: "5",
   allowPriceChange: false,
   autoPrint: true,

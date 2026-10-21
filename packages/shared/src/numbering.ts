@@ -2,7 +2,8 @@
 // Document number patterns (blueprint 02, process 4). Pure functions so the
 // web app can preview numbers and the API can allocate them.
 
-export const NUMBER_PATTERN_TOKENS = ['YYYY', 'YY', 'MM', 'DD', 'FY', 'STORE', 'COMPANY'] as const;
+/** FYS: the financial year in four digits ("2026-27" → "2627"), for numbers that must stay short (GST: 16 characters). */
+export const NUMBER_PATTERN_TOKENS = ['YYYY', 'YY', 'MM', 'DD', 'FY', 'FYS', 'STORE', 'COMPANY'] as const;
 export type NumberPatternToken = (typeof NUMBER_PATTERN_TOKENS)[number];
 
 export interface PatternContext {
@@ -48,6 +49,10 @@ export function fillPattern(pattern: string, ctx: PatternContext): string {
         return day;
       case 'FY':
         return ctx.financialYearName;
+      case 'FYS': {
+        const m = /^(\d{4})-(\d{2}|\d{4})$/.exec(ctx.financialYearName.trim());
+        return m ? `${m[1].slice(2)}${m[2].slice(-2)}` : ctx.financialYearName.replace(/[^0-9]/g, '').slice(-4);
+      }
       case 'STORE':
         if (!ctx.storeCode) throw new Error('Pattern uses {STORE} but no store was given');
         return ctx.storeCode;

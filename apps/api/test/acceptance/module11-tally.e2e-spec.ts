@@ -114,7 +114,7 @@ describe('11.24 Tally export', () => {
           .expect(201)
       ).body;
       const token = (await owner.post(`/pos/tills/${till.id}/register`).send({ deviceName: `${code} PC` }).expect(201)).body.token;
-      tills[code] = { id: till.id, token, prefix: `${code}-${tillCode}-2026-27-`, n: 0 };
+      tills[code] = { id: till.id, token, prefix: `${till.numberPrefix}/2627/`, n: 0 };
     }
     const toy = (await owner.post('/items').send({ name: 'Wooden toy train', itemGroupId: groupId, baseUnitId: pcs, hsnCode: '9503', isStockItem: false }).expect(201)).body;
     await owner.post('/prices').send({ priceListId: listId, itemId: toy.id, price: '560', startDate: '2026-04-01' }).expect(201);

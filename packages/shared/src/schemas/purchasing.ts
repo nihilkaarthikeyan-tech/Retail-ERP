@@ -206,6 +206,8 @@ export const supplierBillLineSchema = z.object({
   shelfLocationId: uuid.optional().nullable(),
   ...batchFields,
   serialNumbers: z.array(trimmed(60)).optional(),
+  /** Plan 08 G8: false = input credit cannot be claimed; the tax is added to the cost of the goods. */
+  creditClaimable: z.boolean().optional(),
 });
 export type SupplierBillLineInput = z.infer<typeof supplierBillLineSchema>;
 
@@ -220,6 +222,8 @@ export const createSupplierBillSchema = z.object({
   storeId: uuid.optional().nullable(),
   paymentTermsId: uuid.optional().nullable(),
   remarks: optionalText(500),
+  /** Plan 08 G8: the shop pays the tax itself (empty = from the supplier's tax situation). */
+  reverseCharge: z.boolean().optional().nullable(),
   lines: z.array(supplierBillLineSchema).min(1, 'Add at least one line'),
 });
 export type CreateSupplierBillInput = z.infer<typeof createSupplierBillSchema>;

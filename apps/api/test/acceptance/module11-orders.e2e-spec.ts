@@ -26,7 +26,7 @@ let customerGroups: Record<string, string>;
 let n = 0;
 
 const today = () => businessDate();
-const num = () => `MAIN-T1-2026-27-${String(++n).padStart(6, '0')}`;
+const num = () => `MAT1/2627/${String(++n).padStart(6, '0')}`;
 const T = <R extends { set: (k: string, v: string) => R }>(r: R) => r.set('x-till-token', tillToken);
 
 beforeAll(async () => {
@@ -338,7 +338,7 @@ describe('11.22 alteration job', () => {
   });
 
   it('the charge item must be a service item, set in the till settings', async () => {
-    expect(trouserBill.number).toBe('MAIN-T1-2026-27-000010');
+    expect(trouserBill.number).toBe('MAT1/2627/000010');
     expect((await owner.patch('/pos/settings').send({ alterationItemId: chinos.id }).expect(400)).body.message).toMatch(/service item/);
     expect((await owner.patch('/pos/settings').send({ alterationItemId: service.id }).expect(200)).body.alterationItemId).toBe(service.id);
     const snap = (await T(owner.get(`/pos/till/${tillId}/snapshot`)).expect(200)).body;
@@ -347,7 +347,7 @@ describe('11.22 alteration job', () => {
 
   it('the job is received, with the tailor, ready, delivered, each with who and when; ₹150 billed on collection', async () => {
     const j = (await owner.post('/alterations').send(job({ billId: trouserBill.id })).expect(201)).body;
-    expect(j).toMatchObject({ status: 'received', charge: '150.00', chargePaidWith: 'collection', tailor: 'Murugan (tailor)', bill: { number: 'MAIN-T1-2026-27-000010' } });
+    expect(j).toMatchObject({ status: 'received', charge: '150.00', chargePaidWith: 'collection', tailor: 'Murugan (tailor)', bill: { number: 'MAT1/2627/000010' } });
     expect(j.number).toMatch(/^ALT-2026-27-\d{5}$/);
     // No skipping a step.
     expect((await owner.post(`/alterations/${j.id}/status`).send({ status: 'ready' }).expect(400)).body.message).toMatch(/cannot move to ready/);

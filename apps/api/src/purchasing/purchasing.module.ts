@@ -12,6 +12,8 @@ import { ConsignmentStock } from './consignment-stock.service.js';
 import { ConsignmentController } from './consignment.controller.js';
 import { ConsignmentService } from './consignment.service.js';
 import { GoodsReceiptsService } from './goods-receipts.service.js';
+import { GstInwardController } from './gst-inward.controller.js';
+import { GstInwardService } from './gst-inward.service.js';
 import { LandedChargesService } from './landed-charges.service.js';
 import { PurchaseCommon } from './purchase-common.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
@@ -24,8 +26,8 @@ import { SupplierBillsService } from './supplier-bills.service.js';
 
 @Module({
   imports: [CompanyModule, NumberingModule, FinancialYearsModule, ItemsModule, InventoryModule, PartiesModule, PricingModule, CatalogueModule],
-  controllers: [PurchasingController, ConsignmentController],
-  providers: [PurchaseCommon, PurchasePostings, PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, LandedChargesService, ReorderService, PurchaseReportsService, PurchaseSettingsService, ConsignmentStock, ConsignmentService],
+  controllers: [PurchasingController, ConsignmentController, GstInwardController],
+  providers: [PurchaseCommon, PurchasePostings, PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, LandedChargesService, ReorderService, PurchaseReportsService, PurchaseSettingsService, ConsignmentStock, ConsignmentService, GstInwardService],
   exports: [PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, PurchasePostings],
 })
 export class PurchasingModule {}

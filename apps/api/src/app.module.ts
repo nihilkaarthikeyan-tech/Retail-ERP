@@ -6,6 +6,8 @@ import { AuthModule } from './auth/auth.module.js';
 import { CatalogueModule } from './catalogue/catalogue.module.js';
 import { CompanyModule } from './company/company.module.js';
 import { FinancialYearsModule } from './financial-years/financial-years.module.js';
+import { GstCoreModule } from './gst/gst-core.module.js';
+import { GstPortalModule } from './gst-portal/gst-portal.module.js';
 import { HealthModule } from './health/health.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
@@ -46,6 +48,8 @@ import { UsersModule } from './users/users.module.js';
     PartiesModule,
     InventoryModule,
     PurchasingModule,
+    GstCoreModule,
+    GstPortalModule,
     PosModule,
     AccountingModule,
     ReportsModule,

@@ -33,7 +33,7 @@ For each customer the shop needs:
 
 The system shows on each customer: billing this year, amount unpaid, and loyalty points.
 
-The reference system also stores sales teams with commission splits, sales partners, market segment, industry, account manager and portal logins; a small retailer does not need them.
+Sales teams with commission splits, sales partners, market segment, industry, account manager and portal logins are not kept; a small retailer does not need them.
 
 ### Addresses
 

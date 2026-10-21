@@ -261,7 +261,7 @@ Card and UPI settlements (from the settlement account to the bank) are recorded 
 - **Payments summary** — per day (or per bill): amount by payment method, totals; filter by dates, cashier, till, method.
 - **Shift closing report** — per shift: starting amount, expected, counted and difference per method; sales, returns, GST. This is the closing itself, printed.
 - **Sales register** — invoice and line level with GST (Reports).
-- **Hourly sales and sales per cashier** (recommended; not in the reference) — from the bills' times.
+- **Hourly sales and sales per cashier** (recommended) — from the bills' times.
 - **Stock held by open till bills** — shown in the expected-stock report.
 
 ## Edge cases
@@ -277,10 +277,10 @@ Card and UPI settlements (from the settlement account to the bank) are recorded 
 - **Two tills, last piece:** the stock check counts other tills' unmerged bills, so the second till is refused unless selling beyond stock is allowed.
 - **Shift running past midnight:** the shift is dated the day it was opened; next-day bills are refused until it is closed and a new one opened.
 - **Cash difference at closing:** recorded on the closing; the accountant posts a cash short or over entry; big differences are reviewed.
-- **Power cut or no internet mid-bill:** the reference system has **no offline mode**; its till is a web page that needs the server. Parked bills are saved on the server. Our product must decide on an offline till (open question).
+- **Power cut or no internet mid-bill:** a till that is only a web page stops working; our product must decide on an offline till (open question).
 - **Several tills in one store:** each has its own set-up, starting cash, shift and closing; they share the store's stock location.
 - **Several stores:** each till belongs to one store; staff are limited to their store's tills.
-- **Foreign currency:** a till has one currency; foreign notes would need their own method and a typed rate (not supported in the reference).
+- **Foreign currency:** a till has one currency; foreign notes would need their own method and a typed rate (not supported).
 
 ## Settings
 

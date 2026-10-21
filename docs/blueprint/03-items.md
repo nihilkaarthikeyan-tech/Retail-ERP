@@ -34,7 +34,7 @@ One record for every product (or service) that can appear on a bill. The shop ne
 - **Account and store defaults:** usually inherited from the item group; an item can override its default warehouse, supplier, sales account, cost of goods sold account and store cost centre.
 - **Opening stock:** quantity and cost to load once when the item is first created (for single-store setups; multi-store opening stock is loaded through Data import).
 
-The reference system also carries manufacturing, fixed-asset, subcontracting, sample-retention, quality-inspection, commission and deferred-revenue details on items. A small retailer does not need them.
+Manufacturing, fixed-asset, subcontracting, sample-retention, quality-inspection, commission and deferred-revenue details are not kept on items; a small retailer does not need them.
 
 ### Size and colour lists (variant attributes)
 

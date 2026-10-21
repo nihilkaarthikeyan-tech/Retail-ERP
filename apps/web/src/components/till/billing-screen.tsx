@@ -23,11 +23,11 @@ import { PayDialog } from "./pay-dialog";
 import { type ApprovalRequest, ManagerApprovalDialog } from "./pin-dialogs";
 import { PrintArea, ReceiptPaper } from "./receipt-paper";
 import { ReturnDialog } from "./return-dialog";
-import { DeliveryDialog, SalespersonDialog } from "./extras-dialogs";
+import { BuyerDialog, DeliveryDialog, SalespersonDialog } from "./extras-dialogs";
 import { AlterationsDialog, customerForOrder, OrdersDialog } from "./order-dialogs";
 import { CashDialog, CloseShiftDialog } from "./shift-dialogs";
 
-type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery" | "orders" | "alterations";
+type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery" | "orders" | "alterations" | "buyer";
 type PadMode = "qty" | "price" | "disc";
 
 const PAD_LABEL: Record<PadMode, string> = { qty: "Quantity", price: "Price", disc: "Discount %" };
@@ -596,6 +596,16 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               </tbody>
             </table>
           </div>
+          {draft.buyer || bill.supply.invoiceKind !== "consumer" || bill.supply.interState ? (
+            <p className="muted" data-testid="gst-note">
+              {bill.supply.invoiceKind === "business" ? "Business tax invoice" : bill.supply.invoiceKind === "bill_of_supply" ? "Bill of supply (composition scheme, no GST)" : "Consumer bill"}
+              {draft.buyer?.gstin ? ` for GSTIN ${draft.buyer.gstin}` : draft.buyer?.name ? ` for ${draft.buyer.name}` : ""}
+              {bill.supply.interState ? `; IGST, place of supply ${bill.supply.placeOfSupply}` : ""}.{" "}
+              <Button size="small" variant="link" onClick={() => setDialog("buyer")}>
+                Change
+              </Button>
+            </p>
+          ) : null}
           {draft.delivery ? (
             <p className="muted" data-testid="delivery-note">
               Home delivery to {draft.delivery.name ? `${draft.delivery.name}, ` : ""}
@@ -797,6 +807,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <button type="button" className="till-action" onClick={() => setDialog("delivery")} disabled={!draft.lines.length}>
               {draft.delivery ? "Delivery details" : "Home delivery"}
             </button>
+            <button type="button" className="till-action" onClick={() => setDialog("buyer")}>
+              {draft.buyer?.gstin ? "Business invoice" : "Buyer GSTIN / details"}
+            </button>
             <button type="button" className="till-action" onClick={() => setDialog("orders")} disabled={!state.online}>
               Customer orders
             </button>
@@ -933,6 +946,18 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           }}
         />
       ) : null}
+      {dialog === "buyer" ? (
+        <BuyerDialog
+          open
+          current={draft.buyer ?? null}
+          defaults={{ name: draft.customer?.name ?? "" }}
+          onSave={(b) => {
+            change({ ...draft, buyer: b, payments: [] });
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
       {dialog === "delivery" ? (
         <DeliveryDialog
           open
@@ -964,7 +989,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             return;
           }
           const known = snapshot.customers.find((c) => c.id === ret.customerId);
-          const customer = known && known.id !== till.walkInCustomerId ? { id: known.id, name: known.name, mobile: known.mobile, gstin: known.gstin, stateCode: known.stateCode, customerGroupId: known.customerGroupId } : null;
+          const customer = known && known.id !== till.walkInCustomerId ? { id: known.id, name: known.name, mobile: known.mobile, gstin: known.gstin, taxSituation: known.taxSituation ?? null, stateCode: known.stateCode, customerGroupId: known.customerGroupId } : null;
           change({ ...draft, ret, customer, payments: [] });
         }}
       />

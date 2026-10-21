@@ -17,7 +17,7 @@ export interface QueueItem {
   /** Keeps first-in-first-out order across restarts. */
   seq: number;
   createdAt: string;
-  /** What the cashier sees in lists, e.g. "Bill MAIN-T1-2026-27-000012". */
+  /** What the cashier sees in lists, e.g. "Bill MAT1/2627/000012". */
   label: string;
   payload: unknown;
   /** Cash movements: the shift they belong to (its server id is found at send time). */

@@ -89,6 +89,10 @@ export const CHART_TEMPLATE: TemplateFamily[] = [
                 { key: 'gst_output_cgst', number: '2131', name: 'Output CGST', kind: 'tax' },
                 { key: 'gst_output_sgst', number: '2132', name: 'Output SGST', kind: 'tax' },
                 { key: 'gst_output_igst', number: '2133', name: 'Output IGST', kind: 'tax' },
+                // Plan 08 G8: tax the shop pays itself on purchases under reverse charge, one account per head.
+                { key: 'gst_rcm_cgst', number: '2136', name: 'CGST payable under reverse charge', kind: 'tax' },
+                { key: 'gst_rcm_sgst', number: '2137', name: 'SGST payable under reverse charge', kind: 'tax' },
+                { key: 'gst_rcm_igst', number: '2138', name: 'IGST payable under reverse charge', kind: 'tax' },
               ],
             },
             { key: 'loans_overdraft', number: '2140', name: 'Loans and overdraft', children: [] },

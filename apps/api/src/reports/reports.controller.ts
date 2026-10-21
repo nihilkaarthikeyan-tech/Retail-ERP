@@ -100,7 +100,7 @@ export class ReportsController {
   }
 
   // ---- Downloads are recorded in the history (blueprint 14 process 2) ----
-  @Post('reports/export-log') @HttpCode(204) @RequireAnyPermission('pos.reports', 'stock.view', 'stock.cost.view', 'cost_price.view', 'purchase.view', 'accounts.view') async exportLog(@Body(zod(exportLogSchema)) input: ExportLogInput, @ReqActor() actor: Actor) {
+  @Post('reports/export-log') @HttpCode(204) @RequireAnyPermission('pos.reports', 'stock.view', 'stock.cost.view', 'cost_price.view', 'purchase.view', 'accounts.view', 'gst.returns') async exportLog(@Body(zod(exportLogSchema)) input: ExportLogInput, @ReqActor() actor: Actor) {
     await this.audit.record(this.prisma, actor, { action: 'export', entityType: 'report', entityId: null, changes: { report: input.report, filters: input.filters, rows: input.rows ?? null } });
   }
 

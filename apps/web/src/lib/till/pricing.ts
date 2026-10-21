@@ -8,6 +8,7 @@
 // charge, GST from the HSN rate list and rounding to the rupee. No floating
 // point (rule 1).
 import {
+  bandUnitPrice,
   bestOffer,
   checkDiscount,
   Decimal,
@@ -15,18 +16,25 @@ import {
   deliveryChargeFor,
   effectiveDiscountPercent,
   freeToSell,
-  inclusiveTax,
+  gstinProblem,
   type InclusiveTax,
+  isStateCode,
   lineOfferSaving,
+  needsBuyerDetails,
+  pickGstRate,
   planOffers,
   type PosTransactionInput,
   quantityProblem,
   rateForLine,
+  resolveSupply,
   roundBill,
   roundMoney,
   saleLineAmount,
   selectPrice,
   shareByWeight,
+  type Supply,
+  supplyLineTax,
+  taxSituationOf,
 } from "shared";
 import type { SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, TillSnapshot } from "./types";
 
@@ -66,6 +74,16 @@ export interface DraftDelivery {
   /** YYYY-MM-DD, or empty. */
   deliverOn: string;
   remarks: string;
+  /** Plan 08 G1: the state the goods go to (place of supply); empty = the store's state. */
+  stateCode?: string;
+}
+
+/** Plan 08 G4, G5: the buyer written on the bill: a GSTIN makes it a business tax invoice. */
+export interface DraftBuyer {
+  gstin: string;
+  name: string;
+  address: string;
+  stateCode: string;
 }
 
 /** The serial numbers typed on a line. */
@@ -115,6 +133,8 @@ export interface DraftCustomer {
   mobile: string | null;
   gstin: string | null;
   stateCode: string | null;
+  /** Plan 08 G3: empty = from the GSTIN. */
+  taxSituation?: string | null;
   customerGroupId: string | null;
   /** Added on the till (module 3 quick add): sent as newCustomer. */
   newClientId?: string;
@@ -148,6 +168,8 @@ export interface DraftBill {
     reason: string | null;
     /** The original bill was paid (partly) on account, so the refund may go back on account (plan 07 §1a). */
     paidOnAccount?: boolean;
+    /** Plan 08 G6: the original bill's GST (its place of supply decides IGST; a bill of supply has no tax). */
+    supply?: { interState: boolean; noTax: boolean } | null;
     /** Without a bill: the manager's single-use approval (action return_without_bill). */
     approvalToken?: string;
     approvedBy?: string;
@@ -163,6 +185,8 @@ export interface DraftBill {
   salesStaffId?: string | null;
   /** Plan 11 B4: home delivery of the sale. */
   delivery?: DraftDelivery | null;
+  /** Plan 08 G4, G5: the buyer's GSTIN (business tax invoice) or name, address and state. */
+  buyer?: DraftBuyer | null;
   /** Plan 11 part 2: the customer order collected on this bill; its unused advance pays part of it. */
   order?: { id: string; number: string; advance: string; lines: { itemId: string; quantity: string }[] } | null;
   /** Plan 11 part 2: how much of the customer's credit (advances kept) pays part of the bill. */
@@ -248,6 +272,8 @@ export interface ComputedBill {
   billOffer: SnapOffer | null;
   coupon: SnapCoupon | null;
   interState: boolean;
+  /** Plan 08 G1, G3, G4, G7: place of supply, invoice kind and whether tax is charged on the sale. */
+  supply: Supply;
   problems: string[];
   approvals: NeededApproval[];
   provisional: boolean;
@@ -315,14 +341,40 @@ export function listPriceFor(snapshot: TillSnapshot, item: SnapItem, unitId: str
   return null;
 }
 
-/** GST rate: longest HSN match (8, 6, 4 digits), latest start on or before the date (plan 06 answer 1). */
-export function gstRateFor(rates: SnapGstRate[], hsnCode: string | null, date: string): SnapGstRate | null {
-  if (!hsnCode) return null;
-  const codes = [hsnCode.slice(0, 8), hsnCode.slice(0, 6), hsnCode.slice(0, 4)].filter((c, i, a) => c.length >= 4 && a.indexOf(c) === i);
-  for (const code of codes) {
-    const found = rates.filter((r) => r.hsnCode === code && r.effectiveFrom <= date).sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : -1))[0];
-    if (found) return found;
+/**
+ * GST rate (plan 08 G2): longest HSN match (8, 6, 4 digits), latest start on
+ * or before the date and, for price-banded codes, the band of the selling price
+ * per unit (GST included); the same shared rule as the server.
+ */
+export function gstRateFor(rates: SnapGstRate[], hsnCode: string | null, date: string, unitPrice?: DecimalInput | null): SnapGstRate | null {
+  return pickGstRate(rates, hsnCode, date, unitPrice);
+}
+
+/** Plan 08 G1, G3, G4: the place of supply and invoice kind of the sale, as the server works them out. */
+export function supplyFor(snapshot: TillSnapshot, draft: Pick<DraftBill, "customer" | "buyer" | "delivery">): Supply {
+  const till = snapshot.till;
+  const sellerState = till.gst?.sellerState ?? till.store.stateCode ?? till.company.stateCode;
+  const customer = draft.customer;
+  const typed = draft.buyer?.gstin?.trim().toUpperCase() || null;
+  const own = !typed && customer?.gstin && taxSituationOf(customer.gstin, customer.taxSituation) !== "unregistered" ? customer.gstin : null;
+  return resolveSupply({
+    sellerState,
+    scheme: till.gst?.scheme ?? "regular",
+    buyerGstin: typed ?? own,
+    buyerState: draft.buyer?.stateCode || null,
+    deliveryState: draft.delivery?.stateCode || null,
+    taxSituation: typed && typed !== customer?.gstin ? null : (customer?.taxSituation ?? null),
+  });
+}
+
+/** What is wrong with the buyer typed at the till; null when it can go on the bill. */
+export function buyerProblem(b: DraftBuyer): string | null {
+  if (b.gstin.trim()) {
+    const p = gstinProblem(b.gstin, isStateCode);
+    if (p) return p;
+    if (!b.name.trim() || !b.address.trim()) return "A business invoice needs the buyer's name and address";
   }
+  if (b.stateCode && !isStateCode(b.stateCode)) return "Choose the buyer's state";
   return null;
 }
 
@@ -402,9 +454,9 @@ export function bestBillOffer(offers: SnapOffer[], amount: Decimal): { offer: Sn
   return best ? { offer: best.offer, saving: D(best.saving) } : null;
 }
 
-export function isInterState(snapshot: TillSnapshot, customer: { gstin: string | null; stateCode: string | null } | null): boolean {
-  if (!customer?.gstin || !customer.stateCode) return false;
-  return customer.stateCode !== (snapshot.till.store.stateCode ?? snapshot.till.company.stateCode);
+/** IGST for the sale (plan 08 G1): see supplyFor. */
+export function isInterState(snapshot: TillSnapshot, customer: DraftCustomer | null): boolean {
+  return supplyFor(snapshot, { customer, buyer: null, delivery: null }).interState;
 }
 
 // ---- Working out a bill ----
@@ -439,7 +491,7 @@ function blankTax(): InclusiveTax {
  * does (plan 11 A9): the till's list price (no customer price) or the typed
  * price, today's GST rate, no discounts; the amount is price × quantity.
  */
-function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: TillSnapshot, date: string, interState: boolean): ComputedLine {
+function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: TillSnapshot, date: string, supply: Pick<Supply, "interState" | "noTax">): ComputedLine {
   const known = findItem(snapshot, rl.itemId);
   const item: SnapItem = known ?? { id: rl.itemId, code: rl.code, name: rl.name, active: false, isStockItem: true, trackBatches: false, trackSerials: false, hsnCode: null, mrp: null, maxDiscountPercent: "0", baseUnitId: rl.unitId, parentItemId: null, brandId: null, itemGroup: { id: "", path: "" }, units: [], barcodes: [] };
   const unit = item.units.find((u) => u.unitId === rl.unitId);
@@ -461,9 +513,9 @@ function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: T
       problem = problem ?? "The price is not a number";
     }
   }
-  const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date);
+  const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date, price.div(D(unit?.factor ?? "1")));
   if (!rate) problem = problem ?? (item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code})` : `${item.code} has no HSN code, so its GST rate is not known`);
-  const gstRate = D(rate?.rate ?? "0");
+  const gstRate = supply.noTax ? ZERO : D(rate?.rate ?? "0");
   const amount = quantity.gt(0) ? roundMoney(price.mul(quantity)).neg() : ZERO;
   const mrp = unit?.mrp ? D(unit.mrp) : item.mrp ? D(item.mrp).mul(D(unit?.factor ?? "1")) : null;
   return {
@@ -485,7 +537,7 @@ function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: T
     amount,
     gstRate,
     provisional: !rate?.approved,
-    tax: inclusiveTax(amount, gstRate, interState),
+    tax: supplyLineTax(amount, gstRate, supply),
     isFree: false,
     isDelivery: false,
     freeOfLineNo: null,
@@ -502,7 +554,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   const problems: string[] = [];
   const approvals: NeededApproval[] = [];
   const customer = draft.customer;
-  const interState = isInterState(snapshot, customer);
+  const supply = supplyFor(snapshot, draft);
+  const interState = supply.interState;
   const walkIn = till.walkInCustomerId ? snapshot.customers.find((c) => c.id === till.walkInCustomerId) : undefined;
   const groupId = customer ? customer.customerGroupId : (walkIn?.customerGroupId ?? null);
   const customerIdForPrice = customer?.id ?? null;
@@ -780,8 +833,30 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         });
       }
     }
-    for (const l of lines) l.tax = inclusiveTax(l.amount, l.gstRate, interState);
+    // Plan 08 G2, G7: each line's rate on its final amount (price bands); no tax on a bill of supply or to an exempt buyer.
+    for (const l of lines) {
+      if (!l.isFree && !l.problem && l.item.hsnCode) {
+        const factor = D(l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1");
+        const r = gstRateFor(snapshot.gstRates, l.item.hsnCode, date, bandUnitPrice(l.amount, l.quantity.mul(factor)));
+        if (r) {
+          l.gstRate = D(r.rate);
+          l.provisional = !r.approved;
+        }
+      }
+      if (supply.noTax) l.gstRate = ZERO;
+      l.tax = supplyLineTax(l.amount, l.gstRate, supply);
+    }
     sale = partTotals(lines);
+    // Plan 08 G4, G5: the buyer's details a business invoice or a large consumer bill needs.
+    const b = draft.buyer;
+    if (supply.invoiceKind === "business" && b?.gstin.trim() && (!b.name.trim() || !b.address.trim())) problems.push("A business tax invoice needs the buyer's name and address");
+    else if (supply.invoiceKind !== "business" && needsBuyerDetails(sale.taxable) && (!b?.name.trim() || !b?.address.trim() || !b?.stateCode)) {
+      problems.push("A bill of ₹50,000 or more (taxable value) needs the buyer's name, address and state");
+    }
+    if (b?.gstin.trim()) {
+      const p = gstinProblem(b.gstin, isStateCode);
+      if (p) problems.push(p);
+    }
   }
 
   // ---- Return lines: the original net price per unit (after all discounts) comes back ----
@@ -792,7 +867,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     draft.ret.lines.forEach((rl, index) => {
       const lineNo = index + 1;
       if (rl.originalLineId === null) {
-        const line = noBillReturnLine(rl, lineNo, snapshot, date, interState);
+        const line = noBillReturnLine(rl, lineNo, snapshot, date, supply);
         if (line.problem) problems.push(`${rl.code}: ${line.problem}`);
         if (line.quantity.lt(0)) lines.push(line);
         return;
@@ -845,7 +920,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         amount,
         gstRate: D(rl.gstRate),
         provisional: false,
-        tax: inclusiveTax(amount, rl.gstRate, interState),
+        tax: supplyLineTax(amount, rl.gstRate, draft.ret!.supply ?? { interState: false, noTax: false }),
         isFree: rl.isFree,
         isDelivery: false,
         freeOfLineNo: null,
@@ -860,7 +935,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   }
 
   const net = (sale?.total ?? ZERO).add(ret?.total ?? ZERO);
-  const provisional = (sale?.lines ?? []).some((l) => l.provisional);
+  // Plan 08 §5, 8.11: provisional until the CA approves the GST settings.
+  const provisional = (sale?.lines ?? []).some((l) => l.provisional) || till.gst?.approved === false;
   // Plan 11 part 2: the order's advance (up to the bill) and the customer's credit pay part of it.
   const payable = Decimal.max(net, 0);
   const advance = draft.order ? Decimal.min(D(draft.order.advance || "0"), payable) : ZERO;
@@ -869,7 +945,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     if (D(draft.credit).gt(payable.sub(advance))) problems.push("More credit is used than the bill");
     else credit = credit.add(D(draft.credit));
   }
-  return { sale, ret, net, billDiscount, billOffer, coupon, interState, problems, approvals, provisional, delivery, offers: offersUsed(sale?.lines ?? []), credit, due: net.sub(credit) };
+  return { sale, ret, net, billDiscount, billOffer, coupon, interState, supply, problems, approvals, provisional, delivery, offers: offersUsed(sale?.lines ?? []), credit, due: net.sub(credit) };
 }
 
 // ---- Payments ----
@@ -1000,8 +1076,19 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
       ...(d.phone.trim() ? { phone: d.phone.trim() } : {}),
       ...(d.deliverOn ? { deliverOn: d.deliverOn } : {}),
       ...(d.remarks.trim() ? { remarks: d.remarks.trim() } : {}),
+      ...(d.stateCode ? { stateCode: d.stateCode } : {}),
       // Offline the server keeps the charge the till added (pos-offline §5).
       ...(o.offline ? { charge: bill.delivery.charge.toFixed(2) } : {}),
+    };
+  }
+  // Plan 08 G4, G5: the buyer typed at the till.
+  const buyer = draft.buyer;
+  if (buyer && bill.sale && (buyer.gstin.trim() || buyer.name.trim() || buyer.address.trim() || buyer.stateCode)) {
+    input.buyer = {
+      ...(buyer.gstin.trim() ? { gstin: buyer.gstin.trim().toUpperCase() } : {}),
+      ...(buyer.name.trim() ? { name: buyer.name.trim() } : {}),
+      ...(buyer.address.trim() ? { address: buyer.address.trim() } : {}),
+      ...(buyer.stateCode ? { stateCode: buyer.stateCode } : {}),
     };
   }
   const bd = draft.billDiscount;

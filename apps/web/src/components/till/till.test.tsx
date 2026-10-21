@@ -115,7 +115,7 @@ describe("the till offline", () => {
     const done = await screen.findByRole("dialog", { name: "Bill finished" });
     expect(within(done).getByTestId("done-change").textContent).toContain("₹128.00");
     expect(within(done).getByText(/Saved on the till/)).toBeTruthy();
-    expect(within(done).getAllByText(/MAIN-T1-2026-27-000042/).length).toBeGreaterThan(0);
+    expect(within(done).getAllByText(/MAT1\/2627\/000042/).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.getByRole("button", { name: /Sync status: Offline, 1 waiting/ })).toBeTruthy());
     await waitFor(() => expect(window.print).toHaveBeenCalled());
 
@@ -183,7 +183,7 @@ describe("on account at the till (plan 07 §1a)", () => {
     });
     const receipt: Receipt = {
       billId: "b1",
-      number: "MAIN-T1-2026-27-000042",
+      number: "MAT1/2627/000042",
       kind: "sale",
       duplicate: false,
       provisional: true,
@@ -240,7 +240,7 @@ describe("on account at the till (plan 07 §1a)", () => {
 function receiptFor(kind: "sale" | "return", total: string, method: string): Receipt {
   return {
     billId: "b9",
-    number: "MAIN-T1-2026-27-000042",
+    number: "MAT1/2627/000042",
     kind,
     duplicate: false,
     provisional: true,

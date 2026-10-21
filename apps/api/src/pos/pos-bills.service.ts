@@ -6,8 +6,11 @@
 // sold and flagged for checking.
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  bandUnitPrice,
+  BILL_OF_SUPPLY_DECLARATION,
   businessDate,
   creditCheck,
+  creditNoteDeadline,
   changeDue,
   checkDiscount,
   type CurrentUser,
@@ -16,28 +19,39 @@ import {
   type DeliveryDetailsInput,
   deliveryChargeFor,
   effectiveDiscountPercent,
+  gstDocumentTitle,
   hasPermission,
-  inclusiveTax,
+  hsnForPrint,
+  type InclusiveTax,
+  INDIAN_STATES,
   isCountedOffer,
+  isCreditNoteLate,
   isExpiredOn,
   planOffers,
   type PosBillQuery,
   type PosLineInput,
   type PosTransactionInput,
   freeToSell,
+  needsBuyerDetails,
   QUANTITY_TOLERANCE,
   type QuickAddCustomerInput,
   quantityProblem,
   roundBill,
   roundMoney,
+  resolveSupply,
   roundQuantity,
   saleLineAmount,
   shareByWeight,
+  type Supply,
+  supplyLineTax,
+  taxSituationOf,
+  tillNumberSeries,
 } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
-import type { Customer, GstRate, Item, Offer, PosDelivery, PosSettings, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
+import type { Customer, GstRate, GstSettings, Item, Offer, PosDelivery, PosSettings, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
+import type { Seller } from '../gst/gst-core.service.js';
 import { type Movement, StockEngine } from '../inventory/stock-engine.service.js';
 import { ItemsService } from '../items/items.service.js';
 import { CustomersService } from '../parties/customers.service.js';
@@ -86,6 +100,17 @@ interface BuiltLine {
   costSourceId: bigint | null;
   /** Plan 11 C1: who sold the line. */
   salesStaffId: string | null;
+  /** Plan 08: an offline line keeps the GST rate the till charged. */
+  keepRate?: boolean;
+}
+
+/** Plan 08 G4, G5: the buyer written on the bill. */
+interface BuyerInfo {
+  gstin: string | null;
+  name: string | null;
+  address: string | null;
+  stateCode: string | null;
+  taxSituation: string | null;
 }
 
 interface BuiltBill {
@@ -101,6 +126,12 @@ interface BuiltBill {
   salesStaffId: string | null;
   /** Plan 11 B4: home delivery of the sale, with the charge added. */
   delivery: (Omit<DeliveryDetailsInput, 'charge'> & { charge: Decimal }) | null;
+  /** Plan 08 G1, G3, G4: place of supply, invoice kind and the buyer; a return keeps its original bill's. */
+  supply: Supply;
+  buyer: BuyerInfo;
+  registrationId: string | null;
+  /** Plan 08 G6: a return against a bill names it; late = after the credit-note deadline. */
+  original: { number: string; date: string; late: boolean } | null;
 }
 
 /** Plan 11 part 2: the customer order collected on the sale, with its lines. */
@@ -113,7 +144,9 @@ interface BuildContext {
   input: PosTransactionInput;
   user: CurrentUser;
   flags: Set<string>;
-  interState: boolean;
+  supply: Supply;
+  buyer: BuyerInfo;
+  seller: Seller;
   settings: PosSettings;
   customer: Customer;
   approvals: string[];
@@ -150,11 +183,14 @@ interface FreeItemInfo {
   provisional: boolean;
 }
 
-/** Names shown with a bill: offers used, salespeople, the delivery. */
+/** Names shown with a bill: offers used, salespeople, the delivery; plan 08: original bills, GSTINs and the GST settings. */
 interface BillExtras {
   offers: Map<string, { code: string; name: string }>;
   staff: Map<string, { code: string; name: string }>;
   deliveries: Map<string, PosDelivery>;
+  originals: Map<string, { number: string; date: string }>;
+  gstins: Map<string, string>;
+  gst: GstSettings | null;
 }
 
 /** The delivery charge line follows the bill's own lines (the till numbers its lines 1, 2, 3 …). */
@@ -227,7 +263,11 @@ export class PosBillsService {
       if (!input.offline) throw new BadRequestException(`${customer.name} is blocked; only a credit controller can bill them`);
       flags.add('customer_blocked');
     }
-    const interState = this.common.interState(till.store.stateCode, company.stateCode, customer);
+    // Plan 08 G1, G3, G4: the seller's registration, the buyer and the place of supply.
+    const gstSettings = await this.common.gst.settingsFor(this.prisma, company.id);
+    const seller = await this.common.gst.sellerFor(this.prisma, till.storeId);
+    const buyer = await this.buyerFor(input, customer);
+    const supply = resolveSupply({ sellerState: seller.stateCode, scheme: gstSettings.scheme, buyerGstin: buyer.gstin, buyerState: buyer.stateCode, deliveryState: input.delivery?.stateCode ?? null, taxSituation: buyer.taxSituation });
     const coupon = input.couponCode && input.sale ? await this.offers.couponFor(this.prisma, company.id, input.couponCode, date, customer.id) : null;
     const offerCtx = { companyId: company.id, storeId: till.storeId, date, customerGroupId: customer.customerGroupId, couponOfferId: coupon?.offerId ?? null };
     const year = await this.years.forDate(this.prisma, company.id, date);
@@ -242,16 +282,17 @@ export class PosBillsService {
     const pending: PendingApproval[] = [];
     const order = await this.orderFor(company.id, input, till, customer);
     const alteration = await this.alterationFor(company.id, input, till);
-    const ctx: BuildContext = { till, date, input, user, flags, interState, settings, customer, approvals, catalogue, newPrices, pending, order, alteration };
+    const ctx: BuildContext = { till, date, input, user, flags, supply, buyer, seller, settings, customer, approvals, catalogue, newPrices, pending, order, alteration };
     await this.checkSalesStaff(company.id, till, input, flags);
 
     const ret = input.ret ? await this.buildReturn(ctx) : null;
     const sale = input.sale ? await this.buildSale(ctx, offerCtx, coupon?.id ?? null) : null;
-    for (const b of [ret, sale]) if (b) this.checkNumber(b.number, till, year.name);
+    for (const b of [ret, sale]) if (b) this.checkNumber(b.number, till, year.name, input.offline);
     if (ret && sale && ret.number === sale.number) throw new BadRequestException('The return and the sale need different numbers');
 
-    const retTotals = ret ? this.totals(ret.lines, interState) : null;
-    const saleTotals = sale ? this.totals(sale.lines, interState) : null;
+    const retTotals = ret ? this.totals(ret.lines, ret.supply) : null;
+    const saleTotals = sale ? this.totals(sale.lines, sale.supply) : null;
+    if (sale && saleTotals) this.checkBuyerDetails(sale, saleTotals.taxable, input.offline, flags);
     const net = D(saleTotals?.total ?? '0').add(D(retTotals?.total ?? '0'));
 
     // Payments (blueprint 09 process 3); on account only as plan 07 §1a allows.
@@ -280,12 +321,18 @@ export class PosBillsService {
       throw new ConflictException(`PRICE_CHANGED: the server total is ₹${net.toFixed(2)}, the till showed ₹${D(input.expectedTotal).toFixed(2)}; check the bill again`);
     }
     // Plan 06 answer 1: once live, only approved GST rates may be used.
+    // Plan 08 §5, 8.11: until the CA approves the GST settings every bill stays provisional.
+    const gstApproved = !!gstSettings.approvedAt;
     const provisional = [...(ret?.lines ?? []), ...(sale?.lines ?? [])].some((l) => l.provisional);
     // Only new sales are refused once live; a return of a bill from the test period must still be possible.
     if (settings.liveAllowed && (sale?.lines ?? []).some((l) => l.provisional) && !input.offline) throw new BadRequestException('A GST rate on this bill is not approved yet; the accountant must approve it');
     if (provisional) flags.add('gst_provisional');
     // Plan 11 part 2: a warning (never a refusal, decision 32) when the sale takes goods set aside for someone's order.
     const warnings = sale ? await this.reservedWarnings(sale, till, order) : [];
+    if (ret?.original?.late) {
+      warnings.push(`Credit note after ${creditNoteDeadline(ret.original.date)}: the GST of bill ${ret.original.number} can no longer be reduced in the GST return. The goods and the money are still returned.`);
+    }
+    const flagsFor = (b: BuiltBill) => [...flags, ...(b.kind === 'return' && b.original?.late ? ['credit_note_late'] : [])];
 
     const saved = await this.prisma.$transaction(
       async (tx) => {
@@ -323,8 +370,15 @@ export class PosBillsService {
               couponId: b.couponId,
               billDiscount: b.billDiscount.toFixed(2),
               offline: input.offline,
-              checkFlags: [...flags],
-              gstProvisional: b.lines.some((l) => l.provisional),
+              checkFlags: flagsFor(b),
+              gstProvisional: !gstApproved || b.lines.some((l) => l.provisional),
+              invoiceKind: b.supply.invoiceKind,
+              buyerGstin: b.buyer.gstin,
+              buyerName: b.buyer.name,
+              buyerAddress: b.buyer.address,
+              buyerStateCode: b.buyer.stateCode,
+              placeOfSupply: b.supply.placeOfSupply,
+              gstRegistrationId: b.registrationId,
               returnReason: b.returnReason,
               approvedById: b.approvedById,
               salesStaffId: b.salesStaffId,
@@ -360,7 +414,9 @@ export class PosBillsService {
           });
           created.push(bill.id);
         }
-        if (flags.size) await tx.posBill.updateMany({ where: { id: { in: created } }, data: { checkFlags: [...flags] } });
+        if (flags.size) {
+          for (const b of [ret, sale]) if (b) await tx.posBill.updateMany({ where: { id: { in: created }, kind: b.kind }, data: { checkFlags: flagsFor(b) } });
+        }
         await this.common.markApprovalsUsed(tx, pending);
         const saleId = sale ? (await tx.posBill.findFirstOrThrow({ where: { id: { in: created }, kind: 'sale' }, select: { id: true } })).id : null;
         if (credit.rows.length) {
@@ -548,12 +604,17 @@ export class PosBillsService {
     await this.audit.record(tx, actor, { action: 'create', entityType: 'pos_delivery', entityId: row.id, changes: { bill: bill.number, address: row.address, deliverOn: iso(row.deliverOn), charge: row.chargeAmount.toFixed(2) } });
   }
 
-  /** The bill's number must be the till's own (pos-offline §3): STORE-TILL-FY-000001. */
-  private checkNumber(number: string, till: TillWithRefs, fyName: string) {
-    const prefix = `${till.seriesKind}-${fyName}-`;
-    if (!number.startsWith(prefix) || !/^\d{6}$/.test(number.slice(prefix.length))) {
-      throw new BadRequestException(`Bill number ${number} is not in this till’s series (${prefix}000001)`);
-    }
+  /**
+   * The bill's number must be the till's own (pos-offline §3): PREFIX/2627/000001,
+   * at most 16 characters (CGST rule 46(b), plan 08). A bill made offline before
+   * the till got its short prefix keeps its old STORE-TILL-FY-000001 number.
+   */
+  private checkNumber(number: string, till: TillWithRefs, fyName: string, offline: boolean) {
+    const prefix = tillNumberSeries(till.seriesKind, fyName);
+    const inSeries = (p: string) => number.startsWith(p) && /^\d{6}$/.test(number.slice(p.length));
+    if (inSeries(prefix)) return;
+    if (offline && inSeries(tillNumberSeries(`${till.store.code}-${till.code}`, fyName))) return;
+    throw new BadRequestException(`Bill number ${number} is not in this till’s series (${prefix}000001)`);
   }
 
   /**
@@ -718,7 +779,8 @@ export class PosBillsService {
       // Offers apply to the list price; a typed price switches them off for the line (blueprint 04).
       const forOffers = { id: b.item.id, parentItemId: b.item.parentItemId, brandId: b.item.brandId, itemGroup: await this.groupOf(b.item.itemGroupId) };
       const covering = price.eq(listPrice) ? offers.filter((o) => o.appliesTo !== 'bill' && this.offers.covers(o, forOffers)) : [];
-      const gst = await this.common.gstRateFor(this.prisma, b.item, date);
+      // Plan 08 G2: a price-banded rate is chosen again on the final amount below.
+      const gst = await this.common.gstRateFor(this.prisma, b.item, date, b.factor.isZero() ? price : price.div(b.factor));
       const manualPct = D(l.discountPercent ?? '0');
       const verdict = checkDiscount({
         listPrice,
@@ -800,7 +862,14 @@ export class PosBillsService {
         salesStaffId: l.salesStaffId ?? billStaff,
       };
       // Offline bills are recorded as charged; differences go on the check report (pos-offline §5).
-      if (input.offline && l.charged) this.applyCharged(line, l, flags);
+      if (input.offline && l.charged) {
+        // Plan 08 G2: the server's rate for what the till charged, so a different rate is flagged.
+        const own = await this.common.gstRateFor(this.prisma, b.item, date, bandUnitPrice(l.charged.lineTotal, b.basicQuantity));
+        line.gstRate = ctx.supply.noTax ? new Decimal(0) : D(own.rate);
+        line.provisional = !own.approvedAt;
+        this.applyCharged(line, l, flags);
+        line.keepRate = true;
+      }
       lines.push(line);
       if (!input.offline && chosen && chosen.freeQuantity.gt(0)) {
         const free = chosen.freeQuantity;
@@ -1002,7 +1071,66 @@ export class PosBillsService {
         salesStaffId: null,
       });
     }
-    return { kind: 'sale', number: part.number, lines, returnOfId: null, returnReason: null, approvedById: null, couponId, billDiscount, salesStaffId: billStaff, delivery };
+    await this.settleRates(lines, ctx);
+    return { kind: 'sale', number: part.number, lines, returnOfId: null, returnReason: null, approvedById: null, couponId, billDiscount, salesStaffId: billStaff, delivery, supply: ctx.supply, buyer: ctx.buyer, registrationId: ctx.seller.registrationId, original: null };
+  }
+
+  /**
+   * Plan 08 G2, G7: each line's rate on the final amount (after the bill
+   * discount), so a price-banded HSN code takes the band of the selling price
+   * per unit; no tax lines on a bill of supply or to an exempt buyer.
+   */
+  private async settleRates(lines: BuiltLine[], ctx: Pick<BuildContext, 'date' | 'supply'>) {
+    for (const l of lines) {
+      if (l.keepRate) continue;
+      if (!l.isFree && l.item.hsnCode) {
+        const r = await this.common.gstRateFor(this.prisma, l.item, ctx.date, bandUnitPrice(l.amount, l.basicQuantity));
+        l.gstRate = D(r.rate);
+        l.provisional = !r.approvedAt;
+      }
+      if (ctx.supply.noTax) l.gstRate = new Decimal(0);
+    }
+  }
+
+  /**
+   * Plan 08 G4, G5: the buyer on the bill. A GSTIN typed or scanned at the till
+   * (checked with its check character) makes a business tax invoice; else the
+   * customer's own GSTIN; a customer without one gets a consumer bill.
+   */
+  private async buyerFor(input: PosTransactionInput, customer: Customer): Promise<BuyerInfo> {
+    const typed = input.buyer ?? null;
+    if (typed?.gstin) {
+      const same = customer.gstin === typed.gstin;
+      return { gstin: typed.gstin, name: typed.name ?? (same ? customer.name : null), address: typed.address ?? null, stateCode: typed.gstin.slice(0, 2), taxSituation: same ? customer.taxSituation : null };
+    }
+    if (!customer.isWalkIn && customer.gstin && taxSituationOf(customer.gstin, customer.taxSituation) !== 'unregistered') {
+      const a = await this.prisma.address.findFirst({ where: { partyType: 'customer', partyId: customer.id, active: true, isBilling: true }, orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }] });
+      const address = typed?.address ?? (a ? [a.addressLine1, a.addressLine2, [a.city, a.pincode].filter(Boolean).join(' ')].filter((x) => !!x && x.trim()).join(', ') : null);
+      return { gstin: a?.gstin ?? customer.gstin, name: typed?.name ?? customer.name, address, stateCode: (a?.gstin ?? customer.gstin).slice(0, 2), taxSituation: a?.taxSituation ?? customer.taxSituation };
+    }
+    return {
+      gstin: null,
+      name: typed?.name ?? (customer.isWalkIn ? null : customer.name),
+      address: typed?.address ?? null,
+      stateCode: typed?.stateCode ?? null,
+      taxSituation: customer.isWalkIn ? null : customer.taxSituation,
+    };
+  }
+
+  /**
+   * Plan 08 G4, G5 (CBIC invoice rules): a business invoice names the buyer and
+   * their address; a consumer bill of ₹50,000 taxable value or more needs the
+   * buyer's name, address and state. Offline bills are kept and flagged.
+   */
+  private checkBuyerDetails(b: BuiltBill, taxable: Decimal, offline: boolean, flags: Set<string>) {
+    let problem: string | null = null;
+    if (b.supply.invoiceKind === 'business' && (!b.buyer.name || !b.buyer.address)) problem = 'A business tax invoice needs the buyer’s name and address';
+    else if (b.supply.invoiceKind !== 'business' && needsBuyerDetails(taxable) && (!b.buyer.name || !b.buyer.address || !b.buyer.stateCode)) {
+      problem = 'A bill of ₹50,000 or more (taxable value) needs the buyer’s name, address and state';
+    }
+    if (!problem) return;
+    if (!offline) throw new BadRequestException(problem);
+    flags.add('buyer_details_missing');
   }
 
   /**
@@ -1088,11 +1216,16 @@ export class PosBillsService {
   }
 
   /** Returns at the original prices, or without a bill with a manager's approval (decision 40). */
-  private async buildReturn(ctx: { till: TillWithRefs; date: string; input: PosTransactionInput; user: CurrentUser; flags: Set<string>; customer: Customer; approvals: string[]; pending: PendingApproval[] }): Promise<BuiltBill> {
+  private async buildReturn(ctx: Pick<BuildContext, 'till' | 'date' | 'input' | 'user' | 'flags' | 'customer' | 'approvals' | 'pending' | 'supply' | 'buyer' | 'seller'>): Promise<BuiltBill> {
     const { till, date, input, user } = ctx;
     const part = input.ret!;
     const lines: BuiltLine[] = [];
     let approvedById: string | null = null;
+    // Plan 08 G6: a return against a bill is its credit note, with the original's place of supply and buyer.
+    let supply = ctx.supply;
+    let buyer = ctx.buyer;
+    let registrationId = ctx.seller.registrationId;
+    let original: BuiltBill['original'] = null;
     // Against a bill, the return carries the original bill's salesperson; without one, the salesperson chosen now.
     let billStaff: string | null = input.salesStaffId ?? null;
     if (part.returnOfId) {
@@ -1101,6 +1234,18 @@ export class PosBillsService {
       billStaff = orig.salesStaffId;
       if (orig.status !== 'completed') throw new BadRequestException(`Bill ${orig.number} is cancelled`);
       if (orig.customerId !== ctx.customer.id) throw new BadRequestException('A return must be for the same customer as the original bill');
+      const origDate = iso(orig.businessDate)!;
+      original = { number: orig.number, date: origDate, late: isCreditNoteLate(origDate, date) };
+      registrationId = orig.gstRegistrationId ?? registrationId;
+      buyer = { gstin: orig.buyerGstin, name: orig.buyerName, address: orig.buyerAddress, stateCode: orig.buyerStateCode, taxSituation: null };
+      const place = orig.placeOfSupply ?? ctx.seller.stateCode;
+      supply = {
+        invoiceKind: orig.invoiceKind as Supply['invoiceKind'],
+        situation: taxSituationOf(orig.buyerGstin, null),
+        placeOfSupply: place,
+        interState: !D(orig.igst).isZero() || place !== ctx.seller.stateCode,
+        noTax: orig.invoiceKind === 'bill_of_supply',
+      };
       for (const l of part.lines) {
         const o = orig.lines.find((x) => x.id === l.returnOfLineId);
         if (!o) throw new BadRequestException(`Line ${l.lineNo} is not on bill ${orig.number}`);
@@ -1155,7 +1300,7 @@ export class PosBillsService {
         const found = await this.pricing.lookup({ itemId: b.item.id, unitId: b.unitId, priceListId: till.priceListId, date, quantity: l.quantity }, user);
         if (!found.found || found.rate === null) throw new BadRequestException(`${b.item.code} has no price in the till’s price list`);
         const price = l.price !== undefined ? D(l.price) : D(found.rate);
-        const gst = await this.common.gstRateFor(this.prisma, b.item, date);
+        const gst = await this.common.gstRateFor(this.prisma, b.item, date, b.factor.isZero() ? price : price.div(b.factor));
         lines.push({
           lineNo: l.lineNo,
           item: b.item,
@@ -1174,7 +1319,7 @@ export class PosBillsService {
           offerDiscount: new Decimal(0),
           offerId: null,
           isFree: false,
-          gstRate: D(gst.rate),
+          gstRate: supply.noTax ? new Decimal(0) : D(gst.rate),
           provisional: !gst.approvedAt,
           amount: roundMoney(price.mul(b.quantity)).neg(),
           returnOfLineId: null,
@@ -1184,7 +1329,7 @@ export class PosBillsService {
         });
       }
     }
-    return { kind: 'return', number: part.number, lines, returnOfId: part.returnOfId ?? null, returnReason: part.reason ?? null, approvedById, couponId: null, billDiscount: new Decimal(0), salesStaffId: billStaff, delivery: null };
+    return { kind: 'return', number: part.number, lines, returnOfId: part.returnOfId ?? null, returnReason: part.reason ?? null, approvedById, couponId: null, billDiscount: new Decimal(0), salesStaffId: billStaff, delivery: null, supply, buyer, registrationId, original };
   }
 
   private pendingReturned(lines: BuiltLine[], originalLineId: string): Decimal {
@@ -1192,7 +1337,7 @@ export class PosBillsService {
   }
 
   /** Per-line GST from prices that include it, and the bill totals rounded to the rupee. */
-  private totals(lines: BuiltLine[], interState: boolean) {
+  private totals(lines: BuiltLine[], supply: Supply) {
     let gross = new Decimal(0);
     let discount = new Decimal(0);
     let taxable = new Decimal(0);
@@ -1201,7 +1346,7 @@ export class PosBillsService {
     let igst = new Decimal(0);
     let exact = new Decimal(0);
     const out = lines.map((l) => {
-      const tax = inclusiveTax(l.amount, l.gstRate, interState);
+      const tax = supplyLineTax(l.amount, l.gstRate, supply);
       const lineGross = roundMoney(l.price.mul(l.quantity));
       gross = gross.add(lineGross);
       discount = discount.add(l.quantity.isNegative() ? l.discountAmount.neg() : l.discountAmount);
@@ -1410,12 +1555,24 @@ export class PosBillsService {
   private async extras(bills: BillRow[]): Promise<BillExtras> {
     const offerIds = [...new Set(bills.flatMap((b) => b.lines.map((l) => l.offerId)).filter((x): x is string => !!x))];
     const staffIds = [...new Set(bills.flatMap((b) => [b.salesStaffId, ...b.lines.map((l) => l.salesStaffId)]).filter((x): x is string => !!x))];
-    const [offers, staff, deliveries] = await Promise.all([
+    const originalIds = [...new Set(bills.map((b) => b.returnOfId).filter((x): x is string => !!x))];
+    const regIds = [...new Set(bills.map((b) => b.gstRegistrationId).filter((x): x is string => !!x))];
+    const [offers, staff, deliveries, originals, regs, gst] = await Promise.all([
       offerIds.length ? this.prisma.offer.findMany({ where: { id: { in: offerIds } }, select: { id: true, code: true, name: true } }) : [],
       staffIds.length ? this.prisma.salesStaff.findMany({ where: { id: { in: staffIds } }, select: { id: true, code: true, name: true } }) : [],
       this.prisma.posDelivery.findMany({ where: { billId: { in: bills.map((b) => b.id) } } }),
+      originalIds.length ? this.prisma.posBill.findMany({ where: { id: { in: originalIds } }, select: { id: true, number: true, businessDate: true } }) : [],
+      regIds.length ? this.prisma.gstRegistration.findMany({ where: { id: { in: regIds } }, select: { id: true, gstin: true } }) : [],
+      bills.length ? this.prisma.gstSettings.findUnique({ where: { companyId: bills[0].companyId } }) : null,
     ]);
-    return { offers: new Map(offers.map((o) => [o.id, o])), staff: new Map(staff.map((x) => [x.id, x])), deliveries: new Map(deliveries.map((d) => [d.billId, d])) };
+    return {
+      offers: new Map(offers.map((o) => [o.id, o])),
+      staff: new Map(staff.map((x) => [x.id, x])),
+      deliveries: new Map(deliveries.map((d) => [d.billId, d])),
+      originals: new Map(originals.map((o) => [o.id, { number: o.number, date: iso(o.businessDate)! }])),
+      gstins: new Map(regs.map((r) => [r.id, r.gstin])),
+      gst,
+    };
   }
 
   private async transactionDto(bills: BillRow[], user: CurrentUser, repeated: boolean) {
@@ -1465,6 +1622,7 @@ export class PosBillsService {
       offline: b.offline,
       checkFlags: b.checkFlags,
       gstProvisional: b.gstProvisional,
+      ...gstFields(b, extras),
       returnReason: b.returnReason,
       cancelReason: b.cancelReason,
       reprints: b.reprints,
@@ -1494,6 +1652,7 @@ export class PosBillsService {
         salesStaff: staff(l.salesStaffId),
         isFree: l.isFree,
         gstRate: l.gstRate.toString(),
+        hsnCode: l.hsnCode ?? l.item.hsnCode,
         taxableAmount: l.taxableAmount.toFixed(2),
         cgst: l.cgst.toFixed(2),
         sgst: l.sgst.toFixed(2),
@@ -1515,11 +1674,14 @@ export class PosBillsService {
       const r = byRate.get(k) ?? { taxable: new Decimal(0), cgst: new Decimal(0), sgst: new Decimal(0), igst: new Decimal(0) };
       byRate.set(k, { taxable: r.taxable.add(D(l.taxableAmount)), cgst: r.cgst.add(D(l.cgst)), sgst: r.sgst.add(D(l.sgst)), igst: r.igst.add(D(l.igst)) });
     }
+    const digits = extras.gst?.hsnDigits ?? 4;
     return {
       billId: b.id,
       number: b.number,
       kind: b.kind,
       duplicate,
+      // Plan 08 (decision 43, CBIC invoice rules): title, seller and buyer, place of supply, original bill.
+      gst: receiptGst(b, extras),
       provisional: b.gstProvisional,
       soldAt: b.soldAt,
       till: b.till.code,
@@ -1527,7 +1689,7 @@ export class PosBillsService {
       lines: b.lines.map((l) => ({
         name: l.item.name,
         code: l.item.code,
-        hsn: l.item.hsnCode,
+        hsn: hsnForPrint(l.hsnCode ?? l.item.hsnCode, digits) || null,
         quantity: l.quantity.toString(),
         price: l.price.toFixed(2),
         discount: l.discountAmount.toFixed(2),
@@ -1541,12 +1703,52 @@ export class PosBillsService {
       offers: offersUsed(b, extras).map((o) => ({ name: o.name, saving: o.saving })),
       salesStaff: b.salesStaffId ? (extras.staff.get(b.salesStaffId)?.name ?? null) : null,
       delivery: extras.deliveries.has(b.id) ? deliveryDto(extras.deliveries.get(b.id)!) : null,
-      gstTable: [...byRate.entries()].map(([rate, r]) => ({ rate, taxable: r.taxable.toFixed(2), cgst: r.cgst.toFixed(2), sgst: r.sgst.toFixed(2), igst: r.igst.toFixed(2) })),
+      // No tax table on a bill of supply (G7), nor when the business switched it off (plan 08 §5).
+      gstTable:
+        b.invoiceKind === 'bill_of_supply' || extras.gst?.receiptTaxTable === false
+          ? []
+          : [...byRate.entries()].map(([rate, r]) => ({ rate, taxable: r.taxable.toFixed(2), cgst: r.cgst.toFixed(2), sgst: r.sgst.toFixed(2), igst: r.igst.toFixed(2) })),
       totals: { gross: b.grossAmount.toFixed(2), discount: b.discountAmount.toFixed(2), taxable: b.taxableAmount.toFixed(2), rounding: b.roundingAdjustment.toFixed(2), total: b.total.toFixed(2) },
       payments: b.payments.map((p) => ({ method: p.paymentMethod.name, amount: p.amount.toFixed(2), reference: p.reference })),
       change: b.changeAmount.toFixed(2),
     };
   }
+}
+
+/** Plan 08: the GST facts of a till bill, as the reports and prints read them. */
+function gstFields(b: BillRow, extras: BillExtras) {
+  const original = b.returnOfId ? (extras.originals.get(b.returnOfId) ?? null) : null;
+  return {
+    invoiceKind: b.invoiceKind,
+    documentTitle: gstDocumentTitle(b.kind, b.invoiceKind),
+    buyerGstin: b.buyerGstin,
+    buyerName: b.buyerName,
+    buyerAddress: b.buyerAddress,
+    buyerStateCode: b.buyerStateCode,
+    placeOfSupply: b.placeOfSupply,
+    gstRegistrationId: b.gstRegistrationId,
+    sellerGstin: b.gstRegistrationId ? (extras.gstins.get(b.gstRegistrationId) ?? null) : null,
+    originalBill: original,
+    creditNoteLate: b.checkFlags.includes('credit_note_late'),
+  };
+}
+
+/** What the receipt prints about GST (plan 08 §2, CBIC invoice rules). */
+function receiptGst(b: BillRow, extras: BillExtras) {
+  const f = gstFields(b, extras);
+  const state = (code: string | null) => (code ? { code, name: INDIAN_STATES[code] ?? code } : null);
+  return {
+    title: f.documentTitle,
+    invoiceKind: f.invoiceKind,
+    sellerGstin: f.sellerGstin,
+    buyer: f.buyerGstin || f.buyerName || f.buyerAddress ? { name: f.buyerName, gstin: f.buyerGstin, address: f.buyerAddress, state: state(f.buyerStateCode) } : null,
+    placeOfSupply: state(f.placeOfSupply),
+    interState: !D(b.igst).isZero(),
+    reverseCharge: false,
+    original: f.originalBill,
+    declaration: b.invoiceKind === 'bill_of_supply' ? BILL_OF_SUPPLY_DECLARATION : null,
+    creditNoteLate: f.creditNoteLate,
+  };
 }
 
 /**
@@ -1579,7 +1781,7 @@ export function deliveryDto(d: PosDelivery) {
   };
 }
 
-function lineData(l: BuiltLine & { tax: ReturnType<typeof inclusiveTax> }) {
+function lineData(l: BuiltLine & { tax: InclusiveTax }) {
   return {
     lineNo: l.lineNo,
     itemId: l.item.id,
@@ -1599,6 +1801,7 @@ function lineData(l: BuiltLine & { tax: ReturnType<typeof inclusiveTax> }) {
     offerId: l.offerId,
     isFree: l.isFree,
     gstRate: l.gstRate.toString(),
+    hsnCode: l.item.hsnCode,
     taxableAmount: l.tax.taxable.toFixed(2),
     cgst: l.tax.cgst.toFixed(2),
     sgst: l.tax.sgst.toFixed(2),

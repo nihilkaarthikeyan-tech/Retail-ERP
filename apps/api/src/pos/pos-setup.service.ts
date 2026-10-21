@@ -3,9 +3,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   type CurrentUser,
+  Decimal,
   type GstRateInput,
   hasPermission,
   PAYMENT_ACCOUNT_ROLES,
+  priceBandProblem,
   type PaymentMethodInput,
   type PosSettingsInput,
   type RegisterDeviceInput,
@@ -18,6 +20,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import type { GstRate, PaymentMethod, Store } from '../generated/prisma/client.js';
+import { ensureGstSettings, rateRow } from '../gst/gst-core.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ensurePosDefaults, fromIso, iso, newToken, PosCommon, sha256 } from './pos-common.service.js';
 
@@ -37,13 +40,13 @@ export class PosSetupService {
   }
 
   async createGstRate(input: GstRateInput, actor: Actor) {
-    const exists = await this.prisma.gstRate.findUnique({ where: { hsnCode_effectiveFrom: { hsnCode: input.hsnCode, effectiveFrom: fromIso(input.effectiveFrom) } } });
-    if (exists) throw new ConflictException(`HSN ${input.hsnCode} already has a rate starting ${input.effectiveFrom}`);
+    const data = rateFields(input);
+    await this.checkRateRow(null, { hsnCode: input.hsnCode, effectiveFrom: input.effectiveFrom, ...data });
     return this.prisma.$transaction(async (tx) => {
       const r = await tx.gstRate.create({
-        data: { hsnCode: input.hsnCode, rate: input.rate, cessRate: input.cessRate ?? '0', effectiveFrom: fromIso(input.effectiveFrom), note: input.note ?? null, createdById: actor.userId, updatedById: actor.userId },
+        data: { hsnCode: input.hsnCode, rate: data.rate, cessRate: input.cessRate ?? '0', kind: data.kind, priceFrom: data.priceFrom, priceUpTo: data.priceUpTo, effectiveFrom: fromIso(input.effectiveFrom), note: input.note ?? null, createdById: actor.userId, updatedById: actor.userId },
       });
-      await this.audit.record(tx, actor, { action: 'create', entityType: 'gst_rate', entityId: r.id, changes: { hsnCode: r.hsnCode, rate: r.rate.toString(), effectiveFrom: input.effectiveFrom } });
+      await this.audit.record(tx, actor, { action: 'create', entityType: 'gst_rate', entityId: r.id, changes: { hsnCode: r.hsnCode, rate: r.rate.toString(), kind: r.kind, priceFrom: r.priceFrom?.toString() ?? null, priceUpTo: r.priceUpTo?.toString() ?? null, effectiveFrom: input.effectiveFrom } });
       return gstDto(r);
     });
   }
@@ -53,14 +56,29 @@ export class PosSetupService {
     const before = await this.prisma.gstRate.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('GST rate not found');
     if (before.approvedAt) throw new BadRequestException('An approved rate cannot be changed; add a new rate with a later start date');
+    const merged = { rate: input.rate ?? before.rate.toString(), kind: input.kind ?? before.kind, priceFrom: input.priceFrom !== undefined ? input.priceFrom : (before.priceFrom?.toString() ?? null), priceUpTo: input.priceUpTo !== undefined ? input.priceUpTo : (before.priceUpTo?.toString() ?? null) };
+    const data = rateFields(merged as GstRateInput);
+    const effectiveFrom = input.effectiveFrom ?? iso(before.effectiveFrom)!;
+    await this.checkRateRow(id, { hsnCode: before.hsnCode, effectiveFrom, ...data });
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.gstRate.update({
         where: { id },
-        data: { rate: input.rate, cessRate: input.cessRate ?? undefined, effectiveFrom: input.effectiveFrom ? fromIso(input.effectiveFrom) : undefined, note: input.note !== undefined ? input.note : undefined, updatedById: actor.userId },
+        data: { rate: data.rate, kind: data.kind, priceFrom: data.priceFrom, priceUpTo: data.priceUpTo, cessRate: input.cessRate ?? undefined, effectiveFrom: input.effectiveFrom ? fromIso(input.effectiveFrom) : undefined, note: input.note !== undefined ? input.note : undefined, updatedById: actor.userId },
       });
       await this.audit.recordUpdate(tx, actor, 'gst_rate', id, gstDto(before), gstDto(after));
       return gstDto(after);
     });
+  }
+
+  /** Plan 08 G2: one plain rate per HSN code and date, or price bands that do not overlap. */
+  private async checkRateRow(id: string | null, row: { hsnCode: string; effectiveFrom: string; rate: string; kind: string; priceFrom: string | null; priceUpTo: string | null }) {
+    const others = (await this.prisma.gstRate.findMany({ where: { hsnCode: row.hsnCode, effectiveFrom: fromIso(row.effectiveFrom), ...(id ? { id: { not: id } } : {}) } })).map(rateRow);
+    const banded = row.priceFrom !== null || row.priceUpTo !== null;
+    if (!banded && others.length) throw new ConflictException(`HSN ${row.hsnCode} already has a rate starting ${row.effectiveFrom}`);
+    if (banded && others.some((o) => o.priceFrom === null && o.priceUpTo === null)) throw new ConflictException(`HSN ${row.hsnCode} already has a plain rate starting ${row.effectiveFrom}; give it a price band too`);
+    if (banded && others.some((o) => (o.priceFrom === null ? row.priceFrom === null : row.priceFrom !== null && new Decimal(o.priceFrom).eq(row.priceFrom)))) throw new ConflictException(`HSN ${row.hsnCode} already has a band from that price starting ${row.effectiveFrom}`);
+    const problem = priceBandProblem([...others, { ...row }]);
+    if (problem) throw new BadRequestException(problem);
   }
 
   async approveGstRate(id: string, actor: Actor) {
@@ -143,6 +161,9 @@ export class PosSetupService {
     await this.checkTill(this.prisma, company.id, input.storeId, input);
     if (await this.prisma.till.findUnique({ where: { companyId_code: { companyId: company.id, code: input.code } } })) throw new ConflictException(`Till ${input.code} already exists`);
     const store = await this.prisma.store.findUniqueOrThrow({ where: { id: input.storeId } });
+    // Plan 08 (CGST rule 46(b)): bill numbers PREFIX/2627/000001 stay within 16 characters.
+    if (input.numberPrefix && (await this.common.invoicePrefixTaken(this.prisma, company.id, input.numberPrefix, null))) throw new ConflictException(`Invoice prefix ${input.numberPrefix} is used by another till`);
+    const numberPrefix = input.numberPrefix ?? (await this.common.freeInvoicePrefix(this.prisma, company.id, store.code, input.code, null));
     return this.prisma.$transaction(async (tx) => {
       const t = await tx.till.create({
         data: {
@@ -152,8 +173,8 @@ export class PosSetupService {
           name: input.name,
           locationId: input.locationId,
           priceListId: input.priceListId,
-          // Bill numbers: STORE-TILL-FY-000001, made by the till itself (pos-offline §3).
-          seriesKind: `${store.code}-${input.code}`,
+          // Bill numbers: PREFIX/2627/000001, made by the till itself (pos-offline §3).
+          seriesKind: numberPrefix,
           cashierDiscountPercent: input.cashierDiscountPercent ?? '5',
           allowPriceChange: input.allowPriceChange ?? false,
           autoPrint: input.autoPrint ?? true,
@@ -181,9 +202,11 @@ export class PosSetupService {
         await tx.tillPaymentMethod.deleteMany({ where: { tillId: id } });
         await tx.tillPaymentMethod.createMany({ data: input.paymentMethods.map((m) => ({ tillId: id, paymentMethodId: m.paymentMethodId, isDefault: !!m.isDefault })) });
       }
-      const { paymentMethods: _pm, ...rest } = input;
+      const { paymentMethods: _pm, numberPrefix, ...rest } = input;
       void _pm;
-      const after = await tx.till.update({ where: { id }, data: { ...rest, updatedById: actor.userId }, include: { store: { select: { id: true, code: true, name: true } }, paymentMethods: true, devices: { where: { revokedAt: null } } } });
+      // Plan 08: a new invoice prefix starts a new series; one used by another till is never taken.
+      if (numberPrefix && numberPrefix !== before.seriesKind && (await this.common.invoicePrefixTaken(tx, before.companyId, numberPrefix, id))) throw new ConflictException(`Invoice prefix ${numberPrefix} is used by another till`);
+      const after = await tx.till.update({ where: { id }, data: { ...rest, ...(numberPrefix ? { seriesKind: numberPrefix } : {}), updatedById: actor.userId }, include: { store: { select: { id: true, code: true, name: true } }, paymentMethods: true, devices: { where: { revokedAt: null } } } });
       await this.audit.recordUpdate(tx, actor, 'till', id, tillDto(before), tillDto(after));
       return tillDto(after);
     });
@@ -226,6 +249,10 @@ export class PosSetupService {
       if (!user.isOwnerAdmin) throw new ForbiddenException('Only the Owner can switch the tills live');
       if (input.liveAllowed && !(await this.prisma.gstRate.count({ where: { approvedAt: { not: null } } }))) {
         throw new BadRequestException('No GST rate has been approved yet; the accountant approves the rates first');
+      }
+      // Plan 08 §5, 8.11: live billing needs the CA's approval of the GST settings.
+      if (input.liveAllowed && !(await ensureGstSettings(this.prisma, company.id)).approvedAt) {
+        throw new BadRequestException('The GST settings are not approved by the accountant yet; until then every bill is provisional and live billing stays off');
       }
     }
     // Plan 11 B4: the delivery charge is billed as a sellable service item (no stock).
@@ -275,8 +302,15 @@ export class PosSetupService {
   }
 }
 
+/** Exempt and nil-rated rows carry no tax (rate 0); bands are kept as typed. */
+function rateFields(input: Pick<GstRateInput, 'rate' | 'kind' | 'priceFrom' | 'priceUpTo'>) {
+  const kind = input.kind ?? 'taxable';
+  if (kind !== 'taxable' && Number(input.rate) !== 0) throw new BadRequestException('An exempt or nil-rated HSN code has a rate of 0');
+  return { rate: input.rate, kind, priceFrom: input.priceFrom ?? null, priceUpTo: input.priceUpTo ?? null };
+}
+
 function gstDto(r: GstRate) {
-  return { id: r.id, hsnCode: r.hsnCode, rate: r.rate.toString(), cessRate: r.cessRate.toString(), effectiveFrom: iso(r.effectiveFrom), approved: !!r.approvedAt, approvedAt: r.approvedAt, approvedById: r.approvedById, note: r.note };
+  return { id: r.id, hsnCode: r.hsnCode, rate: r.rate.toString(), cessRate: r.cessRate.toString(), kind: r.kind, priceFrom: r.priceFrom?.toFixed(2) ?? null, priceUpTo: r.priceUpTo?.toFixed(2) ?? null, effectiveFrom: iso(r.effectiveFrom), approved: !!r.approvedAt, approvedAt: r.approvedAt, approvedById: r.approvedById, note: r.note };
 }
 
 function methodDto(m: PaymentMethod) {

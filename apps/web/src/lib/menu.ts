@@ -79,6 +79,9 @@ export const MENU: MenuEntry[] = [
   { href: "/purchases/consignment", label: "Sale or return", permissions: ["purchase.view"], section: "Purchases", icon: "layers" },
   { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
   { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
+  // Plan 08 §3: GST on purchases.
+  { href: "/purchases/tax-register", label: "Purchase tax register", permissions: ["gst.input_credit"], section: "Purchases", icon: "receipt" },
+  { href: "/purchases/input-credit", label: "Input credit matching", permissions: ["gst.input_credit"], section: "Purchases", icon: "upload" },
   { href: "/purchases/settings", label: "Purchase settings", permissions: ["purchase.settings"], section: "Purchases", icon: "settings" },
   // Module 6
   { href: "/till", label: "Open the till", permissions: ["pos.sell"], section: "Billing counter", icon: "receipt" },
@@ -105,9 +108,16 @@ export const MENU: MenuEntry[] = [
   { href: "/accounts/reports", label: "Accounts reports", permissions: ["accounts.view", "payments.post"], section: "Accounts", icon: "list" },
   { href: "/accounts/closing", label: "Closing the books", permissions: ["accounts.view", "books.lock"], section: "Accounts", icon: "lock" },
   { href: "/accounts/defaults", label: "Default accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", icon: "settings" },
+  // Module 8: GST settings and the CA's approval (plan 08 §5)
+  { href: "/gst/settings", label: "GST settings", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Accounts", icon: "settings" },
+  // Module 8: GST returns (plan 08 §3)
+  { href: "/reports/gst", label: "GST returns", permissions: ["gst.returns"], section: "Accounts", icon: "percent" },
   { href: "/accounts/tally", label: "Export to Tally", permissions: ["tally.export", "accounts.manage"], section: "Accounts", icon: "file" },
+  // Plan 08 §4: e-invoice and e-way bill files.
+  { href: "/gst/e-invoices", label: "E-invoices", permissions: ["einvoice.manage"], section: "Accounts", icon: "receipt" },
+  { href: "/gst/e-way-bills", label: "E-way bills", permissions: ["eway.manage"], section: "Accounts", icon: "truck" },
   // Module 9
-  { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view"], section: "Reports", icon: "chart" },
+  { href: "/reports", label: "All reports", permissions: ["pos.reports", "stock.view", "purchase.view", "accounts.view", "payments.post", "cost_price.view", "stock.cost.view", "gst.returns"], section: "Reports", icon: "chart" },
   { href: "/reports/summary-email", label: "Daily summary email", permissions: ["reports.summary_email"], section: "Reports", icon: "mail" },
   // Module 10
   { href: "/labels", label: "Labels", permissions: ["labels.print"], section: "Printing and data", icon: "barcode" },

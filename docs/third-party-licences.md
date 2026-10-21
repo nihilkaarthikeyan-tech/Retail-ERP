@@ -19,6 +19,8 @@ Last checked: 15 October 2026 (Till Helper added; module 1 list unchanged).
 | decimal.js | Exact decimal arithmetic for money and quantities | MIT |
 | reflect-metadata, rxjs | Required by NestJS | Apache-2.0 |
 
+QR codes printed on e-invoices (plan 08 §4) are drawn by our own encoder (`packages/shared/src/qr.ts`, written from the public QR code standard ISO/IEC 18004); no QR library is used.
+
 PostgreSQL itself (Docker image `postgres:17-alpine`) is under the PostgreSQL Licence, a permissive BSD-style licence.
 
 ## Till Helper (apps/till-helper, runs on each till computer)

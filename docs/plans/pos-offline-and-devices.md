@@ -44,7 +44,7 @@ A cashier must sign in online at least once a day (sessions are 12 hours, approv
 
 ## 3. Bill numbers that never clash
 
-- Each till has **its own number series**, set up with the till, for example `MAIN-T1-2627-000123` (store, till, financial year, running number). No two tills share a series, so two offline tills can never produce the same number.
+- Each till has **its own number series**, set up with the till, for example `MAT1/2627/000123` (the till's invoice prefix of 1–4 letters or digits, unique in the company, financial year, running number). No two tills share a series, so two offline tills can never produce the same number. *(18 October 2026, plan 08: GST allows invoice numbers of at most 16 characters (CGST rule 46(b)), so the old form `MAIN-T1-2026-27-000123` was replaced; bills already made keep their numbers, and a bill made offline before the till took its new prefix is still accepted.)*
 - The till numbers its own bills from a counter kept on the till. The counter is saved **before** a number is printed, so a crash cannot reuse a number.
 - The server checks every incoming bill:
   - the number belongs to that till's series;

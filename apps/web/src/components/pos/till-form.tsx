@@ -26,11 +26,13 @@ interface Form {
   active: boolean;
   methods: string[];
   defaultMethod: string;
+  /** Plan 08: the invoice prefix (PREFIX/2627/000001, at most 16 characters); empty = worked out from the codes. */
+  numberPrefix: string;
 }
 
 function initial(till: TillDto | null): Form {
   if (!till) {
-    return { storeId: "", code: "", name: "", locationId: "", priceListId: "", cashierDiscountPercent: "5", allowPriceChange: false, autoPrint: true, receiptFooter: "", active: true, methods: [], defaultMethod: "" };
+    return { storeId: "", code: "", name: "", locationId: "", priceListId: "", cashierDiscountPercent: "5", allowPriceChange: false, autoPrint: true, receiptFooter: "", active: true, methods: [], defaultMethod: "", numberPrefix: "" };
   }
   return {
     storeId: till.store.id,
@@ -43,6 +45,7 @@ function initial(till: TillDto | null): Form {
     autoPrint: till.autoPrint,
     receiptFooter: till.receiptFooter ?? "",
     active: till.active,
+    numberPrefix: /^[A-Z0-9]{1,4}$/.test(till.numberPrefix) ? till.numberPrefix : "",
     methods: till.paymentMethods.map((m) => m.paymentMethodId),
     defaultMethod: till.paymentMethods.find((m) => m.isDefault)?.paymentMethodId ?? "",
   };
@@ -91,6 +94,7 @@ export function TillForm({ till, canEdit, onSaved }: { till: TillDto | null; can
       receiptFooter: form.receiptFooter.trim() || null,
       paymentMethods,
       active: form.active,
+      ...(form.numberPrefix.trim() && (isNew || form.numberPrefix.trim().toUpperCase() !== till.numberPrefix) ? { numberPrefix: form.numberPrefix.trim() } : {}),
     };
     const parsed = isNew ? tillSchema.safeParse({ ...common, storeId: form.storeId, code: form.code }) : updateTillSchema.safeParse(common);
     setErrors(issuesToFieldErrors(parsed));
@@ -142,14 +146,26 @@ export function TillForm({ till, canEdit, onSaved }: { till: TillDto | null; can
             </Field>
           )}
           {isNew ? (
-            <TextInput id="till-code" label="Code" required className="mono" value={form.code} error={errors.code} hint="For example T1. Bill numbers start with the store and this code; it cannot be changed later." autoComplete="off" onChange={(e) => set("code", e.target.value)} />
+            <TextInput id="till-code" label="Code" required className="mono" value={form.code} error={errors.code} hint="For example T1. It cannot be changed later." autoComplete="off" onChange={(e) => set("code", e.target.value)} />
           ) : (
-            <Field id="till-code" label="Code" hint={`Bill numbers start ${till.numberPrefix}-`}>
+            <Field id="till-code" label="Code">
               <span id="till-code" className="mono">
                 {till.code}
               </span>
             </Field>
           )}
+          <TextInput
+            id="till-number-prefix"
+            label="Invoice prefix"
+            className="mono"
+            maxLength={4}
+            value={form.numberPrefix}
+            error={errors.numberPrefix}
+            disabled={!canEdit}
+            autoComplete="off"
+            hint={`1–4 letters or digits, different for every till. Bill numbers look like ${form.numberPrefix.trim().toUpperCase() || "MAT1"}/2627/000001 (GST allows 16 characters). Leave empty to use the store and till codes. A new prefix starts a new series.`}
+            onChange={(e) => set("numberPrefix", e.target.value.toUpperCase())}
+          />
           <TextInput id="till-name" label="Name" required value={form.name} error={errors.name} disabled={!canEdit} autoComplete="off" onChange={(e) => set("name", e.target.value)} />
           <SelectInput id="till-location" label="Sells from" required value={form.locationId} error={errors.locationId} disabled={!canEdit || !form.storeId} hint="A shelf location of the store, normally the shop floor." onChange={(e) => set("locationId", e.target.value)}>
             <option value="">{form.storeId ? "Choose a location" : "Choose the store first"}</option>

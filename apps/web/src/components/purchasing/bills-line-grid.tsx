@@ -89,6 +89,9 @@ export function BillLineGrid({ kind, lines, onChange, problems, shelves, prices 
                 <th scope="col" className="num">
                   IGST
                 </th>
+                <th scope="col" title="Untick when the GST of this line cannot be claimed back; it is then added to the cost of the goods">
+                  Input credit
+                </th>
                 <th scope="col" className="num">
                   Line total (preview)
                 </th>
@@ -177,6 +180,9 @@ export function BillLineGrid({ kind, lines, onChange, problems, shelves, prices 
                     </td>
                     <td className="num">
                       <input className="input" inputMode="decimal" aria-label={`IGST for line ${n}`} value={l.igst} disabled={off} onChange={(e) => update(l.key, { igst: e.target.value })} />
+                    </td>
+                    <td>
+                      <input type="checkbox" aria-label={`Input credit can be claimed for line ${n}`} checked={l.creditClaimable} disabled={off} onChange={(e) => update(l.key, { creditClaimable: e.target.checked })} />
                     </td>
                     <td className="num">
                       {preview ? (

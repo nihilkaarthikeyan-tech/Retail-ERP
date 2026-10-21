@@ -179,7 +179,8 @@ export async function downloadReport(fileName: string, headers: string[], rows: 
 
 // ---- The report centre ----
 
-export type ReportFrequency = "daily" | "weekly" | "monthly";
+/** "gst": the GST returns area (module 8), listed apart from the daily, weekly and monthly reports. */
+export type ReportFrequency = "daily" | "weekly" | "monthly" | "gst";
 
 export interface ReportEntry {
   id: string;
@@ -252,10 +253,15 @@ export const REPORTS: ReportEntry[] = [
   { id: "profit-and-loss", title: "Profit and loss", question: "Income less expenses: did the shop make money?", href: accounts("profit-and-loss"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
   { id: "balance-sheet", title: "Balance sheet", question: "What the shop owns and owes on a date.", href: accounts("balance-sheet"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
   { id: "stock-vs-accounts", title: "Stock against accounts", question: "Does the stock value agree with the stock accounts?", href: accounts("stock-vs-accounts"), frequency: "monthly", area: "accounts", where: "Accounts reports", anyOf: ACCOUNTS_VIEW },
+  // ---- GST returns (module 8, plan 08 §3) ----
+  { id: "gst-sales-register", title: "Sales tax register", question: "Every tax invoice and credit note of a month or quarter, with the tax per head, per GSTIN.", href: "/reports/gst/sales-register", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
+  { id: "gst-gstr1", title: "GSTR-1 figures", question: "The outward return: B2B, B2C large and small, credit notes, HSN summary and documents issued, for Excel and the GST portal.", href: "/reports/gst/gstr1", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
+  { id: "gst-gstr3b", title: "GSTR-3B figures", question: "Tax collected and input credit per head, the set-off, reverse charge, net GST payable and credit carried forward.", href: "/reports/gst/gstr3b", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
+  { id: "gst-notes", title: "Credit and debit note register", question: "Every credit and debit note with its original bill, and whether it is within the 30 November deadline.", href: "/reports/gst/notes", frequency: "gst", area: "accounts", anyOf: ["gst.returns"] },
   { id: "tally-export", title: "Export to Tally", question: "The vouchers of a period as a file your accountant imports into TallyPrime, with the Tally ledger name of each account.", href: "/accounts/tally", frequency: "monthly", area: "accounts", where: "Accounts", anyOf: ["tally.export"] },
 ];
 
-export const FREQUENCY_LABELS: Record<ReportFrequency, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
+export const FREQUENCY_LABELS: Record<ReportFrequency, string> = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", gst: "GST returns" };
 
 export function canSeeReport(user: CurrentUser | null, entry: Pick<ReportEntry, "anyOf" | "allOf">): boolean {
   return entry.anyOf.some((k) => hasPermission(user, k)) && (entry.allOf ?? []).every((k) => hasPermission(user, k));

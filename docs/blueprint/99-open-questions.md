@@ -5,32 +5,32 @@ Each item says what is unclear and what decision is needed.
 
 ## General
 
-1. **Which stores need offline tills?** The reference system's till has no offline mode (see question 38). How long offline is allowed and what is blocked offline depend on our shops' connectivity. Treated as one question with 38. Decision needed before module 8.
-2. **Single company or multiple legal entities?** The reference system supports several companies with separate books. If every store is under one GST registration and one company, several features (inter-company transactions, consolidated statements) can be dropped. Decision needed before module 1 is finalised.
+1. **Which stores need offline tills?** (See question 38.) How long offline is allowed and what is blocked offline depend on our shops' connectivity. Treated as one question with 38. Decision needed before module 8.
+2. **Single company or multiple legal entities?** Several companies with separate books are possible. If every store is under one GST registration and one company, several features (inter-company transactions, consolidated statements) can be dropped. Decision needed before module 1 is finalised.
 
 ## Module-specific
 
 ### Module 1: Company and stores
 
-3. **Store as a record of its own.** The reference system has no real store record; a store is a warehouse plus a cost centre plus tills plus an optional reporting dimension, kept in step by hand. Proposal: one Store record that owns these. Needs owner approval because it changes how permissions and reports are filtered.
-4. **Several GST registrations under one company.** If stores sit in different states, each needs its own GSTIN while sharing one set of books. The reference system attaches the GSTIN to the address and picks tax by address, not by company. Confirm whether we need multi-GSTIN at all in version 1.
-5. **Rounding method.** The reference system defaults to banker's rounding (half to even). Retail receipts in India conventionally use commercial rounding (half away from zero). Recommend commercial rounding as our only method; confirm.
-6. **Financial year auto-creation.** Reference system creates next year automatically three days before year end. Do we want this, or a manual step by the accountant?
-7. **Last-in-first-out valuation.** Offered by the reference system; not acceptable under Indian accounting standards for inventory. Recommend not offering it.
+3. **Store as a record of its own.** A store could be kept as a warehouse plus a cost centre plus tills, kept in step by hand. Proposal: one Store record that owns these. Needs owner approval because it changes how permissions and reports are filtered.
+4. **Several GST registrations under one company.** If stores sit in different states, each needs its own GSTIN while sharing one set of books. One option is to attach the GSTIN to the store address and pick tax by address, not by company. Confirm whether we need multi-GSTIN at all in version 1.
+5. **Rounding method.** Banker's rounding (half to even) is one option. Retail receipts in India conventionally use commercial rounding (half away from zero). Recommend commercial rounding as our only method; confirm.
+6. **Financial year auto-creation.** Should the next year be created automatically a few days before year end, or a manual step by the accountant?
+7. **Last-in-first-out valuation.** Not acceptable under Indian accounting standards for inventory. Recommend not offering it.
 8. **Manufacturing warehouses created at setup** (work in progress, finished goods). Recommend not creating them for a retail product.
 
 ### Module 2: Items
 
-9. **Price-embedded (weighing-scale) barcodes.** Supermarkets print barcodes that carry the item code and either weight or price. The reference system does not parse these. Decide whether version 1 needs a configurable prefix/weight/price barcode format at the till.
-10. **Variant code format.** The reference builds a variant code from the parent code followed by a short code for each attribute value, joined by hyphens. Confirm this is acceptable or whether the owner wants a different code scheme (for example a numeric SKU with the attribute abbreviations only in the name).
+9. **Price-embedded (weighing-scale) barcodes.** Supermarkets print barcodes that carry the item code and either weight or price. Decide whether version 1 needs a configurable prefix/weight/price barcode format at the till.
+10. **Variant code format.** Proposal: build a variant code from the parent code followed by a short code for each attribute value, joined by hyphens. Confirm this is acceptable or whether the owner wants a different code scheme (for example a numeric SKU with the attribute abbreviations only in the name).
 11. **Whole-number units.** Should units such as pieces refuse fractions at the till by default? Reference leaves it as a per-unit flag.
-12. **Which item fields are dropped?** Manufacturing, asset, subcontracting, deferred revenue, quality inspection and customer-provided-item fields exist on the reference item. Proposal: omit all of them.
+12. **Which item fields are dropped?** Manufacturing, asset, subcontracting, deferred revenue, quality inspection and customer-provided-item fields: proposal is to omit all of them.
 13. **Expired batch at point of sale.** Hard block or warning with override role? To be settled in the Inventory and POS modules.
 
 ### Module 3: Pricing and promotions
 
-14. **Gift cards with stored value.** The reference system's gift card is a one-use personal coupon, not a stored balance. Retailers usually want sellable gift cards with a balance that can be partly spent. Proposal: treat a gift card as a prepaid liability (sell it as a non-stock item posting to a gift-card liability account; redeem it as a payment method). Decide if version 1 needs this.
-15. **Loyalty liability accounting.** Points earned create no accounting entry in the reference system; only redemption posts an expense. Accountants may want an accrued liability at earn time. Decide the policy.
+14. **Gift cards with stored value.** A coupon is not a stored balance. Retailers usually want sellable gift cards with a balance that can be partly spent. Proposal: treat a gift card as a prepaid liability (sell it as a non-stock item posting to a gift-card liability account; redeem it as a payment method). Decide if version 1 needs this.
+15. **Loyalty liability accounting.** If points earned create no accounting entry, only redemption posts an expense. Accountants may want an accrued liability at earn time. Decide the policy.
 16. **Points on returns.** Reference re-computes earned points net of returns but never refunds redeemed points. Decide what happens to redeemed points when a bill is returned.
 17. **Conflicting rules at the till.** Reference blocks the sale when two rules tie. Proposal: never block at the till; pick the rule that gives the customer the larger benefit and log the tie. Owner to confirm.
 18. **Cumulative and mixed rules offline.** They need sales history; decide whether offline tills simply skip them.
@@ -39,9 +39,9 @@ Each item says what is unclear and what decision is needed.
 ### Module 4: Customers
 
 20. **Duplicate detection by mobile number.** Reference only de-duplicates by name (adds a suffix). Retail needs mobile number as the practical unique key at the till. Decide: block, warn, or merge on duplicate mobile.
-21. **Address-level GSTIN.** The reference core keeps one tax id on the customer; a GSTIN per address is needed for B2B customers with branches in several states. Proposal: GSTIN on each address, with the customer-level one as default.
+21. **Address-level GSTIN.** A single tax id on the customer is not enough; a GSTIN per address is needed for B2B customers with branches in several states. Proposal: GSTIN on each address, with the customer-level one as default.
 22. **Credit sales at the till.** Decide whether tills may bill credit customers at all in version 1, and if so whether the credit check blocks the sale or only warns the cashier.
-23. **Sales team / commission and portal users.** Present on the reference customer; propose dropping both from version 1 unless the owner sells through commissioned agents.
+23. **Sales team / commission and portal users.** Propose dropping both from version 1 unless the owner sells through commissioned agents.
 
 ### Module 5: Suppliers
 
@@ -68,9 +68,9 @@ Each item says what is unclear and what decision is needed.
 
 ### Module 8: Point of sale
 
-38. **Offline till.** The reference system has no offline mode at all; the till is a web page that needs the server for every action. Our product needs a decision: (a) online-only with a local fallback that queues bills, (b) a true local-first till that syncs. This drives the whole POS architecture (local catalogue, local numbering with a till prefix, conflict rules for stock, customer creation offline). Highest-priority open question.
+38. **Offline till.** A till that is only a web page needs the server for every action. Our product needs a decision: (a) online-only with a local fallback that queues bills, (b) a true local-first till that syncs. This drives the whole POS architecture (local catalogue, local numbering with a till prefix, conflict rules for stock, customer creation offline). Highest-priority open question.
 39. **Per-sale posting versus day-end consolidation.** Reference offers both. Consolidation gives fewer ledger lines and faster tills but stock and accounts lag until closing. Proposal: post stock per sale (so stock is always right across tills) and consolidate only accounting at day-end. Confirm.
-40. **Supervisor override.** The reference only has a till-level switch allowing price and discount changes. Retail needs a supervisor PIN or login prompt for overrides, no-receipt returns and voids. Decide the approval UX.
+40. **Supervisor override.** A till-level switch allowing price and discount changes is not enough. Retail needs a supervisor PIN or login prompt for overrides, no-receipt returns and voids. Decide the approval UX.
 41. **Cash denominations and drawer events.** Reference records one counted amount per method; no denomination count, no pay-in/pay-out (petty cash) during a shift. Decide whether to add denomination counting and drawer pay-in/out records.
 42. **Exchange flow.** Reference handles exchanges as a return plus a new bill. Decide whether a single exchange screen that nets the two is needed.
 43. **Receipt content and GST rules at the till.** Simplified tax invoice thresholds and B2C e-invoice exemptions to be confirmed from official sources in the Tax module.
@@ -82,11 +82,11 @@ Each item says what is unclear and what decision is needed.
 46. **Pick lists, packing slips and delivery trips.** Useful for a distribution warehouse; overhead for a shop doing a few home deliveries. Proposal: deliveries and simple driver and vehicle details in version 1; pick lists and trips later.
 47. **Shipping rules.** Keep as a simple delivery charge line (fixed or by order value); decide whether weight-based slabs and country filters are needed.
 48. **Sales team, commissions, sales partners and targets.** Propose dropping from version 1 (noted in Customers too).
-49. **Invoice before delivery.** Allowed in the reference; decide whether B2B flow should force delivery before invoicing for stock items (cleaner stock/revenue matching).
+49. **Invoice before delivery.** Decide whether B2B flow should force delivery before invoicing for stock items (cleaner stock/revenue matching).
 
 ### Module 10: Accounting
 
-50. **Immutable ledger.** The reference offers either a reversal dated today or marking the old lines as cancelled. Indian audit practice favours an immutable ledger. Proposal: immutable by default, no option. Confirm.
+50. **Immutable ledger.** Options: a reversal dated today, or marking the old lines as cancelled. Indian audit practice favours an immutable ledger. Proposal: immutable by default, no option. Confirm.
 51. **Two ledgers (general and payment).** Reference keeps a separate settlement ledger for receivables and payables. Decide whether to replicate this or derive outstanding amounts from the general ledger alone (simpler, slower on large books).
 52. **Budgets, accounting dimensions, finance books, exchange rate revaluation, deferred revenue.** Proposal: cost centre per store only; budgets and the rest deferred to a later version.
 53. **Bank statement import formats.** Decide which Indian bank CSV/Excel formats and which aggregator (if any) version 1 must read.
@@ -101,14 +101,14 @@ Each item says what is unclear and what decision is needed.
 59. **B2C HSN summary.** Optional for smaller sellers at the time of the cited advisory; a pending phase may have made it mandatory. Confirm current portal behaviour.
 60. **Consolidated daily invoice for sales under 200.** Legally allowed; proposal: still record every bill at the till and treat the daily consolidated invoice as a print/report only. Confirm.
 61. **Free goods and samples.** Whether a taxable value must be declared on free supplies is a consultant's call.
-62. **TDS/TCS.** Income-tax withholding exists in the reference system. Decide whether version 1 needs it (only relevant above turnover thresholds).
+62. **TDS/TCS.** Income-tax withholding (TDS/TCS): decide whether version 1 needs it (only relevant above turnover thresholds).
 63. **Direct portal integration.** Decide whether to integrate with an e-invoice/e-way bill provider (GSP) in version 1 or export JSON files for manual upload.
 64. **Multi-GSTIN.** Stores in several states mean several registrations and separate return data; ties to question 4.
 
 ### Module 13: Reports and dashboards
 
-65. **User-built list reports.** The reference lets any user build and save list reports; decide whether version 1 offers a report builder or only the fixed catalogue plus export.
-66. **Recommended reports not in the reference** (hourly sales, top/bottom sellers, shrinkage, loyalty liability, sell-through, stock cover). Owner to prioritise.
+65. **User-built list reports.** Decide whether version 1 offers a report builder or only the fixed catalogue plus export.
+66. **Recommended reports** (hourly sales, top/bottom sellers, shrinkage, loyalty liability, sell-through, stock cover). Owner to prioritise.
 67. **Digest and scheduled reports by WhatsApp/SMS** in addition to email; decide channel for store owners.
 
 ### Module 14: Users, roles and permissions
@@ -133,6 +133,6 @@ Each item says what is unclear and what decision is needed.
 
 ### Module 17: Integrations
 
-79. **Which integrations ship in version 1?** Candidates: one card/UPI terminal provider, one payment-link gateway, SMS and WhatsApp for e-receipts, one GST Suvidha Provider for e-invoice and e-way bill, one marketplace or own web store, a bank aggregator. The reference keeps all of these outside its core. Owner to pick and rank.
+79. **Which integrations ship in version 1?** Candidates: one card/UPI terminal provider, one payment-link gateway, SMS and WhatsApp for e-receipts, one GST Suvidha Provider for e-invoice and e-way bill, one marketplace or own web store, a bank aggregator. Owner to pick and rank.
 80. **Webhook retries.** Reference logs failures but does not retry automatically. Decide whether to add retries with back-off.
-81. **Local device helper at the till** (receipt printer, cash drawer, customer display, weighing scale, label printer). Needed for any serious till; not in the reference. Decide the approach (browser device APIs, a small local agent, or a native till app).
+81. **Local device helper at the till** (receipt printer, cash drawer, customer display, weighing scale, label printer). Needed for any serious till. Decide the approach (browser device APIs, a small local agent, or a native till app).

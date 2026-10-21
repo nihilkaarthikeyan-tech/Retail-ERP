@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Decimal } from "shared";
+import { Decimal, INDIAN_STATES } from "shared";
 import { Alert, Badge, Button, DataTable, type Column } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -13,6 +13,9 @@ import { showQuantity } from "@/lib/stock";
 import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { BillCancelDialog, BillDebitNoteDialog, BillHoldDialog, heldText, PriceDifferenceDialog } from "./bills-dialogs";
 import { useUnitCodes } from "./bills-line-grid";
+
+/** "Tamil Nadu (33)" for a GST state code. */
+const stateLabel = (code: string) => `${INDIAN_STATES[code] ?? code} (${code})`;
 
 interface BillViewProps {
   bill: SupplierBillDto;
@@ -162,6 +165,7 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
               <>
                 {showQuantity(l.gstRate)}%
                 <div className="muted">{nonZero(l.igst) ? `IGST ${rupees(l.igst)}` : `CGST ${rupees(l.cgst)} · SGST ${rupees(l.sgst)}`}</div>
+                {l.creditClaimable === false ? <div className="muted">No input credit: added to cost</div> : null}
               </>
             ),
           },
@@ -211,6 +215,20 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
           <dd>{formatDate(bill.supplierBillDate)}</dd>
           <dt>Posting date</dt>
           <dd>{formatDate(bill.postingDate)}</dd>
+          {bill.placeOfSupply ? (
+            <>
+              <dt>Place of supply</dt>
+              <dd>{stateLabel(bill.placeOfSupply)}</dd>
+            </>
+          ) : null}
+          {bill.reverseCharge ? (
+            <>
+              <dt>Reverse charge</dt>
+              <dd>
+                <Badge kind="warn">Yes</Badge> The shop pays this bill&apos;s GST to the government itself; the supplier is paid without GST.
+              </dd>
+            </>
+          ) : null}
           {!isNote ? (
             <>
               <dt>Due date</dt>
@@ -263,7 +281,7 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
           <dl className="kv">
             <dt>Before GST</dt>
             <dd>{rupees(bill.taxableAmount)}</dd>
-            <dt>GST</dt>
+            <dt>{bill.reverseCharge ? "GST paid by the shop (reverse charge)" : "GST"}</dt>
             <dd>{rupees(bill.taxAmount)}</dd>
             <dt>Rounding</dt>
             <dd>{rupees(bill.roundingAdjustment)}</dd>

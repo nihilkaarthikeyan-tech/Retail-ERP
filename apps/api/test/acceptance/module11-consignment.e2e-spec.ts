@@ -26,7 +26,7 @@ let n = 0;
 
 const today = () => businessDate();
 const monthStart = () => `${today().slice(0, 8)}01`;
-const num = () => `MAIN-T1-2026-27-${String(++n).padStart(6, '0')}`;
+const num = () => `MAT1/2627/${String(++n).padStart(6, '0')}`;
 const T = (r: ReturnType<Agent['post']>) => r.set('x-till-token', tillToken);
 const cash = (amount: string) => [{ paymentMethodId: pm.CASH, amount }];
 

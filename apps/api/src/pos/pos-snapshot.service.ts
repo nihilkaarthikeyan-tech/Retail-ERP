@@ -6,7 +6,7 @@
 // (plan 11 C1, B4) and the till's last bill numbers. Never
 // passwords, PINs or cost prices.
 import { Injectable } from '@nestjs/common';
-import { addDays, businessDate, type CurrentUser } from 'shared';
+import { addDays, businessDate, type CurrentUser, tillNumberSeries } from 'shared';
 import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { fromIso, iso, PosCommon } from './pos-common.service.js';
@@ -21,8 +21,10 @@ export class PosSnapshotService {
   ) {}
 
   async snapshot(tillId: string, since: string | undefined, user: CurrentUser, deviceToken: string | undefined) {
-    const till = await this.common.usableTill(this.prisma, tillId, user);
-    await this.common.assertDevice(this.prisma, till.id, deviceToken);
+    const found = await this.common.usableTill(this.prisma, tillId, user);
+    await this.common.assertDevice(this.prisma, found.id, deviceToken);
+    // Plan 08: a till made before GST-length numbers gets its short invoice prefix now.
+    const till = await this.common.ensureInvoicePrefix(this.prisma, found, user.id);
     const company = await this.common.currentCompany();
     const settings = await this.common.settings(this.prisma, company.id);
     const today = businessDate();
@@ -48,7 +50,7 @@ export class PosSnapshotService {
     const partySettings = await this.prisma.partySettings.findUnique({ where: { companyId: company.id } });
     const customers = await this.prisma.customer.findMany({
       where: { companyId: company.id, OR: [{ mobile: { not: null } }, { id: partySettings?.walkInCustomerId ?? '00000000-0000-0000-0000-000000000000' }], ...(changedSince ? { updatedAt: { gt: changedSince } } : {}) },
-      select: { id: true, code: true, name: true, mobile: true, gstin: true, stateCode: true, customerGroupId: true, status: true },
+      select: { id: true, code: true, name: true, mobile: true, gstin: true, taxSituation: true, stateCode: true, customerGroupId: true, status: true },
     });
     const stock = await this.prisma.stockPosition.findMany({ where: { locationId: till.locationId }, select: { itemId: true, quantity: true } });
     // Plan 11 part 2: goods set aside for ready customer orders, so the till warns before selling them offline too.
@@ -56,14 +58,16 @@ export class PosSnapshotService {
     const years = await this.prisma.financialYear.findMany({ where: { companyId: company.id, status: 'open' }, select: { name: true, startDate: true, endDate: true } });
     const lastNumbers = await Promise.all(
       years.map(async (y) => {
-        const prefix = `${till.seriesKind}-${y.name}-`;
+        const prefix = tillNumberSeries(till.seriesKind, y.name);
         const last = await this.prisma.posBill.findFirst({ where: { tillId: till.id, number: { startsWith: prefix } }, orderBy: { number: 'desc' }, select: { number: true } });
         return { financialYear: y.name, prefix, lastNumber: last?.number ?? null };
       }),
     );
     const store = await this.prisma.store.findUniqueOrThrow({ where: { id: till.storeId } });
     const salesStaff = await this.prisma.salesStaff.findMany({ where: { storeId: till.storeId, active: true }, orderBy: { code: 'asc' }, select: { id: true, code: true, name: true } });
-    const gst = store.gstRegistrationId ? await this.prisma.gstRegistration.findUnique({ where: { id: store.gstRegistrationId } }) : null;
+    // Plan 08: the seller's registration and the GST settings the till bills with offline too.
+    const seller = await this.common.gst.sellerFor(this.prisma, till.storeId);
+    const gstSettings = await this.common.gst.settingsFor(this.prisma, company.id);
 
     return {
       serverTime,
@@ -82,7 +86,8 @@ export class PosSnapshotService {
         autoPrint: till.autoPrint,
         receiptFooter: till.receiptFooter,
         store: { id: store.id, code: store.code, name: store.name, address: [store.addressLine1, store.addressLine2, store.city, store.pincode].filter(Boolean).join(', '), phone: store.phone, stateCode: store.stateCode ?? company.stateCode },
-        company: { legalName: company.legalName, stateCode: company.stateCode, gstin: gst?.gstin ?? null },
+        company: { legalName: company.legalName, stateCode: company.stateCode, gstin: seller.gstin },
+        gst: { scheme: gstSettings.scheme, approved: !!gstSettings.approvedAt, hsnDigits: gstSettings.hsnDigits, receiptTaxTable: gstSettings.receiptTaxTable, sellerState: seller.stateCode },
         paymentMethods: till.paymentMethods.map((m) => ({ id: m.paymentMethodId, code: m.paymentMethod.code, name: m.paymentMethod.name, kind: m.paymentMethod.kind, allowRefund: m.paymentMethod.allowRefund, needsReference: m.paymentMethod.needsReference, isDefault: m.isDefault, active: m.paymentMethod.active })),
         liveAllowed: settings.liveAllowed,
         walkInCustomerId: partySettings?.walkInCustomerId ?? null,
@@ -113,7 +118,7 @@ export class PosSnapshotService {
         barcodes: i.barcodes.map((b) => ({ code: b.code, unitId: b.unitId })),
       })),
       prices: prices.map((p) => ({ id: p.id, priceListId: p.priceListId, itemId: p.itemId, unitId: p.unitId, price: p.price.toString(), startDate: iso(p.startDate), endDate: iso(p.endDate), customerId: p.customerId, batchId: p.batchId, packSize: p.packSize?.toString() ?? null })),
-      gstRates: gstRates.map((r) => ({ hsnCode: r.hsnCode, rate: r.rate.toString(), effectiveFrom: iso(r.effectiveFrom), approved: !!r.approvedAt })),
+      gstRates: gstRates.map((r) => ({ hsnCode: r.hsnCode, rate: r.rate.toString(), kind: r.kind, priceFrom: r.priceFrom?.toString() ?? null, priceUpTo: r.priceUpTo?.toString() ?? null, effectiveFrom: iso(r.effectiveFrom), approved: !!r.approvedAt })),
       offers: offers.map(offerDto),
       coupons: coupons.map((c) => ({ code: c.code, offerId: c.offerId, startDate: iso(c.startDate), endDate: iso(c.endDate), maxUses: c.maxUses, usedCount: c.usedCount, customerId: c.customerId })),
       customers,

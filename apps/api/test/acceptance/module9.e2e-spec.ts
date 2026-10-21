@@ -50,7 +50,7 @@ async function freshCompany() {
   await till('T1', MAIN, 'MAIN-FLOOR', 'MAIN');
 }
 
-async function till(code: string, store: string, location: string, storeCode: string) {
+async function till(code: string, store: string, location: string, _storeCode: string) {
   const t = (
     await owner
       .post('/pos/tills')
@@ -58,7 +58,7 @@ async function till(code: string, store: string, location: string, storeCode: st
       .expect(201)
   ).body;
   const token = (await owner.post(`/pos/tills/${t.id}/register`).send({ deviceName: `${code} PC` }).expect(201)).body.token;
-  tills[code] = { id: t.id, token, prefix: `${storeCode}-${code}-2026-27-`, n: 0 };
+  tills[code] = { id: t.id, token, prefix: `${t.numberPrefix}/2627/`, n: 0 };
 }
 
 /** Prices include 5% GST, so ₹105 is ₹100 before GST. */

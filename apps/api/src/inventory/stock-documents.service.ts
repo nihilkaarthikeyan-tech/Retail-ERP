@@ -34,6 +34,7 @@ import { NumberingService } from '../numbering/numbering.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { seriesKind } from './location-defaults.js';
 import { type Movement, StockEngine } from './stock-engine.service.js';
+import { TransferGstService } from './transfer-gst.service.js';
 
 const D = (v: { toString(): string } | string | number) => new Decimal(v.toString());
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
@@ -84,6 +85,7 @@ export class StockDocumentsService {
     private readonly years: FinancialYearsService,
     private readonly items: ItemsService,
     private readonly engine: StockEngine,
+    private readonly transferGst: TransferGstService,
   ) {}
 
   // ---- Reading ----
@@ -315,6 +317,8 @@ export class StockDocumentsService {
           await this.applySerials(tx, fresh, 'finalise', actor);
         }
         await this.storeLineValues(tx, fresh, entries);
+        // Plan 08 G10: between stores under different GSTINs the send is a taxable supply.
+        await this.transferGst.onSend(tx, fresh, actor.userId);
         const after = await tx.stockDocument.update({
           where: { id },
           data: { status: 'finalised', finalisedAt: new Date(), finalisedById: actor.userId, ...totals(entries), isBackDated: fresh.isBackDated, updatedById: actor.userId },
@@ -474,6 +478,7 @@ export class StockDocumentsService {
         const lineFor = new Map(doc.lines.map((l) => [l.id, l.id]));
         await this.engine.reverseDocument(tx, id, (e) => lineFor.get(e.documentLineId) ?? e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, doc) });
         await this.applySerials(tx, doc, 'cancel', actor);
+        if (doc.kind === 'transfer_send') await this.transferGst.onCancel(tx, id, actor.userId);
         if (doc.kind === 'transfer_receive') {
           for (const l of doc.lines) {
             if (!l.sendLineId) continue;

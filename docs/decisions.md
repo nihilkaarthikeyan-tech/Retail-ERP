@@ -50,7 +50,6 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 ## General
 
 **1 / 38. Offline billing.** Online-first billing counter with a **local offline queue**: if the connection drops, bills are saved on the till and sent to the server when it returns. Full offline selling (local-first) only for shops with genuinely unreliable internet, because it makes syncing, stock and offers much more complex. Which shops need it: **OPEN**.
-*Note: question 1 in the blueprint wrongly says the reference system's till works offline. It does not (see question 38).*
 
 **2. Companies.** One legal company = one company and one set of accounts. Shops are branches within it. Create a separate company only where the business is legally separate.
 
@@ -254,3 +253,6 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | 2026-10-16 | 48 | Salesperson recorded on bills and lines, with a sales-by-salesperson report. Commissions, teams and targets stay removed | Clothing and footwear shops pay floor staff on what they sell |
 | 2026-10-16 | — | Part 2 (supplier consignment, Tally export, alterations, customer orders with advance) after part 1; GST module 8 last | Owner's order of work |
 | 2026-10-16 | Plan 11 part 2 | Owner approved `docs/plans/11-shop-extras-part2.md`: customer orders with an advance, collected on a till bill that uses the advance, ordered goods set aside once ready; alteration jobs with the charge paid with the bill or on collection; supplier sale-or-return held as our stock with a separate consignment balance owed, settled by statement into a supplier bill; Tally export for TallyPrime with a ledger-name map | Clothing and fancy stores take orders and do alterations; many buy on sale-or-return; outside accountants use Tally |
+| 2026-10-18 | 43, 55–64 | GST module may be built now from the blueprint and official government sources; bills stay provisional and no real shop uses GST until the CA approves the GST settings | Owner wants GST ready; the CA reviews before go-live instead of before building |
+| 2026-10-18 | — | Design principle added to CLAUDE.md: one common core for all businesses; everything that differs is a setting with a sensible default, filled in by shop-type templates | Owner: one product for all retail shop types, no per-industry versions |
+| 2026-10-18 | 43, 56–64 | Owner approved `docs/plans/08-gst.md`: GST core built once from official sources, everything that differs as settings; business tax invoices at the till only; GSTR-1 as Excel and portal JSON; e-invoice and e-way bill as portal files with response import, provider connection later (63) | GST needed before any shop goes live; CA approves the settings before production use |

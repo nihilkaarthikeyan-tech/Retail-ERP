@@ -9,7 +9,7 @@ const trimmed = (max: number) => z.string().trim().min(1).max(max);
 
 // ---- Printing ----
 
-export const PRINT_KINDS = ['purchase_order', 'goods_receipt', 'transfer', 'count_sheet', 'payment', 'journal', 'statement', 'customer_order', 'alteration_job', 'alteration_tag'] as const;
+export const PRINT_KINDS = ['purchase_order', 'goods_receipt', 'transfer', 'count_sheet', 'payment', 'journal', 'statement', 'customer_order', 'alteration_job', 'alteration_tag', 'pos_bill'] as const;
 export type PrintKind = (typeof PRINT_KINDS)[number];
 
 export const printSettingsSchema = z.object({

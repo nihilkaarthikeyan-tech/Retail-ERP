@@ -9,15 +9,23 @@ Read this whole file before doing anything.
 
 ## 1. Clean-room rules (must follow at all times)
 
-1. **This project does not use ERPNext or Frappe in any form.** Never install them, depend on them, or import anything from them.
-2. **Never open, read, search, fetch, clone or paste ERPNext or Frappe source code.** ERPNext was studied separately, in a different folder, only to learn features. Do not read anything outside this project folder.
-3. **Build features only from our blueprint** in `docs/blueprint/`. The blueprint describes what each feature does in plain language. If a detail is missing, ask the project owner; do not look it up in ERPNext.
+1. **This project does not use any other ERP product or framework in any form.** Never install one, depend on one, or import anything from one.
+2. **Never open, read, search, fetch, clone or paste the source code of any other ERP product.** Do not read anything outside this project folder.
+3. **Build features only from our blueprint** in `docs/blueprint/`. The blueprint describes what each feature does in plain language. If a detail is missing, ask the project owner; do not look it up in other products.
 4. **Design our own data model, names, screens and wording.** Common business terms are fine (item, invoice, warehouse, supplier).
 5. **Tax rules (GST, e-invoice, e-way bill)** come from the blueprint and official government sources (https://www.gst.gov.in), never from other ERP products.
 6. **Every source file we write** starts with our copyright line, for example:
    `// Copyright (c) 2026, <Our Company Name>. All rights reserved.`
 7. **Third-party libraries:** only use packages with permissive licences (MIT, Apache-2.0, BSD, ISC). Ask the project owner before adding anything under GPL, AGPL or an unclear licence.
 8. **Branding:** the product uses its own name and logo only.
+
+---
+
+## 1a. Design principle: one common core, everything else a setting
+
+1. **Build every common rule once, into the core,** for all businesses: stock, billing, accounts, GST law, double entry. Rules that come from the law or from accounting are not settings.
+2. **Everything that differs between businesses is a setting** the business can change itself: what it sells, sizes and colours, batches and serial numbers, GST registrations and rates, number formats, approvals, receipts, labels, which menus show. Never build a separate version for one industry or one customer.
+3. **Every setting has a sensible default,** and shop-type templates (fancy, clothing, footwear, cosmetics, mobiles, general) fill them in at setup, so a new shop is ready without configuring anything.
 
 ---
 
@@ -147,7 +155,7 @@ Confirm the API can connect to the database and the web app can call the API bef
    - Where `docs/decisions.md` and the blueprint differ, **`docs/decisions.md` wins**.
    - Do not build anything marked **OPEN** in `docs/decisions.md` until the project owner records a decision.
    - Build only the **launch scope** in `docs/decisions.md`. Do not build deferred features.
-   - Do not build the GST module until questions 43 and 55–64 are marked as approved by the Chartered Accountant.
+   - The GST module is built from the blueprint and official government sources (gst.gov.in, the e-invoice and e-way bill portals), citing the source of every rule. Until the Chartered Accountant approves the GST settings (questions 43 and 55–64), every bill stays marked provisional and no real shop may use GST in production.
 2. Build in this order, finishing and testing each before the next:
    1. Users, roles and permissions; company and stores
    2. Items, units, barcodes, price lists

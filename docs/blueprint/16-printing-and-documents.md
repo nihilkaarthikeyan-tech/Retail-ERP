@@ -117,7 +117,7 @@ Customer, period, opening balance, each invoice, payment and credit note with a 
 
 ### Labels
 
-Price and barcode labels per item or per received batch: item name, price (and MRP where printed), barcode, unit, packing or expiry date, batch. Printed on label printers using printer commands, or on A4 label sheets. The reference system can send printer commands but has no label designer (open question).
+Price and barcode labels per item or per received batch: item name, price (and MRP where printed), barcode, unit, packing or expiry date, batch. Printed on label printers using printer commands, or on A4 label sheets. Printer commands can be sent directly; there is no label designer yet (open question).
 
 ## Processes
 

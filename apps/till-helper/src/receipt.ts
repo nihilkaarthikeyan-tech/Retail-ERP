@@ -34,6 +34,19 @@ export interface Payment {
   reference?: string | null;
 }
 
+/** Plan 08 (CBIC invoice rules): what the receipt prints about GST, as the ERP sends it. */
+export interface ReceiptGst {
+  title: string;
+  invoiceKind?: string | null;
+  sellerGstin?: string | null;
+  buyer?: { name?: string | null; gstin?: string | null; address?: string | null; state?: { code: string; name: string } | null } | null;
+  placeOfSupply?: { code: string; name: string } | null;
+  reverseCharge?: boolean;
+  original?: { number: string; date?: string | null } | null;
+  declaration?: string | null;
+  creditNoteLate?: boolean;
+}
+
 export interface Receipt {
   number: string;
   kind: 'sale' | 'return';
@@ -52,6 +65,8 @@ export interface Receipt {
   /** Optional extras the till may send. */
   cashier?: string | null;
   customer?: string | null;
+  /** Plan 08: title, buyer, place of supply, original bill and declaration. */
+  gst?: ReceiptGst | null;
 }
 
 export type PaperWidth = 80 | 58;
@@ -142,6 +157,20 @@ export function checkReceipt(input: unknown): Check {
   if (!isOptText(r.store.address) || !isOptText(r.store.phone)) return fail('receipt.store address/phone must be text');
   if (!isObj(r.company) || !isOptText(r.company.legalName) || !isOptText(r.company.gstin)) {
     return fail('receipt.company must have legalName and gstin as text');
+  }
+  if (r.gst !== undefined && r.gst !== null) {
+    const g = r.gst;
+    const isState = (v: unknown) => v === undefined || v === null || (isObj(v) && isText(v.code) && isText(v.name));
+    if (!isObj(g) || !isText(g.title) || !g.title) return fail('receipt.gst.title is required');
+    if (!isOptText(g.invoiceKind) || !isOptText(g.sellerGstin) || !isOptText(g.declaration)) return fail('receipt.gst text fields must be text');
+    if (!isState(g.placeOfSupply)) return fail('receipt.gst.placeOfSupply must have code and name');
+    if (g.buyer !== undefined && g.buyer !== null && (!isObj(g.buyer) || !isOptText(g.buyer.name) || !isOptText(g.buyer.gstin) || !isOptText(g.buyer.address) || !isState(g.buyer.state))) {
+      return fail('receipt.gst.buyer must have name, gstin, address and state as text');
+    }
+    if (g.original !== undefined && g.original !== null && (!isObj(g.original) || !isText(g.original.number) || !isOptText(g.original.date))) return fail('receipt.gst.original must have the bill number');
+    for (const k of ['reverseCharge', 'creditNoteLate'] as const) {
+      if (g[k] !== undefined && typeof g[k] !== 'boolean') return fail(`receipt.gst.${k} must be true or false`);
+    }
   }
   return { ok: true, receipt: input as unknown as Receipt };
 }
@@ -262,15 +291,18 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   p.bold(false);
   const legal = receipt.company.legalName?.trim();
   if (legal && legal !== receipt.store.name.trim()) lines(wrap(legal, w));
-  if (receipt.company.gstin) lines(wrap(`GSTIN: ${receipt.company.gstin}`, w));
+  const g = receipt.gst ?? null;
+  const sellerGstin = g?.sellerGstin ?? receipt.company.gstin;
+  if (sellerGstin) lines(wrap(`GSTIN: ${sellerGstin}`, w));
   if (receipt.store.address) lines(wrap(receipt.store.address, w));
   if (receipt.store.phone) lines(wrap(`Phone: ${receipt.store.phone}`, w));
 
   // Title.
   p.line().bold(true);
-  lines(wrap(receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE', w));
+  lines(wrap(g ? g.title.toUpperCase() : receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE', w));
   if (receipt.duplicate) lines(wrap('DUPLICATE', w));
   p.bold(false);
+  if (g?.declaration) lines(wrap(g.declaration, w));
   if (receipt.provisional) lines(wrap(PROVISIONAL_NOTE, w));
 
   // Bill number, date and till.
@@ -281,6 +313,15 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   lines(wrap(`Date: ${indianDateTime(receipt.soldAt)}`, w));
   if (receipt.cashier) lines(wrap(`Cashier: ${receipt.cashier}`, w));
   if (receipt.customer) lines(wrap(`Customer: ${receipt.customer}`, w));
+  if (g?.original) lines(wrap(`Against bill ${g.original.number}${g.original.date ? ` dated ${g.original.date}` : ''}`, w));
+  if (g?.buyer) {
+    if (g.buyer.name) lines(wrap(`Buyer: ${g.buyer.name}`, w));
+    if (g.buyer.gstin) lines(wrap(`Buyer GSTIN: ${g.buyer.gstin}`, w));
+    if (g.buyer.address) lines(wrap(g.buyer.address, w));
+    if (g.buyer.state) lines(wrap(`State: ${g.buyer.state.name} (${g.buyer.state.code})`, w));
+  }
+  if (g?.placeOfSupply) lines(wrap(`Place of supply: ${g.placeOfSupply.name} (${g.placeOfSupply.code})`, w));
+  if (g && g.invoiceKind === 'business') lines(wrap(`Reverse charge: ${g.reverseCharge ? 'Yes' : 'No'}`, w));
 
   // Items.
   p.line(rule);
@@ -326,6 +367,12 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   }
   if (receipt.change !== undefined && receipt.change !== null && !isZero(receipt.change)) {
     lines(leftRight('Change', rs(receipt.change), w));
+  }
+
+  if (g?.creditNoteLate) lines(wrap('Issued after the GST time limit: the tax of the original bill is not reduced in the return.', w));
+  if (g) {
+    p.line();
+    lines(wrap('Authorised signatory', w));
   }
 
   // Footer and cut.

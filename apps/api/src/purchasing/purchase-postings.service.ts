@@ -2,7 +2,7 @@
 // Ledger postings of purchasing documents (plan 07 §4; accounting effects map
 // section 1). Each runs inside the document's own transaction (rule 5).
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Decimal } from 'shared';
+import { Decimal, purchaseTaxSplit } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js';
 
@@ -72,11 +72,23 @@ export class PurchasePostings {
     const lines: LedgerLineInput[] = [];
     for (const l of b.lines) {
       const priceDifference = D(l.priceDifference);
-      lines.push({ role: l.accountRole, storeId, debit: D(l.taxableAmount).sub(priceDifference) });
+      // Goods that came in through a goods receipt (a bill that received them, or its debit note) are already
+      // in stock against goods received not billed; the bill clears that account instead of adding stock again.
+      const role = l.accountRole === 'stock' && b.receiptId ? 'goods_received_not_billed' : l.accountRole;
+      lines.push({ role, storeId, debit: D(l.taxableAmount).sub(priceDifference) });
       if (!priceDifference.isZero()) lines.push({ role: 'purchase_price_difference', storeId, debit: priceDifference });
-      lines.push({ role: 'gst_input_cgst', storeId, debit: D(l.cgst) });
-      lines.push({ role: 'gst_input_sgst', storeId, debit: D(l.sgst) });
-      lines.push({ role: 'gst_input_igst', storeId, debit: D(l.igst) });
+      // Plan 08 G7, G8 (accounting effects map §5): claimable tax to input credit; tax that cannot be claimed
+      // into the cost (goods already received: goods received not billed, which the bill's re-costing of the
+      // receipt credited; sale-or-return goods already sold: cost of goods sold; services: the expense);
+      // under reverse charge the shop owes the tax to the government, not to the supplier.
+      const split = purchaseTaxSplit({ cgst: l.cgst.toString(), sgst: l.sgst.toString(), igst: l.igst.toString(), creditClaimable: l.creditClaimable }, { reverseCharge: b.reverseCharge, composition: false });
+      lines.push({ role: 'gst_input_cgst', storeId, debit: split.input.cgst });
+      lines.push({ role: 'gst_input_sgst', storeId, debit: split.input.sgst });
+      lines.push({ role: 'gst_input_igst', storeId, debit: split.input.igst });
+      if (!split.toCost.isZero()) lines.push({ role: role === 'consignment_payable' ? 'cost_of_goods_sold' : role, storeId, debit: split.toCost });
+      lines.push({ role: 'gst_rcm_cgst', storeId, credit: split.reverseCharge.cgst });
+      lines.push({ role: 'gst_rcm_sgst', storeId, credit: split.reverseCharge.sgst });
+      lines.push({ role: 'gst_rcm_igst', storeId, credit: split.reverseCharge.igst });
     }
     if (!D(b.roundingAdjustment).isZero()) lines.push({ role: 'rounding', storeId, debit: D(b.roundingAdjustment) });
     lines.push({

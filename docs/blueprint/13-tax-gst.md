@@ -4,7 +4,7 @@
 
 Charges the right Goods and Services Tax on every sale and purchase, records input credit on purchases and output tax on sales, prints compliant invoices, produces the figures the monthly returns need, and registers invoices and goods movements with the government portals (e-invoice and e-way bill) where the law requires it.
 
-**Source rule for this module.** Rates, limits and document rules below come from official government publications, cited inline. The reference system was studied only for how a tax engine can be organised (tax sets, rules, tax-inclusive prices, rounding). Government rules change, so every figure carries its source and must be checked again before release.
+**Source rule for this module.** Rates, limits and document rules below come from official government publications, cited inline. The tax engine is organised around tax sets, rules, tax-inclusive prices and rounding. Government rules change, so every figure carries its source and must be checked again before release.
 
 ## Who uses it
 

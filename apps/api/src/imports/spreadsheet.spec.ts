@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { describe, expect, it } from 'vitest';
-import { readCsv, readSpreadsheet, readXlsx, writeCsv, writeXlsx } from './spreadsheet.js';
+import { readCsv, readSpreadsheet, readXlsx, writeCsv, writeXlsx, writeXlsxBook } from './spreadsheet.js';
 
 describe('our own .xlsx reader and writer (plan 10 answer 1)', () => {
   it('writes a file that reads back the same, keeping text columns as text', () => {
@@ -59,5 +59,15 @@ describe('files saved by Excel itself', () => {
       [],
       ['Ponni Rice & Dal', '0012345678905', 105.00000000000001, null, true],
     ]);
+  });
+
+  it('writes a workbook with several sheets, each read back by its name (module 8 GSTR-1)', () => {
+    const buf = writeXlsxBook([
+      { name: 'b2b', rows: [['Invoice', 'Taxable'], ['B/1', 1000]] },
+      { name: 'hsn(b2c)', rows: [['HSN', 'Quantity'], ['6205', 2]], textColumns: [0] },
+    ]);
+    expect(readXlsx(buf)).toEqual([['Invoice', 'Taxable'], ['B/1', 1000]]);
+    expect(readXlsx(buf, 'hsn(b2c)')).toEqual([['HSN', 'Quantity'], ['6205', 2]]);
+    expect(() => readXlsx(buf, 'docs')).toThrow('no sheet docs');
   });
 });

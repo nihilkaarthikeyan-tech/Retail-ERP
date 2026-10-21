@@ -43,6 +43,10 @@ export interface GstRateDto {
   hsnCode: string;
   rate: string;
   cessRate: string;
+  /** Plan 08 G2: taxable, exempt or nil; a price band on the selling price per unit (GST included). */
+  kind?: "taxable" | "exempt" | "nil";
+  priceFrom?: string | null;
+  priceUpTo?: string | null;
   effectiveFrom: string;
   approved: boolean;
   approvedAt: string | null;
@@ -132,6 +136,13 @@ export interface PosBillDto {
   id: string;
   number: string;
   kind: "sale" | "return";
+  /** Plan 08: invoice kind, title, buyer, place of supply and the credit-note deadline flag. */
+  invoiceKind?: string;
+  documentTitle?: string;
+  buyerGstin?: string | null;
+  buyerName?: string | null;
+  placeOfSupply?: string | null;
+  creditNoteLate?: boolean;
   status: "completed" | "cancelled";
   till: { id: string; code: string; name: string };
   shiftId: string;
@@ -227,6 +238,8 @@ export const FLAG_LABELS: Record<string, string> = {
   price_missing: "Item had no price on the server; the till's price was kept",
   stock_negative: "Stock went below zero",
   gst_provisional: "GST rate not approved yet",
+  credit_note_late: "Credit note after the GST time limit (30 November): tax not reduced in the return",
+  buyer_details_missing: "Buyer details a GST invoice needs were missing (made offline)",
   expired_batch: "An expired batch was sold while offline",
   serial_not_in_stock: "A serial number was not in stock at this till",
   shift_date: "Sold offline on a shift from another day",

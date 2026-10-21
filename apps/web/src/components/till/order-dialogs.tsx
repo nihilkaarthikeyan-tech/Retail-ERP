@@ -276,7 +276,7 @@ export function OrdersDialog({
 export function customerForOrder(order: TillOrder, snapshot: StoredSnapshot): DraftCustomer {
   const known = snapshot.customers.find((c) => c.id === order.customerId);
   return known
-    ? { id: known.id, name: known.name, mobile: known.mobile, gstin: known.gstin, stateCode: known.stateCode, customerGroupId: known.customerGroupId }
+    ? { id: known.id, name: known.name, mobile: known.mobile, gstin: known.gstin, taxSituation: known.taxSituation ?? null, stateCode: known.stateCode, customerGroupId: known.customerGroupId }
     : { id: order.customerId, name: order.customer?.name ?? "Customer", mobile: order.customer?.mobile ?? null, gstin: null, stateCode: null, customerGroupId: null };
 }
 

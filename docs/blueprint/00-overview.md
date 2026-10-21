@@ -2,7 +2,7 @@
 
 ## What this blueprint is
 
-This folder describes, in plain language, every feature a retail business needs from its ERP: what each feature does, who uses it, what information it keeps, what rules it enforces, how it calculates, and how it affects the rest of the system. It was written by studying a mature open-source ERP as a reference. It contains **no code** and no implementation details; a developer who has never seen the reference system should be able to build each module from these descriptions.
+This folder describes, in plain language, every feature a retail business needs from its ERP: what each feature does, who uses it, what information it keeps, what rules it enforces, how it calculates, and how it affects the rest of the system. It contains **no code** and no implementation details; a developer should be able to build each module from these descriptions alone.
 
 ## Scope
 
@@ -30,7 +30,7 @@ This folder describes, in plain language, every feature a retail business needs 
 
 Supporting files: 01-glossary.md (business terms), 99-open-questions.md (decisions needed), PROGRESS.md (status).
 
-**Not covered** (present in the reference system, out of scope for a retail product): manufacturing (bills of materials, work orders, production), HR and payroll, projects and timesheets, CRM sales pipeline (leads, opportunities), support tickets, asset management, quality management, subcontracting, healthcare, education, agriculture, non-profit, website builder, subscriptions, telephony, shareholder registers, invoice discounting, dunning letters.
+**Not covered** (out of scope for a retail product): manufacturing (bills of materials, work orders, production), HR and payroll, projects and timesheets, CRM sales pipeline (leads, opportunities), support tickets, asset management, quality management, subcontracting, healthcare, education, agriculture, non-profit, website builder, subscriptions, telephony, shareholder registers, invoice discounting, dunning letters.
 
 **Retail-relevant features found that were not in the original list** (noted here; each is described inside the most related module):
 
@@ -88,7 +88,7 @@ Reading the arrows: an arrow from A to B means B needs A to exist first, or A fe
 
 ## Three ledgers that everything feeds
 
-The reference system is built around one idea: transactions never change balances directly. Every finalised transaction writes **ledger entries**, and balances are always sums of ledger entries. There are three ledgers a retailer must understand:
+The product is built around one idea: transactions never change balances directly. Every finalised transaction writes **ledger entries**, and balances are always sums of ledger entries. There are three ledgers a retailer must understand:
 
 1. **Stock ledger.** One line per item, per stock location, per movement: date, quantity in or out, rate, running quantity, running value. Every receipt, sale, transfer, adjustment or return writes here. Stock balance and stock value reports are sums of this ledger.
 2. **General ledger (accounting).** One line per account per transaction, with a debit or a credit amount, always balanced within one transaction. Profit and loss, balance sheet and trial balance are sums of this ledger.
@@ -143,6 +143,6 @@ flowchart TD
 ## Conventions used in every module file
 
 - Each module file uses the same headings: Purpose, Who uses it, Main records, Processes, Business rules, Calculations, Effects on other modules, Reports, Edge cases, Settings.
-- Neutral names are used throughout. Where the reference system has a product-specific name for a concept, the glossary records the neutral name chosen.
-- Currency examples use Indian rupees. Tax examples use Indian GST, sourced from official government portals, not from the reference system.
+- Plain business names are used throughout; the glossary records the name chosen for each concept.
+- Currency examples use Indian rupees. Tax examples use Indian GST, sourced from official government portals.
 - A **store** is a physical shop. A **stock location** (warehouse) is any place stock is counted. A store has at least one location, and its sales floor and back room may be separate locations.

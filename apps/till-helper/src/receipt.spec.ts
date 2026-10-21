@@ -211,3 +211,41 @@ describe('checkReceipt', () => {
     expect(checkReceipt({ ...sampleSale(), store: {} }).ok).toBe(false);
   });
 });
+
+describe('plan 08: GST details on the receipt', () => {
+  const gst = {
+    title: 'Tax invoice',
+    invoiceKind: 'business',
+    sellerGstin: '33AAACR1234A1ZV',
+    buyer: { name: 'Kaveri Traders', gstin: '29AABCK1234A1Z5', address: '12 MG Road, Bengaluru', state: { code: '29', name: 'Karnataka' } },
+    placeOfSupply: { code: '29', name: 'Karnataka' },
+    reverseCharge: false,
+    original: null,
+    declaration: null,
+    creditNoteLate: false,
+  };
+  it('prints the title, buyer GSTIN, place of supply and reverse charge of a business invoice', () => {
+    const r: Receipt = { ...sampleSale(), gst };
+    expect(checkReceipt(r).ok).toBe(true);
+    const lines = asText(buildReceipt(r, 80));
+    expect(lines).toContain('TAX INVOICE');
+    expect(lines).toContain('GSTIN: 33AAACR1234A1ZV');
+    expect(lines).toContain('Buyer GSTIN: 29AABCK1234A1Z5');
+    expect(lines).toContain('Place of supply: Karnataka (29)');
+    expect(lines).toContain('Reverse charge: No');
+    expect(lines).toContain('Authorised signatory');
+  });
+  it('prints a bill of supply with its declaration and a credit note with the original bill', () => {
+    const bos = asText(buildReceipt({ ...sampleSale(), gst: { ...gst, title: 'Bill of supply', invoiceKind: 'bill_of_supply', buyer: null, declaration: 'Composition taxable person, not eligible to collect tax on supplies' } }, 80));
+    expect(bos).toContain('BILL OF SUPPLY');
+    expect(bos.join(' ')).toMatch(/Composition taxable person, not eligible to collect tax/);
+    const cn = asText(buildReceipt({ ...sampleSale(), kind: 'return', gst: { ...gst, title: 'Credit note', invoiceKind: 'consumer', buyer: null, original: { number: 'MAIN-T1-2026-27-000001', date: '2026-10-18' }, creditNoteLate: true } }, 80));
+    expect(cn).toContain('CREDIT NOTE');
+    expect(cn.join(' ')).toMatch(/Against bill MAIN-T1-2026-27-000001\s+dated 2026-10-18/);
+    expect(cn.join(' ')).toMatch(/after the GST time limit/);
+  });
+  it('refuses a GST block without a title', () => {
+    expect(checkReceipt({ ...sampleSale(), gst: { title: '' } }).ok).toBe(false);
+    expect(checkReceipt({ ...sampleSale(), gst: { title: 'Tax invoice', reverseCharge: 'no' } }).ok).toBe(false);
+  });
+});

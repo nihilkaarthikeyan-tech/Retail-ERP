@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { PrintButton } from "@/components/documents/print-button";
 import { Alert, Badge, Button, DataTable, Dialog, type Column } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -116,7 +117,10 @@ export function BillView({ bill, onChanged }: { bill: PosBillDto; onChanged: () 
         {cancelled ? <Badge kind="off">Cancelled</Badge> : <Badge kind="ok">Completed</Badge>}
         {bill.offline ? <Badge kind="warn">Made offline</Badge> : null}
         {bill.gstProvisional ? <Badge kind="neutral">GST provisional</Badge> : null}
+        {bill.creditNoteLate ? <Badge kind="warn">Credit note after the GST time limit</Badge> : null}
         <span className="spacer" />
+        {/* Plan 08: the A4 tax invoice, bill of supply or credit note. */}
+        <PrintButton kind="pos_bill" id={bill.id} label={`Print A4 ${(bill.documentTitle ?? "invoice").toLowerCase()}`} />
         {rights.sell ? (
           <Button onClick={() => void reprint()} busy={busy}>
             Reprint

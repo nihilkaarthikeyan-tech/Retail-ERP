@@ -648,3 +648,70 @@ Reports only read. Each scenario checks that a report agrees with the documents 
 - **Given** one day with till sales at two stores, a supplier bill, a supplier payment and an expense
 - **Then** the export has one voucher for each, with debits equal to credits on every voucher, using the mapped ledger names.
 - **Then** exporting the same day again gives identical vouchers, and the export is recorded in the history.
+
+## Module 8 — Tax (GST) (plan 08)
+
+Amounts use test rates entered for these scenarios; the CA approves the real rates before go-live.
+
+### 8.1 Consumer bill, same state (the CLAUDE.md "GST invoice" minimum)
+- **Given** MAIN in Tamil Nadu (33), a shirt priced ₹1,050 including 5% GST
+- **Then** the bill shows taxable ₹1,000.00, CGST ₹25.00, SGST ₹25.00, HSN per line, the store's GSTIN and a unique number; it prints as a tax invoice. Accounts: output CGST and SGST up ₹25.00 each when the shift closes.
+
+### 8.2 Business invoice to another state
+- **Given** a buyer with a Karnataka GSTIN (29…) buying the same shirt at the till
+- **Then** the bill becomes a business tax invoice with the buyer's name, address, GSTIN and state, place of supply Karnataka, IGST ₹50.00 and no CGST/SGST.
+- **Then** a bad GSTIN is refused with a plain message.
+
+### 8.3 Rate by selling price
+- **Given** a test rule for HSN 6205: 5% up to ₹2,500 per piece, 18% above
+- **Then** a ₹2,000 shirt is taxed at 5% and a ₹3,000 shirt at 18% on the same bill; the HSN summary shows two lines for 6205.
+
+### 8.4 Rate change by date
+- **Given** an HSN at 12% until 21 September 2025 and 5% from 22 September 2025
+- **Then** a bill dated 21 September uses 12% and one dated 22 September uses 5%; an old bill reprinted later still shows 12%.
+
+### 8.5 Return as a credit note
+- **Then** a return of the 8.1 shirt reverses taxable ₹1,000.00, CGST ₹25.00, SGST ₹25.00, names the original bill number and date, and appears in GSTR-1 credit notes.
+- **Then** a return dated after 30 November of the next financial year still refunds and returns the stock, with a warning that the tax cannot be adjusted.
+
+### 8.6 Composition scheme
+- **Given** the company switched to composition
+- **Then** the same sale prints a "bill of supply" with the declaration and no tax; purchase tax goes into the cost of the goods; no input credit is posted.
+
+### 8.7 Reverse charge and blocked credit on purchases
+- **Then:**
+  - a reverse-charge purchase bill of ₹10,000 at 18% posts ₹1,800.00 as tax payable by the shop and, where allowed, ₹1,800.00 input credit;
+  - a line marked "credit not claimable" adds its tax to the cost of the goods.
+
+### 8.8 GSTR-1 and HSN summary for a month
+- **Given** a month with consumer bills in-state, a business invoice to another state, a large other-state consumer bill above ₹2.5 lakh, and two credit notes
+- **Then:**
+  - B2B, B2CL, B2CS (by state and rate), credit notes, HSN summary (business and consumer separately) and documents issued all add up to the sales tax register;
+  - the Excel and JSON downloads carry the same figures.
+
+### 8.9 GSTR-3B
+- **Then** tax collected per head minus input credit per head, set off in the legal order (IGST first), plus reverse charge, gives the net payable; extra credit carries forward and never goes below zero.
+
+### 8.10 E-invoice and e-way bill files
+- **Given** e-invoicing switched on
+- **Then:**
+  - a business invoice produces the e-invoice JSON, and prints "not yet registered";
+  - importing the portal's response attaches the reference number and signed QR code, which then print.
+- **Then** a ₹60,000 transfer to another state produces the e-way bill JSON; with 450 km entered, validity is 3 days.
+
+### 8.11 Provisional until approved
+- **Then** until "GST settings approved by the CA" is ticked, every bill stays marked provisional and live billing cannot be switched on.
+
+### 8.12 Transfers between stores (G10)
+- **Given** MAIN under the Tamil Nadu GSTIN, ANNA under the same GSTIN, BLR under a Karnataka GSTIN, and 50 shirts at MAIN at ₹500 (HSN 6205, 5%)
+- **Then:**
+  - sending 5 to ANNA prints a delivery challan (consignor, consignee, HSN, quantity, value) and posts no tax;
+  - sending 10 to BLR prints a tax invoice: taxable ₹5,000.00 (stock at cost), IGST ₹250.00, place of supply Karnataka; output IGST at MAIN and input IGST at BLR go up by ₹250.00 each; stock arrives at BLR at ₹500.00;
+  - cancelling an unreceived send to BLR takes its tax back; an item without an HSN code cannot be sent to BLR.
+
+### 8.13 Purchase tax register
+- **Then** for a GSTIN and a month, every supplier bill and debit note shows the supplier GSTIN, taxable value, CGST, SGST, IGST, the credit claimable, the tax not claimable and whether reverse charge applies; the totals and the Excel download carry the same figures.
+
+### 8.14 Input credit matching (GSTR-2B)
+- **Given** three bills of a supplier (₹2,000, ₹3,000, ₹4,000 at 5%) and a GSTR-2B file from the portal with the first (number typed differently), the second at ₹3,200, and one bill we never recorded
+- **Then** the first is matched, the second shows the taxable and tax differences, the unknown one is "only on the portal" and the third bill is "only in our books"; a file for another GSTIN, or not a GSTR-2B, is refused with a plain message.

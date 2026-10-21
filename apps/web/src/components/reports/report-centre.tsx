@@ -14,6 +14,7 @@ const FREQUENCY_HINTS: Record<ReportFrequency, string> = {
   daily: "For keeping an eye on each day.",
   weekly: "For planning stock and checking dues.",
   monthly: "For closing the month and seeing how the business did.",
+  gst: "The figures for the GST returns, per GSTIN, for a month or a quarter.",
 };
 
 export function ReportCentre() {
@@ -27,7 +28,7 @@ export function ReportCentre() {
       <h1>Reports</h1>
       <p className="muted">Every report you may run, with the question it answers. Each one can be downloaded for Excel or printed.</p>
       {reports.length === 0 ? <Alert kind="info">You do not have the right to see any reports. Ask the owner if you need them.</Alert> : null}
-      {(["daily", "weekly", "monthly"] as ReportFrequency[]).map((freq) => {
+      {(["daily", "weekly", "monthly", "gst"] as ReportFrequency[]).map((freq) => {
         const list = reports.filter((r) => r.frequency === freq);
         if (list.length === 0) return null;
         return (

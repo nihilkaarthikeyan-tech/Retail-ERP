@@ -269,7 +269,7 @@ describe('10.10 clearing trial data (decision 72)', () => {
     await owner
       .post('/pos/bills')
       .set('x-till-token', token)
-      .send({ clientId: randomUUID(), tillId: till.id, soldAt: new Date().toISOString(), sale: { number: 'MAIN-T1-2026-27-000001', lines: [{ lineNo: 1, itemId: rice.id, quantity: '2' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '140' }] })
+      .send({ clientId: randomUUID(), tillId: till.id, soldAt: new Date().toISOString(), sale: { number: 'MAT1/2627/000001', lines: [{ lineNo: 1, itemId: rice.id, quantity: '2' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '140' }] })
       .expect(201);
     const before = { items: await prisma.item.count(), customers: await prisma.customer.count(), suppliers: await prisma.supplier.count(), prices: await prisma.price.count(), users: await prisma.user.count(), accounts: await prisma.account.count() };
     expect(await prisma.posBill.count()).toBe(1);

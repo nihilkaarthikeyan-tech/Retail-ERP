@@ -121,6 +121,7 @@ export class CustomersService {
           ...this.checkDates(input, null),
           customerGroupId: group.id,
           gstin: input.gstin ?? null,
+          taxSituation: input.taxSituation ?? null,
           stateCode,
           // Group defaults are copied once at creation (scenario 3.8).
           priceListId: input.priceListId ?? group.priceListId,
@@ -299,6 +300,7 @@ function summarise(c: CustomerRow): Record<string, unknown> {
     anniversary: c.anniversary ? `${c.anniversary}${c.anniversaryYear ? `-${c.anniversaryYear}` : ''}` : null,
     group: c.customerGroup.code,
     gstin: c.gstin,
+    taxSituation: c.taxSituation,
     stateCode: c.stateCode,
     priceList: c.priceList?.code ?? null,
     paymentTerms: c.paymentTerms?.code ?? null,
@@ -325,6 +327,7 @@ export function toCustomerDto(c: CustomerRow) {
     anniversaryYear: c.anniversaryYear,
     customerGroup: c.customerGroup,
     gstin: c.gstin,
+    taxSituation: c.taxSituation,
     stateCode: c.stateCode,
     priceList: c.priceList,
     paymentTerms: c.paymentTerms,

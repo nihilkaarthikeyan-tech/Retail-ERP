@@ -46,6 +46,7 @@ export class ContactsService {
         phone: input.phone ?? null,
         email: input.email ?? null,
         gstin: input.gstin ?? null,
+        taxSituation: input.taxSituation ?? null,
         isBilling: input.isBilling ?? true,
         isDelivery: input.isDelivery ?? true,
         isMain,

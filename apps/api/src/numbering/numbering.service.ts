@@ -79,7 +79,7 @@ export class NumberingService {
       storeCode = store.code;
     }
     let financialYearName = '';
-    if (series.pattern.includes('{FY}')) {
+    if (series.pattern.includes('{FY}') || series.pattern.includes('{FYS}')) {
       const year = await this.years.forDate(db, series.companyId, date);
       if (!year) throw new BadRequestException(`No financial year covers ${date}`);
       financialYearName = year.name;

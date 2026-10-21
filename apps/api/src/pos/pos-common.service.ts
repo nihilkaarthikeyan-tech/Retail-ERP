@@ -4,10 +4,11 @@
 // switching by PIN, the GST rate list, and company defaults.
 import { createHash, randomBytes } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { type ApprovalAction, businessDate, type CurrentUser, Decimal, hasPermission, PAYMENT_ACCOUNT_ROLES, type PermissionKey } from 'shared';
+import { type ApprovalAction, businessDate, type CurrentUser, Decimal, hasPermission, PAYMENT_ACCOUNT_ROLES, type PermissionKey, TILL_INVOICE_PREFIX_RE, tillInvoicePrefixCandidates } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import { canAccessStore } from '../auth/store-access.js';
 import { CompanyService } from '../company/company.service.js';
+import { GstCoreService } from '../gst/gst-core.service.js';
 import type { GstRate, Item, PosSettings, Till } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
@@ -54,6 +55,7 @@ export class PosCommon {
   constructor(
     readonly prisma: PrismaService,
     private readonly company: CompanyService,
+    readonly gst: GstCoreService,
   ) {}
 
   currentCompany(db: Db = this.prisma) {
@@ -144,23 +146,44 @@ export class PosCommon {
   // ---- GST rate list (decision 56; plan 06 answer 1) ----
 
   /**
-   * The rate for an item on a date: the longest matching HSN code (8, 6 or 4
-   * digits) with the latest start date on or before the date.
+   * The rate for an item on a date (plan 08 G2): the longest matching HSN code
+   * (8, 6 or 4 digits) with the latest start date on or before the date, and
+   * for price-banded codes the band of the selling price per unit.
    */
-  async gstRateFor(db: Db, item: Pick<Item, 'code' | 'hsnCode'>, date: string): Promise<GstRate> {
-    if (!item.hsnCode) throw new BadRequestException(`${item.code} has no HSN code, so its GST rate is not known`);
-    const codes = [item.hsnCode.slice(0, 8), item.hsnCode.slice(0, 6), item.hsnCode.slice(0, 4)].filter((c, i, a) => c.length >= 4 && a.indexOf(c) === i);
-    for (const code of codes) {
-      const rate = await db.gstRate.findFirst({ where: { hsnCode: code, effectiveFrom: { lte: fromIso(date) } }, orderBy: { effectiveFrom: 'desc' } });
-      if (rate) return rate;
-    }
-    throw new BadRequestException(`No GST rate is set for HSN ${item.hsnCode} (${item.code}); add it to the GST rate list`);
+  async gstRateFor(db: Db, item: Pick<Item, 'code' | 'hsnCode'>, date: string, unitPrice?: Decimal | string | null): Promise<GstRate> {
+    return this.gst.rateFor(db, item, date, unitPrice);
   }
 
-  /** IGST when a business customer is registered in another state than the store. */
-  interState(storeState: string | null, companyState: string, customer: { gstin: string | null; stateCode: string | null } | null): boolean {
-    if (!customer?.gstin || !customer.stateCode) return false;
-    return customer.stateCode !== (storeState ?? companyState);
+  // ---- Invoice prefix of a till (plan 08: CGST rule 46(b), 16 characters) ----
+
+  /** Whether another till uses the prefix, or ever numbered bills with it (numbers are never reused). */
+  async invoicePrefixTaken(db: Db, companyId: string, prefix: string, tillId: string | null): Promise<boolean> {
+    const other = await db.till.findFirst({ where: { companyId, seriesKind: prefix, ...(tillId ? { id: { not: tillId } } : {}) }, select: { id: true } });
+    if (other) return true;
+    const used = await db.posBill.findFirst({ where: { companyId, number: { startsWith: `${prefix}/` }, ...(tillId ? { tillId: { not: tillId } } : {}) }, select: { id: true } });
+    return !!used;
+  }
+
+  /** The first free default prefix for a till (MAIN + T1 → MAT1), else a numbered one. */
+  async freeInvoicePrefix(db: Db, companyId: string, storeCode: string, tillCode: string, tillId: string | null): Promise<string> {
+    for (const p of tillInvoicePrefixCandidates(storeCode, tillCode)) if (!(await this.invoicePrefixTaken(db, companyId, p, tillId))) return p;
+    for (let n = 1; n < 36 ** 3; n++) {
+      const p = `T${n.toString(36).toUpperCase()}`;
+      if (!(await this.invoicePrefixTaken(db, companyId, p, tillId))) return p;
+    }
+    throw new BadRequestException('No free invoice prefix; give the till one by hand');
+  }
+
+  /**
+   * A till made before GST-length numbers gets its short prefix when it next
+   * loads its saved copy (pos-offline §2); bills already made keep their numbers.
+   */
+  async ensureInvoicePrefix<T extends { id: string; companyId: string; code: string; seriesKind: string; store: { code: string } }>(db: Db, till: T, actorId: string | null): Promise<T> {
+    if (TILL_INVOICE_PREFIX_RE.test(till.seriesKind)) return till;
+    const prefix = await this.freeInvoicePrefix(db, till.companyId, till.store.code, till.code, till.id);
+    await db.till.update({ where: { id: till.id }, data: { seriesKind: prefix, updatedById: actorId } });
+    await db.auditLog.create({ data: { userId: actorId, action: 'update', entityType: 'till', entityId: till.id, changes: { numberPrefix: { old: till.seriesKind, new: prefix }, reason: 'GST invoice numbers of at most 16 characters' } } });
+    return { ...till, seriesKind: prefix };
   }
 
   today(): string {

@@ -64,6 +64,21 @@ export function PrintDocument({ doc, logoUrl, onLogoSettled }: PrintDocumentProp
         </dl>
       </div>
 
+      {doc.notice ? (
+        <p className="doc-notice" role="note" aria-label="Notice" style={{ border: "2px solid currentColor", padding: "2mm 3mm", fontWeight: 700 }}>
+          {doc.notice}
+        </p>
+      ) : null}
+
+      {doc.qr ? (
+        <figure className="doc-qr" style={{ float: "right", margin: "0 0 3mm 4mm", width: "34mm", textAlign: "center" }}>
+          <svg viewBox={`-4 -4 ${doc.qr.size + 8} ${doc.qr.size + 8}`} role="img" aria-label={doc.qr.label} shapeRendering="crispEdges" style={{ width: "100%", height: "auto", background: "#fff" }}>
+            <path d={doc.qr.path} fill="#000" />
+          </svg>
+          <figcaption className="doc-muted">{doc.qr.label}</figcaption>
+        </figure>
+      ) : null}
+
       {doc.party || doc.details.length ? (
         <section className="doc-head-grid">
           {doc.party ? (

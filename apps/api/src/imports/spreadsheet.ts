@@ -136,8 +136,8 @@ function columnName(index: number): string {
   return s;
 }
 
-/** The first sheet of an .xlsx file as rows of cells. */
-export function readXlsx(buf: Buffer): Sheet {
+/** The first sheet of an .xlsx file (or the sheet of that name) as rows of cells. */
+export function readXlsx(buf: Buffer, sheetName?: string): Sheet {
   const files = readZip(buf);
   const text = (name: string) => files.get(name)?.toString('utf8');
   const shared: string[] = [];
@@ -147,7 +147,13 @@ export function readXlsx(buf: Buffer): Sheet {
   let sheetPath = 'xl/worksheets/sheet1.xml';
   const workbook = text('xl/workbook.xml');
   const rels = text('xl/_rels/workbook.xml.rels');
-  const firstSheet = workbook?.match(/<sheet\b[^>]*\br:id="([^"]+)"/);
+  const firstSheet = sheetName
+    ? [...(workbook?.matchAll(/<sheet\b([^>]*)\/?>/g) ?? [])]
+        .map((m) => m[1])
+        .find((a) => decodeXml(a.match(/\bname="([^"]*)"/)?.[1] ?? '') === sheetName)
+        ?.match(/\br:id="([^"]+)"/)
+    : workbook?.match(/<sheet\b[^>]*\br:id="([^"]+)"/);
+  if (sheetName && !firstSheet) throw new Error(`The Excel file has no sheet ${sheetName}`);
   if (firstSheet && rels) {
     const rel = [...rels.matchAll(/<Relationship\b([^>]*)\/?>/g)].map((r) => r[1]).find((a) => a.includes(`Id="${firstSheet[1]}"`));
     const target = rel?.match(/Target="([^"]+)"/)?.[1];
@@ -186,9 +192,21 @@ export function readXlsx(buf: Buffer): Sheet {
  * barcodes, HSN codes and mobile numbers keep their leading zeros in Excel.
  */
 export function writeXlsx(sheetName: string, rows: Sheet, opts: { textColumns?: number[]; widths?: number[] } = {}): Buffer {
-  const text = new Set(opts.textColumns ?? []);
+  return writeXlsxBook([{ name: sheetName, rows, ...opts }]);
+}
+
+export interface BookSheet {
+  name: string;
+  rows: Sheet;
+  textColumns?: number[];
+  widths?: number[];
+}
+
+function sheetXml(sheet: BookSheet): string {
+  const { rows } = sheet;
+  const text = new Set(sheet.textColumns ?? []);
   const cols = Math.max(1, ...rows.map((r) => r.length));
-  const colXml = Array.from({ length: cols }, (_, i) => `<col min="${i + 1}" max="${i + 1}" width="${opts.widths?.[i] ?? 18}" customWidth="1"${text.has(i) ? ' style="1"' : ''}/>`).join('');
+  const colXml = Array.from({ length: cols }, (_, i) => `<col min="${i + 1}" max="${i + 1}" width="${sheet.widths?.[i] ?? 18}" customWidth="1"${text.has(i) ? ' style="1"' : ''}/>`).join('');
   const rowXml = rows
     .map((row, r) => {
       const cells = row
@@ -204,25 +222,37 @@ export function writeXlsx(sheetName: string, rows: Sheet, opts: { textColumns?: 
       return `<row r="${r + 1}">${cells}</row>`;
     })
     .join('');
+  const ns = 'http://schemas.openxmlformats.org';
+  return `<worksheet xmlns="${ns}/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${colXml}</cols><sheetData>${rowXml}</sheetData></worksheet>`;
+}
+
+/**
+ * An .xlsx with one or more sheets (module 8: GSTR-1 has one sheet per
+ * section). The first row of each sheet is the bold heading row.
+ */
+export function writeXlsxBook(sheets: BookSheet[]): Buffer {
   const xml = (s: string) => Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${s}`, 'utf8');
   const ns = 'http://schemas.openxmlformats.org';
+  // Excel sheet names: at most 31 characters, none of : \ / ? * [ ].
+  const names = sheets.map((s) => s.name.replace(/[:\\/?*[\]]/g, ' ').slice(0, 31));
+  const overrides = sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('');
+  const sheetList = sheets.map((_, i) => `<sheet name="${encodeXml(names[i])}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('');
+  const rels = sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${ns}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('');
   return writeZip([
     {
       name: '[Content_Types].xml',
       data: xml(
-        `<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+        `<Types xmlns="${ns}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${overrides}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
       ),
     },
     { name: '_rels/.rels', data: xml(`<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
     {
       name: 'xl/workbook.xml',
-      data: xml(`<workbook xmlns="${ns}/spreadsheetml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><sheets><sheet name="${encodeXml(sheetName.slice(0, 31))}" sheetId="1" r:id="rId1"/></sheets></workbook>`),
+      data: xml(`<workbook xmlns="${ns}/spreadsheetml/2006/main" xmlns:r="${ns}/officeDocument/2006/relationships"><sheets>${sheetList}</sheets></workbook>`),
     },
     {
       name: 'xl/_rels/workbook.xml.rels',
-      data: xml(
-        `<Relationships xmlns="${ns}/package/2006/relationships"><Relationship Id="rId1" Type="${ns}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${ns}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
-      ),
+      data: xml(`<Relationships xmlns="${ns}/package/2006/relationships">${rels}<Relationship Id="rId${sheets.length + 1}" Type="${ns}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
     },
     {
       // Style 1: text format "@" (keeps leading zeros); style 2: bold heading row.
@@ -231,10 +261,7 @@ export function writeXlsx(sheetName: string, rows: Sheet, opts: { textColumns?: 
         `<styleSheet xmlns="${ns}/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`,
       ),
     },
-    {
-      name: 'xl/worksheets/sheet1.xml',
-      data: xml(`<worksheet xmlns="${ns}/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${colXml}</cols><sheetData>${rowXml}</sheetData></worksheet>`),
-    },
+    ...sheets.map((sh, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: xml(sheetXml(sh)) })),
   ]);
 }
 

@@ -42,7 +42,7 @@ A quicker way to set up offers with several levels (buy 5 get 5% off, buy 10 get
 
 ### Coupons
 
-A code that switches on one offer. The shop needs: the code, the offer it unlocks, valid dates, how many times it may be used and how many times it has been used. A personal coupon for one customer can be made single-use. The reference system calls this kind a gift card, but it holds no money balance (see open questions for real gift cards).
+A code that switches on one offer. The shop needs: the code, the offer it unlocks, valid dates, how many times it may be used and how many times it has been used. A personal coupon for one customer can be made single-use. A coupon holds no money balance (see open questions for real gift cards).
 
 ### Loyalty scheme
 
@@ -234,7 +234,7 @@ Order on every line: list price → mark-up → discount → price → line amou
 - Prices and offers decide every line amount at the till, in Sales and in Purchasing, and therefore every GST and ledger amount.
 - Discounts reduce the sales income posted; if the business wants discounts shown separately, they are posted to a discount account so both gross sales and discounts are visible (Accounting).
 - Free goods leave stock like any sold line at zero or the token price; their cost still counts in cost of goods sold (Inventory, Accounting).
-- Spending points is treated as a customer payment charged to the loyalty expense account; earning points posts nothing in the reference system (see open questions).
+- Spending points is treated as a customer payment charged to the loyalty expense account; whether earning points posts anything is an open question.
 - Coupon use counts go up and down as bills are finalised and cancelled.
 - Saving prices automatically from purchases or sales creates price records.
 - The customer record shows their scheme and current tier (Customers).
@@ -248,7 +248,7 @@ Order on every line: list price → mark-up → discount → price → line amou
 - **Offers applied on a bill** — which offers changed which lines.
 - **Coupon use** — uses against limit for each coupon.
 - **Points ledger** — per customer: earned, spent, expiring soon, balance.
-- **Offer results** (recommended; not in the reference) — sales under each offer, free goods given, effect on margin.
+- **Offer results** (recommended) — sales under each offer, free goods given, effect on margin.
 
 ## Edge cases
 

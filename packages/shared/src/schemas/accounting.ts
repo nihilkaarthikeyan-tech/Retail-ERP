@@ -67,6 +67,10 @@ export const ACCOUNT_ROLES = {
   gst_output_cgst: 'Output CGST',
   gst_output_sgst: 'Output SGST',
   gst_output_igst: 'Output IGST',
+  /** Plan 08 G8: tax the shop pays itself on purchases under reverse charge. */
+  gst_rcm_cgst: 'CGST payable under reverse charge',
+  gst_rcm_sgst: 'SGST payable under reverse charge',
+  gst_rcm_igst: 'IGST payable under reverse charge',
   sales: 'Sales',
   cost_of_goods_sold: 'Cost of goods sold',
   purchase_expense: 'Purchases of services and expenses',

@@ -2,8 +2,11 @@
 // Module 6 input validation (plan 06; pos-offline-and-devices plan).
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
+import { GST_RATE_KINDS } from '../gst-core.js';
+import { isStateCode } from '../india.js';
 import { DENOMINATIONS } from '../pos.js';
 import { nonNegativeDecimalString, positiveDecimalString } from './catalogue.js';
+import { posBuyerSchema } from './gst-core.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
@@ -43,6 +46,11 @@ export const gstRateSchema = z.object({
   cessRate: percent.optional().nullable(),
   effectiveFrom: isoDate,
   note: optionalText(300),
+  /** Plan 08 G2: exempt and nil-rated are kept apart from a 0% rate (their rate is 0). */
+  kind: z.enum(GST_RATE_KINDS).optional(),
+  /** Plan 08 G2: a price band on the selling price per unit, GST included: above "from", up to and including "up to". */
+  priceFrom: nonNegativeDecimalString.optional().nullable(),
+  priceUpTo: positiveDecimalString.optional().nullable(),
 });
 export type GstRateInput = z.infer<typeof gstRateSchema>;
 
@@ -74,6 +82,13 @@ export const tillSchema = z.object({
   name: trimmed(60),
   locationId: uuid,
   priceListId: uuid,
+  /** Plan 08 (CGST rule 46(b)): the till's invoice prefix, PREFIX/2627/000001 ≤ 16 characters; default from the store and till codes. */
+  numberPrefix: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z0-9]{1,4}$/, 'Invoice prefix must be 1–4 letters or digits, e.g. MAT1')
+    .optional(),
   cashierDiscountPercent: percent.optional(),
   allowPriceChange: z.boolean().optional(),
   autoPrint: z.boolean().optional(),
@@ -217,6 +232,8 @@ export const deliveryDetailsSchema = z.object({
   remarks: optionalText(300),
   /** Offline bills: the delivery charge the till added (kept as charged, pos-offline §5). */
   charge: nonNegativeDecimalString.optional(),
+  /** Plan 08 G1: the state the goods are delivered to (the place of supply); empty = the store's state. */
+  stateCode: z.string().refine(isStateCode, 'Unknown GST state code').optional().nullable(),
 });
 export type DeliveryDetailsInput = z.infer<typeof deliveryDetailsSchema>;
 
@@ -273,6 +290,8 @@ export const posTransactionSchema = z
     useCredit: nonNegativeDecimalString.optional(),
     /** Plan 11 part 2: an alteration job whose charge is billed on this sale, optionally handed back now. */
     alteration: z.object({ jobId: uuid, deliver: z.boolean().optional() }).optional().nullable(),
+    /** Plan 08 G4, G5: the buyer's GSTIN (business tax invoice) or name, address and state. */
+    buyer: posBuyerSchema.optional().nullable(),
   })
   .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return')
   .refine((t) => !t.sale || t.sale.lines.length > 0 || !!t.alteration, { message: 'Add at least one item', path: ['sale', 'lines'] })

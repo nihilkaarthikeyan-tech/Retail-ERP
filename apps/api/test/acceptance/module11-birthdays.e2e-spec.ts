@@ -159,7 +159,7 @@ describe('11.19 birthdays and anniversaries of a customer added at the till', ()
       clientId: randomUUID(),
       tillId,
       soldAt: new Date(Date.now() - (offline ? 60_000 : 0)).toISOString(),
-      sale: { number: `MAIN-T1-2026-27-${String(++n).padStart(6, '0')}`, lines: [line] },
+      sale: { number: `MAT1/2627/${String(++n).padStart(6, '0')}`, lines: [line] },
       payments: [{ paymentMethodId: cashId, amount: '100' }],
       newCustomer: { clientId: randomUUID(), ...newCustomer },
       ...(offline ? { offline: true, shiftClientId } : { expectedTotal: '100.00' }),

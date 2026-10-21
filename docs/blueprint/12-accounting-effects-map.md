@@ -69,7 +69,7 @@ One place that answers, for every transaction a retailer records, which accounts
 | Payment from customer, short payment written off | Discount allowed or write-off expense | Customer balance | A deduction on the payment. |
 | Payment from customer at a different rate | Exchange loss (or credit exchange gain) | Customer balance (or debit) | |
 | Advance from customer (not yet against an invoice, or against an order) | Bank or cash | Customer balance (shows a credit balance), or a separate advance-received account if switched on | Matched to the invoice later. |
-| Gift voucher sold (proposed; the reference system has none) | Cash | Gift-voucher liability | When used: debit gift-voucher liability, credit customer balance, as a payment method. |
+| Gift voucher sold (proposed) | Cash | Gift-voucher liability | When used: debit gift-voucher liability, credit customer balance, as a payment method. |
 
 ## 3. Inventory
 

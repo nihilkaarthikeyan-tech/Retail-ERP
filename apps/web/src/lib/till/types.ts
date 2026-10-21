@@ -37,6 +37,17 @@ export interface SnapTill {
   delivery?: { charge: string; freeAbove: string | null; itemId: string | null };
   /** Plan 11 part 2: the service item an alteration charge is billed as. */
   alterationItemId?: string | null;
+  /** Plan 08: the GST settings the till bills with (offline too) and the seller's registration state. */
+  gst?: SnapGstSettings;
+}
+
+/** Plan 08 §5: what the till needs of the company's GST settings. */
+export interface SnapGstSettings {
+  scheme: "regular" | "composition" | string;
+  approved: boolean;
+  hsnDigits: number;
+  receiptTaxTable: boolean;
+  sellerState: string;
 }
 
 export interface SnapItemUnit {
@@ -82,6 +93,10 @@ export interface SnapPrice {
 export interface SnapGstRate {
   hsnCode: string;
   rate: string;
+  /** Plan 08 G2: taxable, exempt or nil; a price band on the selling price per unit (GST included). */
+  kind?: string;
+  priceFrom?: string | null;
+  priceUpTo?: string | null;
   effectiveFrom: string;
   approved: boolean;
 }
@@ -136,6 +151,8 @@ export interface SnapCustomer {
   name: string;
   mobile: string | null;
   gstin: string | null;
+  /** Plan 08 G3: empty = from the GSTIN. */
+  taxSituation?: string | null;
   stateCode: string | null;
   customerGroupId: string | null;
   status: string;
@@ -212,6 +229,22 @@ export interface Receipt {
   /** Plan 11 C1: the bill's salesperson. */
   salesStaff?: string | null;
   delivery?: ReceiptDelivery | null;
+  /** Plan 08: what the receipt prints about GST (title, seller and buyer, place of supply, original bill). */
+  gst?: ReceiptGst;
+}
+
+/** Plan 08 (CBIC invoice rules): the GST part of a receipt. */
+export interface ReceiptGst {
+  title: string;
+  invoiceKind: string;
+  sellerGstin: string | null;
+  buyer: { name: string | null; gstin: string | null; address: string | null; state: { code: string; name: string } | null } | null;
+  placeOfSupply: { code: string; name: string } | null;
+  interState: boolean;
+  reverseCharge: boolean;
+  original: { number: string; date: string } | null;
+  declaration: string | null;
+  creditNoteLate: boolean;
 }
 
 export interface BillLineDto {
@@ -244,6 +277,10 @@ export interface BillDto {
   businessDate: string;
   total: string;
   offline: boolean;
+  /** Plan 08: the bill's GST (a return keeps its original bill's). */
+  igst?: string;
+  invoiceKind?: string;
+  placeOfSupply?: string | null;
   lines: BillLineDto[];
   payments: { paymentMethod: { id: string; code: string; name: string; kind: string }; amount: string; reference: string | null }[];
 }

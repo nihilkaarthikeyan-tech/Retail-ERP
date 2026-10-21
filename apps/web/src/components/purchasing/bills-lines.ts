@@ -49,6 +49,8 @@ export interface BillLineDraft {
   manufactureDate: string;
   expiryDate: string;
   serials: string;
+  /** Plan 08 G8: off = input credit cannot be claimed; the tax goes into the cost of the goods. */
+  creditClaimable: boolean;
 }
 
 let seq = 0;
@@ -101,6 +103,7 @@ function blankLine(): Omit<BillLineDraft, "itemId" | "itemCode" | "itemName" | "
     manufactureDate: "",
     expiryDate: "",
     serials: "",
+    creditClaimable: true,
   };
 }
 
@@ -182,11 +185,16 @@ export function linesFromBill(bill: SupplierBillDto): BillLineDraft[] {
     cgst: l.cgst ?? "",
     sgst: l.sgst ?? "",
     igst: l.igst ?? "",
+    creditClaimable: l.creditClaimable ?? true,
   }));
 }
 
-/** A receiving bill's draft goods receipt (it holds shelves, batches and serials) back on screen. */
-export function linesFromDraftReceipt(receipt: GoodsReceiptDto): BillLineDraft[] {
+/**
+ * A receiving bill's draft goods receipt (it holds shelves, batches and
+ * serials) back on screen; the bill's own lines say whether credit is claimable.
+ */
+export function linesFromDraftReceipt(receipt: GoodsReceiptDto, bill?: SupplierBillDto | null): BillLineDraft[] {
+  const claimable = new Map((bill?.lines ?? []).filter((b) => b.receiptLineId).map((b) => [b.receiptLineId!, b.creditClaimable ?? true]));
   return receipt.lines.map((l) => {
     const received = parse(l.receivedQuantity) ?? new Decimal(0);
     const free = parse(l.freeQuantity) ?? new Decimal(0);
@@ -212,6 +220,7 @@ export function linesFromDraftReceipt(receipt: GoodsReceiptDto): BillLineDraft[]
       batchNumber: l.newBatchNumber ?? "",
       expiryDate: l.newExpiryOn ?? "",
       serials: l.serialNumbers.join("\n"),
+      creditClaimable: claimable.get(l.id) ?? true,
     };
   });
 }
@@ -260,13 +269,19 @@ export interface BillPreview {
   unpriced: number;
 }
 
-/** Totals of the included lines, rounded to the rupee like the API does. */
-export function previewBill(lines: BillLineDraft[]): BillPreview {
+/**
+ * Totals of the included lines, rounded to the rupee like the API does.
+ * Under reverse charge (plan 08 G8) the supplier is owed the bill without
+ * tax; the tax is still shown, as the shop pays it itself.
+ */
+export function previewBill(lines: BillLineDraft[], reverseCharge = false): BillPreview {
   const included = lines.filter((l) => l.include);
   const previews = included.map(previewLine);
   const priced = previews.filter((p): p is LinePreview => p !== null);
-  const t = documentTotals(priced.map((p) => ({ taxable: p.taxable, cgst: p.cgst, sgst: p.sgst, igst: p.igst })));
-  return { taxable: t.taxable, tax: t.tax, roundingAdjustment: t.roundingAdjustment, total: t.total, unpriced: previews.length - priced.length };
+  const zero = new Decimal(0);
+  const t = documentTotals(priced.map((p) => (reverseCharge ? { taxable: p.taxable, cgst: zero, sgst: zero, igst: zero } : { taxable: p.taxable, cgst: p.cgst, sgst: p.sgst, igst: p.igst })));
+  const tax = reverseCharge ? priced.reduce((s, p) => s.add(p.gst), zero) : t.tax;
+  return { taxable: t.taxable, tax, roundingAdjustment: t.roundingAdjustment, total: t.total, unpriced: previews.length - priced.length };
 }
 
 /** What is wrong with a line before anything is sent, or null. The API checks all of this again. */
@@ -337,6 +352,8 @@ export function billLineToInput(l: BillLineDraft, kind: NewBillKind) {
     ...pick("cgst", l.cgst),
     ...pick("sgst", l.sgst),
     ...pick("igst", l.igst),
+    // Claimable is the default on the server; only "not claimable" is sent.
+    ...(l.creditClaimable ? {} : { creditClaimable: false }),
     ...(kind === "receives_goods"
       ? {
           shelfLocationId: l.shelfLocationId || null,

@@ -5,7 +5,7 @@
 // through the browser's Print / Save as PDF. Drafts are marked DRAFT and
 // cancelled documents CANCELLED; every print is recorded in the history.
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { amountInWords, type CurrentUser, Decimal, hasPermission, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput } from 'shared';
+import { amountInWords, BILL_OF_SUPPLY_DECLARATION, type CurrentUser, Decimal, gstDocumentTitle, hasPermission, hsnForPrint, INDIAN_STATES, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput } from 'shared';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
 import { AlterationsService } from '../orders/alterations.service.js';
 import { OrdersService } from '../orders/orders.service.js';
@@ -13,6 +13,10 @@ import { AuditService } from '../audit/audit.service.js';
 import { canAccessStore } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
+import { TransferGstService } from '../inventory/transfer-gst.service.js';
+import { EInvoicesService, type PrintQr } from '../gst-portal/einvoices.service.js';
+import { EWayBillsService } from '../gst-portal/eway-bills.service.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 type Amount = { toString(): string } | null | undefined;
@@ -44,6 +48,10 @@ export interface PrintDocument {
   terms: string[];
   signatures: string[];
   printedAt: string;
+  /** Plan 08 §4: a warning across the top, e.g. an e-invoice not yet registered. */
+  notice?: string | null;
+  /** Plan 08 §4: the e-invoice's signed QR code. */
+  qr?: PrintQr | null;
 }
 
 const RIGHTS: Record<PrintKind, PermissionKey[]> = {
@@ -58,6 +66,8 @@ const RIGHTS: Record<PrintKind, PermissionKey[]> = {
   customer_order: ['orders.manage'],
   alteration_job: ['alterations.manage'],
   alteration_tag: ['alterations.manage'],
+  // Plan 08: a till bill printed on A4 (business tax invoice, bill of supply or credit note).
+  pos_bill: ['pos.sell', 'pos.reports'],
 };
 
 const TERMS_FOR: Record<PrintKind, 'selling' | 'buying' | null> = {
@@ -71,6 +81,7 @@ const TERMS_FOR: Record<PrintKind, 'selling' | 'buying' | null> = {
   customer_order: 'selling',
   alteration_job: null,
   alteration_tag: null,
+  pos_bill: 'selling',
 };
 
 @Injectable()
@@ -82,6 +93,9 @@ export class PrintService {
     private readonly ledgerReports: LedgerReportsService,
     private readonly orders: OrdersService,
     private readonly alterations: AlterationsService,
+    private readonly transferGst: TransferGstService,
+    private readonly eInvoices: EInvoicesService,
+    private readonly eWayBills: EWayBillsService,
   ) {}
 
   // ---- Settings, logo and standard terms ----
@@ -172,6 +186,8 @@ export class PrintService {
       case 'alteration_job':
       case 'alteration_tag':
         return this.alterationJob(kind, id, user);
+      case 'pos_bill':
+        return this.posBill(id, user);
     }
   }
 
@@ -290,6 +306,94 @@ export class PrintService {
       amountInWords: null,
       terms: tag ? [] : await this.termsFor(kind),
       signatures: tag ? [] : ['Customer', 'For the shop'],
+    };
+  }
+
+  /**
+   * Plan 08 (decision 43): a till bill on A4 with what the CBIC invoice rules ask
+   * for: seller GSTIN, serial number and date, buyer details, HSN at the
+   * configured digits, quantity and unit, taxable value, rate and tax per head,
+   * place of supply, reverse charge, signature; a bill of supply carries the
+   * composition declaration and no tax; a credit note names the original bill.
+   * https://cbic-gst.gov.in/gst-invoice-rules.html
+   */
+  private async posBill(id: string, user: CurrentUser): Promise<PrintDocument> {
+    const b = await this.prisma.posBill.findUnique({ where: { id }, include: { lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { code: true, name: true, hsnCode: true } } } }, till: { select: { code: true, storeId: true } } } });
+    if (!b) throw new NotFoundException('Bill not found');
+    this.assertStore(user, b.till.storeId);
+    const lh = await this.letterhead(b.till.storeId);
+    const gst = await this.prisma.gstSettings.findUnique({ where: { companyId: b.companyId } });
+    const reg = b.gstRegistrationId ? await this.prisma.gstRegistration.findUnique({ where: { id: b.gstRegistrationId } }) : null;
+    const original = b.returnOfId ? await this.prisma.posBill.findUnique({ where: { id: b.returnOfId }, select: { number: true, businessDate: true } }) : null;
+    const delivery = await this.prisma.posDelivery.findUnique({ where: { billId: b.id } });
+    const customer = await this.prisma.customer.findUnique({ where: { id: b.customerId } });
+    const units = await this.unitCodes(b.lines.map((l) => l.unitId));
+    const supplyOfGoods = b.invoiceKind !== 'bill_of_supply';
+    const igst = !D(b.igst).isZero();
+    const state = (code: string | null) => (code ? `${INDIAN_STATES[code] ?? code} (${code})` : '');
+    const digits = gst?.hsnDigits ?? 4;
+    const buyerName = b.buyerName ?? (customer && !customer.isWalkIn ? customer.name : null);
+    const late = b.checkFlags.includes('credit_note_late');
+    // Plan 08 §4: the e-invoice (IRN and QR, or "not yet registered") and the e-way bill.
+    const einvoice = await this.eInvoices.printBlock(b.id);
+    const eway = await this.eWayBills.printDetails('pos_bill', b.id);
+    const columns: PrintColumn[] = [
+      { key: 'no', label: '#' },
+      { key: 'item', label: 'Item' },
+      { key: 'hsn', label: 'HSN' },
+      { key: 'quantity', label: 'Quantity', align: 'right' },
+      { key: 'price', label: 'Rate', align: 'right' },
+      { key: 'discount', label: 'Discount', align: 'right' },
+      { key: 'taxable', label: supplyOfGoods ? 'Taxable value' : 'Value', align: 'right' },
+      ...(supplyOfGoods
+        ? ([{ key: 'gst', label: 'GST %', align: 'right' }, ...(igst ? [{ key: 'igst', label: 'IGST', align: 'right' }] : [{ key: 'cgst', label: 'CGST', align: 'right' }, { key: 'sgst', label: 'SGST', align: 'right' }])] as PrintColumn[])
+        : []),
+    ];
+    return {
+      ...this.base('pos_bill', gstDocumentTitle(b.kind, b.invoiceKind), lh),
+      letterhead: { ...this.base('pos_bill', '', lh).letterhead, gstin: reg?.gstin ?? lh.gstin },
+      number: b.number,
+      date: iso(b.businessDate),
+      mark: b.status === 'cancelled' ? 'CANCELLED' : null,
+      party: buyerName || b.buyerGstin ? { label: 'Buyer', name: buyerName ?? '', code: null, address: b.buyerAddress ? b.buyerAddress.split(/\r?\n/) : [], gstin: b.buyerGstin, phone: customer?.mobile ?? null } : null,
+      details: [
+        ...(b.invoiceKind === 'bill_of_supply' ? [['Declaration', BILL_OF_SUPPLY_DECLARATION] as [string, string]] : []),
+        ...(b.buyerStateCode ? [['Buyer’s state', state(b.buyerStateCode)] as [string, string]] : []),
+        ['Place of supply', state(b.placeOfSupply ?? reg?.stateCode ?? null)],
+        ['Reverse charge', 'No'],
+        ...(original ? [['Against invoice', `${original.number} dated ${iso(original.businessDate)}`] as [string, string]] : []),
+        ...(late ? [['Note', 'Issued after the GST time limit (section 34): the tax of the original invoice is not reduced in the return'] as [string, string]] : []),
+        ...(delivery ? [['Delivery address', delivery.address] as [string, string]] : []),
+        ['Till', b.till.code],
+        ...(b.gstProvisional ? [['GST', 'Provisional: rates or settings not yet approved by the accountant'] as [string, string]] : []),
+        ...einvoice.details,
+        ...eway,
+      ],
+      notice: einvoice.notice,
+      qr: einvoice.qr,
+      columns,
+      lines: b.lines.map((l) => ({
+        no: String(l.lineNo),
+        item: `${l.item.name} (${l.item.code})${l.isFree ? ' · free' : ''}`,
+        hsn: hsnForPrint(l.hsnCode ?? l.item.hsnCode, digits),
+        quantity: `${qty(D(l.quantity).abs())} ${units.get(l.unitId) ?? ''}`.trim(),
+        price: money(l.price),
+        discount: money(D(l.discountAmount).abs()),
+        taxable: money(D(l.taxableAmount).abs()),
+        gst: `${D(l.gstRate).toString()}%`,
+        cgst: money(D(l.cgst).abs()),
+        sgst: money(D(l.sgst).abs()),
+        igst: money(D(l.igst).abs()),
+      })),
+      totals: [
+        [supplyOfGoods ? 'Taxable value' : 'Value', money(D(b.taxableAmount).abs())],
+        ...(supplyOfGoods ? (igst ? [['IGST', money(D(b.igst).abs())] as [string, string]] : ([['CGST', money(D(b.cgst).abs())], ['SGST', money(D(b.sgst).abs())]] as [string, string][])) : []),
+        ...(!D(b.roundingAdjustment).isZero() ? [['Rounding', money(b.roundingAdjustment)] as [string, string]] : []),
+        [b.kind === 'return' ? 'Total credited' : 'Total', money(D(b.total).abs())],
+      ],
+      amountInWords: amountInWords(D(b.total).abs()),
+      terms: await this.termsFor('pos_bill'),
+      signatures: ['Authorised signatory'],
     };
   }
 
@@ -425,6 +529,7 @@ export class PrintService {
         signatures: ['Counted by', 'Checked by'],
       };
     }
+    if (d.kind === 'transfer_send' && d.toStoreId) return this.transferSend(d, units, stores, locs, lh, user);
     return {
       ...this.base(kind, 'Stock transfer slip', lh),
       number: d.number,
@@ -450,6 +555,89 @@ export class PrintService {
       })),
       totals: [['Items', String(d.lines.length)]],
       amountInWords: null,
+      terms: [],
+      signatures: ['Sent by', 'Received by'],
+    };
+  }
+
+  /**
+   * Plan 08 G10: goods sent to another store travel with a delivery challan
+   * (CGST Rules rule 55: number and date, consignor and consignee with their
+   * GSTINs, HSN, description, quantity, value, and the tax rate and amount
+   * where the movement is a supply; CBIC invoice rules,
+   * https://cbic-gst.gov.in/gst-invoice-rules.html). Between stores under
+   * different GSTINs the send is a taxable supply and prints as a tax invoice
+   * with the tax per line.
+   */
+  private async transferSend(
+    d: Prisma.StockDocumentGetPayload<{ include: { lines: { include: { item: true; batch: true } } } }>,
+    units: Map<string, string>,
+    stores: Map<string, string>,
+    locs: Map<string, string>,
+    lh: Awaited<ReturnType<PrintService['letterhead']>>,
+    user: CurrentUser,
+  ): Promise<PrintDocument> {
+    const showValues = hasPermission(user, 'stock.cost.view');
+    const tax = await this.transferGst.forPrint(this.prisma, d);
+    const settings = await this.prisma.gstSettings.findUnique({ where: { companyId: d.companyId }, select: { hsnDigits: true } });
+    const digits = settings?.hsnDigits ?? 4;
+    const regs = await this.prisma.store.findMany({ where: { id: { in: [d.storeId, d.toStoreId!] } }, include: { gstRegistration: true } });
+    const reg = (id: string) => regs.find((s) => s.id === id)?.gstRegistration ?? null;
+    const byLine = new Map((tax?.lines ?? []).map((t) => [t.lineId, t]));
+    const invoiced = !!tax?.taxed;
+    const title = invoiced ? 'Tax invoice (stock transfer)' : tax ? 'Bill of supply (stock transfer)' : 'Delivery challan';
+    const valueOf = (l: (typeof d.lines)[number]) => byLine.get(l.id)?.taxable ?? D(l.valueChange).abs();
+    const total = d.lines.reduce((s, l) => s.add(valueOf(l)), new Decimal(0));
+    return {
+      ...this.base('transfer', title, lh),
+      number: d.number,
+      date: iso(d.postingDate),
+      mark: this.mark(d.status),
+      party: null,
+      details: [
+        ['Consignor', [stores.get(d.storeId), reg(d.storeId)?.gstin ? `GSTIN ${reg(d.storeId)!.gstin}` : null].filter(Boolean).join(' · ')],
+        ['Consignee', [stores.get(d.toStoreId!), reg(d.toStoreId!)?.gstin ? `GSTIN ${reg(d.toStoreId!)!.gstin}` : null].filter(Boolean).join(' · ')],
+        ...(tax ? [['Place of supply', tax.placeOfSupply] as [string, string]] : []),
+        ['Reason', tax ? 'Supply to own branch under another GSTIN' : 'Transfer between own stores (not a sale)'],
+        ...(await this.eWayBills.printDetails('stock_document', d.id)),
+        ...(d.fromLocationId ? [['From location', locs.get(d.fromLocationId) ?? ''] as [string, string]] : []),
+        ...(d.remarks ? [['Remarks', d.remarks] as [string, string]] : []),
+      ],
+      columns: [
+        { key: 'no', label: '#' },
+        { key: 'item', label: 'Item' },
+        { key: 'hsn', label: 'HSN' },
+        { key: 'quantity', label: 'Quantity', align: 'right' },
+        { key: 'batch', label: 'Batch / serials' },
+        ...(showValues ? [{ key: 'value', label: invoiced ? 'Taxable value' : 'Value', align: 'right' as const }] : []),
+        ...(showValues && invoiced ? [{ key: 'gst', label: 'GST', align: 'right' as const }] : []),
+      ],
+      lines: d.lines.map((l) => {
+        const t = byLine.get(l.id);
+        return {
+          no: String(l.lineNo),
+          item: `${l.item.name} (${l.item.code})`,
+          hsn: hsnForPrint(t?.hsnCode ?? l.item.hsnCode, digits),
+          quantity: `${qty(l.quantity)} ${units.get(l.unitId) ?? ''}`.trim(),
+          batch: [l.batch?.batchNumber ?? l.newBatchNumber, l.serialNumbers.length ? l.serialNumbers.join(', ') : null].filter(Boolean).join(' · '),
+          ...(showValues ? { value: money(valueOf(l)) } : {}),
+          ...(showValues && invoiced && t
+            ? { gst: t.igst.gt(0) ? `IGST ${t.gstRate.toString()}% · ${money(t.igst)}` : `CGST + SGST ${t.gstRate.toString()}% · ${money(t.cgst.add(t.sgst))}` }
+            : {}),
+        };
+      }),
+      totals: [
+        ['Items', String(d.lines.length)],
+        ...(showValues ? [[invoiced ? 'Taxable value' : 'Value', money(total)] as [string, string]] : []),
+        ...(showValues && invoiced && tax
+          ? ([
+              ...(tax.totals.cgst.gt(0) ? [['CGST', money(tax.totals.cgst)], ['SGST', money(tax.totals.sgst)]] : []),
+              ...(tax.totals.igst.gt(0) ? [['IGST', money(tax.totals.igst)]] : []),
+              ['Total', money(tax.totals.total)],
+            ] as [string, string][])
+          : []),
+      ],
+      amountInWords: showValues && invoiced && tax ? amountInWords(tax.totals.total.toFixed(2)) : null,
       terms: [],
       signatures: ['Sent by', 'Received by'],
     };

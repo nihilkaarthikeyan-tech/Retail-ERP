@@ -2,7 +2,10 @@
 import { Module } from '@nestjs/common';
 import { AccountingModule } from '../accounting/accounting.module.js';
 import { CompanyModule } from '../company/company.module.js';
+import { InventoryModule } from '../inventory/inventory.module.js';
 import { DashboardsService } from './dashboards.service.js';
+import { GstReturnsController } from './gst-returns.controller.js';
+import { GstReturnsService } from './gst-returns.service.js';
 import { MailerService } from './mailer.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
 import { ReportsCommon } from './reports-common.service.js';
@@ -13,8 +16,8 @@ import { StockAnalysisService } from './stock-analysis.service.js';
 import { SummaryEmailService } from './summary-email.service.js';
 
 @Module({
-  imports: [CompanyModule, AccountingModule],
-  controllers: [ReportsController],
-  providers: [ReportsCommon, SalesReportsService, SeasonReportsService, StockAnalysisService, MoneyReportsService, DashboardsService, MailerService, SummaryEmailService],
+  imports: [CompanyModule, AccountingModule, InventoryModule],
+  controllers: [ReportsController, GstReturnsController],
+  providers: [ReportsCommon, GstReturnsService, SalesReportsService, SeasonReportsService, StockAnalysisService, MoneyReportsService, DashboardsService, MailerService, SummaryEmailService],
 })
 export class ReportsModule {}

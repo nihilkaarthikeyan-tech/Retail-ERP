@@ -717,6 +717,8 @@ model Address {
   phone        String?
   email        String?
   gstin        String?
+  /// Plan 08 G3: as on the party; empty = the party's.
+  taxSituation String?
   isBilling    Boolean   @default(true)
   isDelivery   Boolean   @default(true)
   isMain       Boolean   @default(false)
@@ -825,6 +827,8 @@ model Customer {
   notes                 String?
   customerGroupId       String      @db.Uuid
   gstin                 String?
+  /// Plan 08 G3: regular, unregistered, sez, exempt or reverse_charge; empty = worked out from the GSTIN.
+  taxSituation          String?
   stateCode             String?
   priceListId           String?     @db.Uuid
   paymentTermsId        String?     @db.Uuid
@@ -889,6 +893,8 @@ model Supplier {
   supplierGroupId         String      @db.Uuid
   isTransporter           Boolean     @default(false)
   gstin                   String?
+  /// Plan 08 G3: regular, unregistered, sez, exempt or reverse_charge; empty = worked out from the GSTIN.
+  taxSituation            String?
   pan                     String?
   stateCode               String?
   priceListId             String?     @db.Uuid
@@ -1472,6 +1478,10 @@ model SupplierBill {
   /// The supplier's own number and date; unique per supplier per financial year.
   supplierBillNo               String
   supplierBillDate             DateTime           @db.Date
+  /// Plan 08 G8: the shop pays the tax itself.
+  reverseCharge                Boolean            @default(false)
+  placeOfSupply                String?
+  gstRegistrationId            String?            @db.Uuid
   postingDate                  DateTime           @db.Date
   postingAt                    DateTime
   financialYearId              String             @db.Uuid
@@ -1530,6 +1540,9 @@ model SupplierBillLine {
   discountAmount   Decimal @default(0) @db.Decimal(16, 2)
   taxableAmount    Decimal @db.Decimal(16, 2)
   gstRate          Decimal @default(0) @db.Decimal(5, 2)
+  /// Plan 08 G8: false = input credit cannot be claimed; the tax is added to the cost of the goods.
+  creditClaimable  Boolean @default(true)
+  hsnCode          String?
   cgst             Decimal @default(0) @db.Decimal(16, 2)
   sgst             Decimal @default(0) @db.Decimal(16, 2)
   igst             Decimal @default(0) @db.Decimal(16, 2)
@@ -1693,6 +1706,11 @@ model GstRate {
   hsnCode       String
   rate          Decimal   @db.Decimal(5, 2)
   cessRate      Decimal   @default(0) @db.Decimal(5, 2)
+  /// Plan 08 G2: taxable, exempt or nil (exempt and nil are reported apart from 0%).
+  kind          String    @default("taxable")
+  /// Plan 08 G2: the rate applies when the selling price per unit (GST included) is within this band.
+  priceFrom     Decimal?  @db.Decimal(16, 2)
+  priceUpTo     Decimal?  @db.Decimal(16, 2)
   effectiveFrom DateTime  @db.Date
   approvedById  String?   @db.Uuid
   approvedAt    DateTime?
@@ -1703,7 +1721,9 @@ model GstRate {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  @@unique([hsnCode, effectiveFrom])
+  @@unique([hsnCode, effectiveFrom, priceFrom])
+  /// PostgreSQL treats nulls as different, so this stops two plain (no price band) rates on one date.
+  @@unique([hsnCode, effectiveFrom], where: raw("\"priceFrom\" IS NULL"), map: "GstRate_hsn_date_no_band_key")
   @@index([hsnCode])
 }
 
@@ -1932,6 +1952,16 @@ model PosBill {
   /// price_changed, offer_changed, gst_changed, stock_negative, expired_batch, before_lock …
   checkFlags         String[]
   gstProvisional     Boolean       @default(true)
+  /// Plan 08: consumer, business (B2B tax invoice) or bill_of_supply (composition).
+  invoiceKind        String        @default("consumer")
+  buyerGstin         String?
+  buyerName          String?
+  buyerAddress       String?
+  buyerStateCode     String?
+  /// Plan 08 G1: the state code of the place of supply.
+  placeOfSupply      String?
+  /// The GST registration the bill is reported under.
+  gstRegistrationId  String?       @db.Uuid
   returnReason       String?
   approvedById       String?       @db.Uuid
   cancelledAt        DateTime?
@@ -1979,6 +2009,8 @@ model PosBillLine {
   salesStaffId     String?  @db.Uuid
   isFree           Boolean  @default(false)
   gstRate          Decimal  @db.Decimal(5, 2)
+  /// Plan 08: the HSN code when sold, so reports stay stable if the item's code changes later.
+  hsnCode          String?
   taxableAmount    Decimal  @db.Decimal(16, 2)
   cgst             Decimal  @db.Decimal(16, 2)
   sgst             Decimal  @db.Decimal(16, 2)
@@ -2884,4 +2916,115 @@ model TallyLedgerMap {
   createdById String?  @db.Uuid
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
+}
+
+// ---------------------------------------------------------------------------
+// Module 8: Tax (GST) (docs/plans/08-gst.md).
+// ---------------------------------------------------------------------------
+
+/// What each business sets for GST; the CA's approval switches bills from provisional to final.
+model GstSettings {
+  companyId              String    @id @db.Uuid
+  /// regular or composition.
+  scheme                 String    @default("regular")
+  /// monthly or quarterly.
+  filingFrequency        String    @default("quarterly")
+  /// Aggregate annual turnover band: up_to_5cr, 5cr_to_10cr, above_10cr, above_500cr.
+  turnoverBand           String    @default("up_to_5cr")
+  /// HSN digits printed and reported: 4, 6 or 8.
+  hsnDigits              Int       @default(4)
+  eInvoiceApplies        Boolean   @default(false)
+  /// Show sales under ₹200 with no invoice wanted as one combined daily invoice in the reports.
+  combineSmallSales      Boolean   @default(true)
+  /// How free samples are taxed (decision 61); set by the CA.
+  freeSampleTax          String    @default("not_set")
+  receiptTaxTable        Boolean   @default(true)
+  eWayLimit              Decimal   @default(50000) @db.Decimal(16, 2)
+  /// Same-state e-way bill limits by state code, where a state sets its own.
+  eWayStateLimits        Json      @default("{}")
+  defaultTransporterId   String?
+  defaultTransporterName String?
+  approvedAt             DateTime?
+  approvedById           String?   @db.Uuid
+  approvalNote           String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+/// An e-invoice for a business invoice or its credit or debit note.
+model EInvoice {
+  id                String    @id @default(uuid()) @db.Uuid
+  companyId         String    @db.Uuid
+  gstRegistrationId String    @db.Uuid
+  /// pos_bill or supplier_bill (debit notes) …
+  documentType      String
+  documentId        String    @db.Uuid
+  documentNumber    String
+  /// waiting, registered, failed or cancelled.
+  status            String    @default("waiting")
+  irn               String?
+  ackNumber         String?
+  ackDate           DateTime?
+  signedQr          String?
+  error             String?
+  exportedAt        DateTime?
+  registeredAt      DateTime?
+  cancelledAt       DateTime?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([documentType, documentId])
+  @@index([companyId, status])
+}
+
+/// An e-way bill for moving goods.
+model EWayBill {
+  id              String    @id @default(uuid()) @db.Uuid
+  companyId       String    @db.Uuid
+  /// pos_bill, stock_document (transfer) or supplier return …
+  documentType    String
+  documentId      String    @db.Uuid
+  documentNumber  String
+  value           Decimal   @db.Decimal(16, 2)
+  distanceKm      Int?
+  transporterId   String?
+  transporterName String?
+  vehicleNo       String?
+  /// draft, generated, cancelled or expired.
+  status          String    @default("draft")
+  number          String?
+  generatedAt     DateTime?
+  validUntil      DateTime?
+  error           String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([documentType, documentId])
+  @@index([companyId, status])
+}
+
+/// A statement downloaded from the GST portal (e.g. the inward statement) and uploaded for matching.
+model GstReturnUpload {
+  id                String @id @default(uuid()) @db.Uuid
+  companyId         String @db.Uuid
+  gstRegistrationId String @db.Uuid
+  /// gstr2b …
+  kind              String
+  /// "2026-09" for a month, "2026-Q2" for a quarter.
+  period            String
+  fileName          String
+  data              Json
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  @@index([gstRegistrationId, kind, period])
 }

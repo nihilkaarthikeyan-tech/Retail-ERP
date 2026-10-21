@@ -68,7 +68,7 @@ export function CustomerDialog({ open, snapshot, current, newId, onPick, onClose
           <Button
             variant="primary"
             onClick={() => {
-              onPick({ id: found.id, name: found.name, mobile: found.mobile, gstin: found.gstin, stateCode: found.stateCode, customerGroupId: found.customerGroupId });
+              onPick({ id: found.id, name: found.name, mobile: found.mobile, gstin: found.gstin, taxSituation: found.taxSituation ?? null, stateCode: found.stateCode, customerGroupId: found.customerGroupId });
               setMobile("");
             }}
           >

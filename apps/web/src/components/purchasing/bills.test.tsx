@@ -293,6 +293,7 @@ function draftLine(over: Partial<BillLineDraft> = {}): BillLineDraft {
     manufactureDate: "",
     expiryDate: "",
     serials: "",
+    creditClaimable: true,
     ...over,
   };
 }
@@ -350,6 +351,34 @@ describe("bill line preview and input", () => {
       sgst: "9",
       shelfLocationId: "f1",
     });
+  });
+});
+
+describe("GST on bill lines (plan 08 G8)", () => {
+  it("sends a line whose credit cannot be claimed", () => {
+    expect(billLineToInput(draftLine({ creditClaimable: false }), "services")).toMatchObject({ creditClaimable: false });
+    expect(billLineToInput(draftLine(), "services")).not.toHaveProperty("creditClaimable");
+  });
+
+  it("under reverse charge the supplier is owed the bill without GST, and the GST is still shown", () => {
+    const t = previewBill([draftLine({ quantity: "1", rate: "10000" })], true);
+    expect(t.tax.toFixed(2)).toBe("1800.00");
+    expect(t.total.toFixed(2)).toBe("10000.00");
+  });
+
+  it("shows reverse charge, the place of supply and lines with no input credit on a bill", async () => {
+    mockApi(commonRoutes(["purchase.view", "buying_prices.view"]));
+    const b = bill({ status: "unpaid", reverseCharge: true, placeOfSupply: "33", total: "1000.00", taxAmount: "50.00" });
+    b.lines = b.lines.map((l) => ({ ...l, creditClaimable: false }));
+    render(
+      <AuthProvider>
+        <BillView bill={b} onChanged={vi.fn()} />
+      </AuthProvider>,
+    );
+    expect(await screen.findByText(/The shop pays this bill's GST to the government itself/)).toBeTruthy();
+    expect(screen.getByText("Tamil Nadu (33)")).toBeTruthy();
+    expect(screen.getByText("GST paid by the shop (reverse charge)")).toBeTruthy();
+    expect(screen.getByText("No input credit: added to cost")).toBeTruthy();
   });
 });
 

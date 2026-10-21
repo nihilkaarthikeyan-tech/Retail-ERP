@@ -23,7 +23,7 @@ let shiftClientId: string;
 let n = 0;
 
 const today = () => businessDate();
-const num = (prefix = 'MAIN-T1') => `${prefix}-2026-27-${String(++n).padStart(6, '0')}`;
+const num = (prefix = 'MAT1') => `${prefix}/2627/${String(++n).padStart(6, '0')}`;
 const T = (r: ReturnType<Agent['post']>) => r.set('x-till-token', tillToken);
 
 beforeAll(async () => {
@@ -218,7 +218,7 @@ describe('6.4 selling beyond stock, 6.6 card and UPI, 6.7 never saved twice', ()
     expect(await prisma.posPayment.count({ where: { bill: { clientId: body.clientId } } })).toBe(1);
     expect(await position(atta.id)).toMatchObject({ q: '8' });
     const foreign = { ...sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }]) };
-    foreign.sale.number = 'MAIN-T2-2026-27-000001';
+    foreign.sale.number = 'MAT2/2627/000001';
     expect((await T(owner.post('/pos/bills')).send(foreign).expect(400)).body.message).toMatch(/not in this till’s series/);
     // Without the registered computer's token nothing is accepted.
     await owner.post('/pos/bills').send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }])).expect(401);
@@ -377,6 +377,9 @@ describe('go-live switch (plan 06 answer 1)', () => {
     await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(400);
     const rates = (await owner.get('/pos/gst-rates').expect(200)).body;
     await acct.agent.post(`/pos/gst-rates/${rates.find((r: { hsnCode: string }) => r.hsnCode === '1006').id}/approve`).expect(200);
+    // Plan 08 (scenario 8.11): live billing also needs the CA's approval of the GST settings.
+    expect((await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(400)).body.message).toMatch(/GST settings are not approved/);
+    await acct.agent.post('/gst/settings/approve').send({ note: 'Rates and settings checked' }).expect(200);
     await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(200);
     const rice = await item('Ponni Rice 1 kg', '1006', '70');
     await opening(rice.id, '10', '50');

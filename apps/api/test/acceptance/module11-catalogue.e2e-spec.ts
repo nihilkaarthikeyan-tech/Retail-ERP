@@ -110,7 +110,7 @@ function sale(lines: { itemId: string; quantity: string }[], amount: string) {
     clientId: randomUUID(),
     tillId,
     soldAt: new Date().toISOString(),
-    sale: { number: `MAIN-T1-2026-27-${String(++n).padStart(6, '0')}`, lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) },
+    sale: { number: `MAT1/2627/${String(++n).padStart(6, '0')}`, lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) },
     payments: [{ paymentMethodId: pm.CASH, amount }],
   };
 }

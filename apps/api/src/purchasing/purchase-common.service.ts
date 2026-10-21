@@ -150,12 +150,39 @@ export class PurchaseCommon implements OnModuleInit {
     return store;
   }
 
-  /** IGST between states, CGST + SGST within the same state (the receiving store's state). */
+  /** IGST between states, CGST + SGST within the same state (the receiving store's GSTIN state). */
   async interState(db: Db, supplier: Supplier, storeId: string | null): Promise<boolean> {
-    if (!supplier.stateCode) return false;
+    return (await this.placeOfSupply(db, supplier, storeId)).interState;
+  }
+
+  /**
+   * Plan 08 G1 for purchases: the supplier's state (from the supplier, else
+   * its main billing address) against the state of the GST registration the
+   * receiving store belongs to (else the store's or the company's state).
+   * The place of supply of goods is where the goods are delivered, i.e. the
+   * receiving store (IGST Act section 10(1)(a),
+   * https://taxinformation.cbic.gov.in/content/html/tax_repository/gst/acts/2017_IGST_Act/active/chapterv/section10_v1.00.html);
+   * the supply is inter-state when the supplier's state differs from it
+   * (section 7, same source).
+   */
+  async placeOfSupply(db: Db, supplier: Supplier, storeId: string | null): Promise<{ interState: boolean; placeOfSupply: string; supplierState: string | null; gstRegistrationId: string | null }> {
     const company = await this.currentCompany(db);
-    const store = storeId ? await db.store.findUnique({ where: { id: storeId } }) : null;
-    return supplier.stateCode !== (store?.stateCode ?? company.stateCode);
+    const store = storeId ? await db.store.findUnique({ where: { id: storeId }, include: { gstRegistration: true } }) : null;
+    const registration =
+      store?.gstRegistration ?? (await db.gstRegistration.findFirst({ where: { companyId: company.id, active: true }, orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }] }));
+    const placeOfSupply = store?.gstRegistration?.stateCode ?? store?.stateCode ?? registration?.stateCode ?? company.stateCode;
+    let supplierState = supplier.stateCode ?? (supplier.gstin ? supplier.gstin.slice(0, 2) : null);
+    if (!supplierState) {
+      const address = await db.address.findFirst({ where: { partyType: 'supplier', partyId: supplier.id, active: true, isBilling: true }, orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }] });
+      supplierState = address?.stateCode ?? null;
+    }
+    return { interState: !!supplierState && supplierState !== placeOfSupply, placeOfSupply, supplierState, gstRegistrationId: registration?.id ?? null };
+  }
+
+  /** Plan 08 G7: a composition company claims no input credit; purchase tax goes into the cost of the goods. */
+  async isComposition(db: Db, companyId: string): Promise<boolean> {
+    const s = await db.gstSettings.findUnique({ where: { companyId }, select: { scheme: true } });
+    return s?.scheme === 'composition';
   }
 
   /** Item usable for buying, its unit factor, and quantity checks (decision 11). */

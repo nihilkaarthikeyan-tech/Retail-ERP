@@ -180,6 +180,11 @@ export interface SupplierBillHeader {
   receiptId: string | null;
   remarks: string | null;
   cancelReason: string | null;
+  /** Plan 08 G8: the shop pays the tax itself; the total leaves it out. */
+  reverseCharge?: boolean;
+  /** Plan 08 G1: state code of the place of supply (the receiving store's GSTIN state). */
+  placeOfSupply?: string | null;
+  gstRegistrationId?: string | null;
   createdAt: string;
   finalisedAt: string | null;
 }
@@ -200,6 +205,9 @@ export interface SupplierBillLineDto extends PricedFields {
   order: { id: string; number: string } | null;
   accountRole: string;
   priceDifference?: string;
+  hsnCode?: string | null;
+  /** Plan 08 G8: false = the tax is added to the cost of the goods. */
+  creditClaimable?: boolean;
 }
 
 export interface SupplierBillDto extends SupplierBillHeader {

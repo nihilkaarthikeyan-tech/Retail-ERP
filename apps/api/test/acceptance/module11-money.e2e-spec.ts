@@ -251,7 +251,7 @@ describe('11.19 customer purchases and birthdays (C9, C10)', () => {
   let tillId: string;
   let tillToken: string;
   let pm: Record<string, string>;
-  const num = () => `MAIN-T1-2026-27-${String(++n).padStart(6, '0')}`;
+  const num = () => `MAT1/2627/${String(++n).padStart(6, '0')}`;
   const T = (r: ReturnType<Agent['post']>) => r.set('x-till-token', tillToken);
   const sale = (customerId: string, quantity: string, amount: string) => ({
     clientId: randomUUID(),
