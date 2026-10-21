@@ -100,6 +100,12 @@ export function sampleSnapshot(over: Partial<TillSnapshot> = {}): StoredSnapshot
   };
 }
 
+/** Plan 13: the sample till with the loyalty scheme (₹100 = 1 point, 1 point = ₹1, at least 100, at most 50%) and gift cards on. */
+export function snapshotWithLoyalty(over: Partial<TillSnapshot> = {}): StoredSnapshot {
+  const s = sampleSnapshot(over);
+  return { ...s, till: { ...s.till, loyalty: { schemeName: "Loyalty points", pointValue: "1", minRedeem: 100, maxSharePercent: "50", earnSpend: "100.00", earnPoints: 1 }, giftCards: { validityMonths: 12 } } };
+}
+
 /** The sample till with On account ticked (plan 07 §1a). */
 export function snapshotWithOnAccount(over: Partial<TillSnapshot> = {}): StoredSnapshot {
   const s = sampleSnapshot(over);
@@ -149,6 +155,9 @@ export function fakeApi(over: Partial<TillApi> = {}): TillApi {
     findAlterations: no,
     createAlteration: no,
     alterationStatus: no,
+    customerPoints: no,
+    checkGiftCard: no,
+    sellGiftCard: no,
     ...over,
   };
 }

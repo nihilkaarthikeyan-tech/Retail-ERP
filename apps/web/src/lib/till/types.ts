@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Shapes the till works with: what GET /pos/till/:id/snapshot sends, what
 // POST /pos/bills answers, and the till's own records (pos-offline plan §2).
-import type { ModuleKey } from "shared";
+import type { CustomerLoyaltyDto, GiftCardDto, ModuleKey, ReceiptGiftCard, ReceiptLoyalty } from "shared";
 
 export interface SnapPaymentMethod {
   id: string;
@@ -40,6 +40,20 @@ export interface SnapTill {
   alterationItemId?: string | null;
   /** Plan 08: the GST settings the till bills with (offline too) and the seller's registration state. */
   gst?: SnapGstSettings;
+  /** Plan 13: the loyalty scheme's limits (null while Loyalty points is off); balances need the connection. */
+  loyalty?: SnapLoyalty | null;
+  /** Plan 13: gift cards are sold and spent online only (null while Gift cards is off). */
+  giftCards?: { validityMonths: number } | null;
+}
+
+/** Plan 13: what the till needs of the loyalty scheme. */
+export interface SnapLoyalty {
+  schemeName: string;
+  pointValue: string;
+  minRedeem: number;
+  maxSharePercent: string;
+  earnSpend: string;
+  earnPoints: number;
 }
 
 /** Plan 08 §5: what the till needs of the company's GST settings. */
@@ -234,6 +248,10 @@ export interface Receipt {
   delivery?: ReceiptDelivery | null;
   /** Plan 08: what the receipt prints about GST (title, seller and buyer, place of supply, original bill). */
   gst?: ReceiptGst;
+  /** Plan 13: a title of its own (a gift card receipt), points earned and spent, gift cards used or sold. */
+  title?: string | null;
+  loyalty?: ReceiptLoyalty | null;
+  giftCards?: ReceiptGiftCard[];
 }
 
 /** Plan 08 (CBIC invoice rules): the GST part of a receipt. */
@@ -285,7 +303,30 @@ export interface BillDto {
   invoiceKind?: string;
   placeOfSupply?: string | null;
   lines: BillLineDto[];
-  payments: { paymentMethod: { id: string; code: string; name: string; kind: string }; amount: string; reference: string | null }[];
+  payments: { paymentMethod: { id: string; code: string; name: string; kind: string; use?: string }; amount: string; reference: string | null }[];
+  /** Plan 13 (decision 16): for a sale paid with points or gift cards, what a return gives back. */
+  refundParts?: RefundParts | null;
+}
+
+/** Plan 13: points spent on a sale and the gift cards that paid it, with what earlier returns gave back. */
+export interface RefundParts {
+  returnedTotal: string;
+  pointValue: string;
+  points: { spent: number; restoredBefore: number } | null;
+  giftCards: { key: string; number: string; paid: string; refundedBefore: string; usable: boolean }[];
+}
+
+/** Plan 13: a customer's points as the till shows them after picking the customer. */
+export type TillCustomerPoints = CustomerLoyaltyDto;
+
+/** Plan 13: a gift card checked at the till. */
+export type TillGiftCard = GiftCardDto & { problem: string | null };
+
+/** Plan 13: a gift card sold or reloaded at the till, with its receipt. */
+export interface GiftCardSaleResult {
+  repeated: boolean;
+  card: GiftCardDto;
+  receipt: Receipt;
 }
 
 export interface TransactionResult {

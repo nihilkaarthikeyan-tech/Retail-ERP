@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module.js';
 import { AccountingModule } from './accounting/accounting.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { LoyaltyModule } from './loyalty/loyalty.module.js';
 import { ModulesModule } from './modules/modules.module.js';
 import { PosModule } from './pos/pos.module.js';
 import { ReportsModule } from './reports/reports.module.js';
@@ -53,6 +54,7 @@ import { UsersModule } from './users/users.module.js';
     GstCoreModule,
     GstPortalModule,
     PosModule,
+    LoyaltyModule,
     AccountingModule,
     ReportsModule,
     DocumentsModule,

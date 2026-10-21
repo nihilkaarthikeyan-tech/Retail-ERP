@@ -3,9 +3,12 @@
 // on-screen preview and for the browser print window when the Till Helper is
 // not there. Reprints say "Duplicate". The layout is approved with the GST
 // module (decision 43); figures are shown as the server (or till) gave them.
+// Plan 13: points earned and spent with the balance, and gift cards sold or used.
 "use client";
 
 import { useEffect } from "react";
+import { addDays } from "shared";
+import { formatDate } from "@/lib/format";
 import { dateTimeIn, nonZero, qty, rupees } from "@/lib/till/format";
 import type { PrintableReceipt } from "@/lib/till/receipt";
 
@@ -25,7 +28,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         {r.store.phone ? <div>Phone: {r.store.phone}</div> : null}
       </header>
       {r.duplicate ? <p className="till-receipt-mark">DUPLICATE</p> : null}
-      <p className="till-receipt-mark">{gst ? gst.title.toUpperCase() : r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
+      <p className="till-receipt-mark">{r.title ? r.title.toUpperCase() : gst ? gst.title.toUpperCase() : r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
       {gst?.declaration ? <p className="till-receipt-small">{gst.declaration}</p> : null}
       <div className="till-receipt-meta">
         <div>No: {r.number}</div>
@@ -156,6 +159,30 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
           {r.delivery.phone ? <div>Phone: {r.delivery.phone}</div> : null}
         </div>
       ) : null}
+      {(r.giftCards ?? []).map((g, i) => (
+        <div key={i} className="till-receipt-meta" data-testid="receipt-gift-card">
+          <div>
+            <strong>{GIFT_CARD_ACTION[g.action]}</strong> {rupees(g.amount)}
+          </div>
+          {/* Sale and reload receipts carry the full number (the Till Helper prints it as a barcode too). */}
+          <div className={g.barcode ? "till-receipt-total" : undefined}>Card: {g.number}</div>
+          <div>Balance on card: {rupees(g.balance)}</div>
+          <div>Valid until {formatDate(addDays(g.expiresOn, -1))}</div>
+        </div>
+      ))}
+      {r.loyalty ? (
+        <div className="till-receipt-meta" data-testid="receipt-loyalty">
+          <div>
+            <strong>{r.loyalty.scheme}</strong>
+          </div>
+          {r.loyalty.earned ? <div>Points earned: {r.loyalty.earned}</div> : null}
+          {r.loyalty.spent ? <div>Points spent: {r.loyalty.spent}</div> : null}
+          {r.loyalty.restored ? <div>Points given back: {r.loyalty.restored}</div> : null}
+          {r.loyalty.reversed ? <div>Points taken back: {r.loyalty.reversed}</div> : null}
+          {r.loyalty.balance !== null ? <div>Points balance: {r.loyalty.balance}</div> : null}
+          {r.loyalty.note ? <div className="till-receipt-small">{r.loyalty.note}</div> : null}
+        </div>
+      ) : null}
       {gst?.creditNoteLate ? <p className="till-receipt-small">Issued after the GST time limit: the tax of the original bill is not reduced in the return.</p> : null}
       {r.provisional ? <p className="till-receipt-small">GST rates not yet approved (provisional)</p> : null}
       {gst ? <p className="till-receipt-small">Authorised signatory</p> : null}
@@ -163,6 +190,9 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
     </article>
   );
 }
+
+/** Plan 13: how each gift card line of a receipt starts. */
+const GIFT_CARD_ACTION = { sold: "Gift card sold", loaded: "Gift card loaded", spent: "Paid by gift card", refunded: "Back on gift card" } as const;
 
 /** Plan 11 B3: each offer on the bill and what it saved. */
 function OfferRow({ name, saving }: { name: string; saving: string }) {

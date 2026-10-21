@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { paymentMethodSchema, updatePaymentMethodSchema } from "shared";
+import { isSpecialPaymentMethod, paymentMethodSchema, paymentUse, updatePaymentMethodSchema } from "shared";
 import { PAYMENT_KIND_LABELS, type PaymentKind, type PaymentMethodDto, posRights, usePaymentMethods } from "@/components/pos/pos-shared";
 import { ActiveBadge, Alert, Badge, Button, CheckInput, DataTable, Dialog, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -19,6 +19,14 @@ interface Form {
 }
 
 const empty: Form = { code: "", name: "", kind: "card", allowRefund: true, needsReference: true, active: true };
+
+/** Plan 13: the loyalty points and gift card methods, paid with their own buttons at the till. */
+function specialLabel(m: { kind: string; accountRole?: string | null }): string | null {
+  const use = paymentUse(m);
+  if (use === "points") return "Loyalty points (own button at the till)";
+  if (use === "gift_card") return "Gift card (own button at the till)";
+  return null;
+}
 
 export default function PaymentMethodsPage() {
   const { user } = useAuth();
@@ -40,7 +48,8 @@ export default function PaymentMethodsPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const body = { name: form.name, kind: form.kind, allowRefund: form.allowRefund, needsReference: form.needsReference, active: form.active };
+    const special = editing !== "new" && editing !== null && isSpecialPaymentMethod(editing);
+    const body = { name: form.name, ...(special ? {} : { kind: form.kind }), allowRefund: form.allowRefund, needsReference: form.needsReference, active: form.active };
     const parsed = editing === "new" ? paymentMethodSchema.safeParse({ ...body, code: form.code }) : updatePaymentMethodSchema.safeParse(body);
     setErrors(issuesToFieldErrors(parsed));
     if (!parsed.success) return;
@@ -61,7 +70,7 @@ export default function PaymentMethodsPage() {
   const columns: Column<PaymentMethodDto>[] = [
     { key: "name", header: "Payment method", render: (m) => m.name },
     { key: "code", header: "Code", render: (m) => <span className="mono">{m.code}</span> },
-    { key: "kind", header: "Kind", render: (m) => PAYMENT_KIND_LABELS[m.kind] ?? m.kind },
+    { key: "kind", header: "Kind", render: (m) => specialLabel(m) ?? PAYMENT_KIND_LABELS[m.kind] ?? m.kind },
     {
       key: "rules",
       header: "Rules",
@@ -110,7 +119,7 @@ export default function PaymentMethodsPage() {
             <TextInput id="pm-code" label="Code" required className="mono" value={form.code} error={errors.code} hint="For example PAYTM. Cannot be changed later." autoComplete="off" onChange={(e) => setForm({ ...form, code: e.target.value })} />
           ) : null}
           <TextInput id="pm-name" label="Name" required value={form.name} error={errors.name} autoComplete="off" onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <SelectInput id="pm-kind" label="Kind" value={form.kind} error={errors.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as PaymentKind })}>
+          <SelectInput id="pm-kind" label="Kind" value={form.kind} error={errors.kind} disabled={editing !== "new" && editing !== null && isSpecialPaymentMethod(editing)} hint={editing !== "new" && editing !== null && isSpecialPaymentMethod(editing) ? `${specialLabel(editing)}; its kind cannot change.` : undefined} onChange={(e) => setForm({ ...form, kind: e.target.value as PaymentKind })}>
             {Object.entries(PAYMENT_KIND_LABELS).map(([k, v]) => (
               <option key={k} value={k}>
                 {v}

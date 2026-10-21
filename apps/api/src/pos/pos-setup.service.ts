@@ -6,7 +6,9 @@ import {
   Decimal,
   type GstRateInput,
   hasPermission,
+  isSpecialPaymentMethod,
   PAYMENT_ACCOUNT_ROLES,
+  paymentUse,
   priceBandProblem,
   type PaymentMethodInput,
   type PosSettingsInput,
@@ -126,6 +128,8 @@ export class PosSetupService {
   async updatePaymentMethod(id: string, input: UpdatePaymentMethodInput, actor: Actor) {
     const before = await this.prisma.paymentMethod.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Payment method not found');
+    // Plan 13: the points and gift card methods keep their kind (their account tells them apart).
+    if (isSpecialPaymentMethod(before) && input.kind && input.kind !== before.kind) throw new BadRequestException(`${before.name} is the till's own method for ${paymentUse(before) === 'points' ? 'loyalty points' : 'gift cards'}; its kind cannot change`);
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.paymentMethod.update({
         where: { id },
@@ -222,6 +226,9 @@ export class PosSetupService {
     if (!list || !list.active || !list.forSelling) throw new BadRequestException('Choose an active selling price list');
     const methods = await db.paymentMethod.findMany({ where: { id: { in: input.paymentMethods.map((m) => m.paymentMethodId) }, companyId } });
     if (methods.length !== new Set(input.paymentMethods.map((m) => m.paymentMethodId)).size) throw new BadRequestException('Payment method not found');
+    // Plan 13: points and gift cards have their own buttons at the till (they are never ticked for a till).
+    const special = methods.find((m) => isSpecialPaymentMethod(m));
+    if (special) throw new BadRequestException(`${special.name} has its own button at the till; it is not ticked for a till`);
     if (input.paymentMethods.filter((m) => m.isDefault).length !== 1) throw new BadRequestException('Choose exactly one default payment method');
   }
 
@@ -317,7 +324,7 @@ function gstDto(r: GstRate) {
 }
 
 function methodDto(m: PaymentMethod) {
-  return { id: m.id, code: m.code, name: m.name, kind: m.kind, allowRefund: m.allowRefund, needsReference: m.needsReference, accountRole: m.accountRole, active: m.active };
+  return { id: m.id, code: m.code, name: m.name, kind: m.kind, use: paymentUse(m), allowRefund: m.allowRefund, needsReference: m.needsReference, accountRole: m.accountRole, active: m.active };
 }
 
 function tillDto(t: {

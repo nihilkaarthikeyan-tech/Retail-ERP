@@ -5,7 +5,7 @@
 import type { ApprovalAction, CloseShiftInput, CurrentUser, OpenShiftInput, PosTransactionInput } from "shared";
 import { api, ApiError, query } from "../api";
 import { TILL_TOKEN_HEADER, type TillDeviceInfo } from "../till-device";
-import type { BillDto, Person, Receipt, ServerShift, TillAlteration, TillOrder, TillSnapshot, TransactionResult } from "./types";
+import type { BillDto, GiftCardSaleResult, Person, Receipt, ServerShift, TillAlteration, TillCustomerPoints, TillGiftCard, TillOrder, TillSnapshot, TransactionResult } from "./types";
 
 /** Gives up on a request that hangs (the server is treated as unreachable). */
 export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -47,6 +47,10 @@ export interface TillApi {
   findAlterations(view: string, storeId: string, search?: string): Promise<{ rows: TillAlteration[] }>;
   createAlteration(body: Record<string, unknown>): Promise<TillAlteration>;
   alterationStatus(id: string, status: string): Promise<TillAlteration>;
+  // Plan 13: points and gift cards (online only). The card number goes in the body, never the address.
+  customerPoints(customerId: string): Promise<TillCustomerPoints>;
+  checkGiftCard(number: string): Promise<TillGiftCard>;
+  sellGiftCard(body: { clientId: string; amount: string; paymentMethodId: string; reference?: string | null; number?: string | null; holderName?: string | null; holderPhone?: string | null; customerId?: string | null }): Promise<GiftCardSaleResult>;
 }
 
 export function tillApi(device: TillDeviceInfo): TillApi {
@@ -75,6 +79,9 @@ export function tillApi(device: TillDeviceInfo): TillApi {
     findAlterations: (view, storeId, search) => t(api.get<{ rows: TillAlteration[] }>(`/alterations${query({ view, search: search || undefined, storeId, pageSize: 30 })}`, opts), 10_000),
     createAlteration: (body) => t(api.post<TillAlteration>("/alterations", body, opts)),
     alterationStatus: (id, status) => t(api.post<TillAlteration>(`/alterations/${id}/status`, { status }, opts)),
+    customerPoints: (customerId) => t(api.get<TillCustomerPoints>(`/pos/till/${tillId}/loyalty/${customerId}`, opts), 10_000),
+    checkGiftCard: (number) => t(api.post<TillGiftCard>(`/pos/till/${tillId}/gift-cards/check`, { number }, opts), 10_000),
+    sellGiftCard: (body) => t(api.post<GiftCardSaleResult>("/pos/gift-cards/sell", { tillId, ...body }, opts)),
   };
 }
 

@@ -4,7 +4,7 @@
 // switching by PIN, the GST rate list, and company defaults.
 import { createHash, randomBytes } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { type ApprovalAction, businessDate, type CurrentUser, Decimal, hasPermission, PAYMENT_ACCOUNT_ROLES, type PermissionKey, TILL_INVOICE_PREFIX_RE, tillInvoicePrefixCandidates } from 'shared';
+import { type ApprovalAction, businessDate, type CurrentUser, Decimal, hasPermission, PAYMENT_ACCOUNT_ROLES, type PermissionKey, SPECIAL_PAYMENT_METHODS, TILL_INVOICE_PREFIX_RE, tillInvoicePrefixCandidates } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import { canAccessStore } from '../auth/store-access.js';
 import { CompanyService } from '../company/company.service.js';
@@ -38,11 +38,16 @@ export const DEFAULT_PAYMENT_METHODS = [
  */
 export async function ensurePosDefaults(db: Db, companyId: string): Promise<PosSettings> {
   await db.paymentMethod.createMany({ data: DEFAULT_PAYMENT_METHODS.map((m) => ({ companyId, ...m, accountRole: PAYMENT_ACCOUNT_ROLES[m.kind] })), skipDuplicates: true });
+  // Plan 13: paying with loyalty points and with a gift card ("other" methods told apart by their account).
+  await db.paymentMethod.createMany({
+    data: SPECIAL_PAYMENT_METHODS.map((m) => ({ companyId, code: m.code, name: m.name, kind: m.kind, accountRole: m.accountRole, allowRefund: m.allowRefund, needsReference: m.needsReference })),
+    skipDuplicates: true,
+  });
   await db.posSettings.createMany({ data: [{ companyId }], skipDuplicates: true });
   return db.posSettings.findUniqueOrThrow({ where: { companyId } });
 }
 
-export type TillWithRefs = Till & { store: { id: string; code: string; name: string; stateCode: string | null; companyId: string }; paymentMethods: { paymentMethodId: string; isDefault: boolean; paymentMethod: { id: string; code: string; name: string; kind: string; allowRefund: boolean; needsReference: boolean; active: boolean } }[] };
+export type TillWithRefs = Till & { store: { id: string; code: string; name: string; stateCode: string | null; companyId: string }; paymentMethods: { paymentMethodId: string; isDefault: boolean; paymentMethod: { id: string; code: string; name: string; kind: string; allowRefund: boolean; needsReference: boolean; active: boolean; accountRole: string } }[] };
 
 /** A manager's approval checked while a bill is built, marked used when the bill is saved. */
 export interface PendingApproval {

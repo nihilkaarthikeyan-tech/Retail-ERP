@@ -3057,3 +3057,126 @@ model SetupProgress {
   data      Json     @default("{}")
   updatedAt DateTime @updatedAt
 }
+
+// ---------------------------------------------------------------------------
+// Plan 13: loyalty points and gift cards (docs/plans/13-loyalty-gift-cards.md).
+// ---------------------------------------------------------------------------
+
+/// The company's loyalty scheme (starting values approved by the owner on 21 October 2026).
+model LoyaltySettings {
+  companyId        String   @id @db.Uuid
+  schemeName       String   @default("Loyalty points")
+  /// Earn `earnPoints` points for every `earnSpend` rupees that earn.
+  earnSpend        Decimal  @default(100) @db.Decimal(16, 2)
+  earnPoints       Int      @default(1)
+  /// What one point is worth when spent.
+  pointValue       Decimal  @default(1) @db.Decimal(16, 4)
+  validityDays     Int      @default(365)
+  minRedeem        Int      @default(100)
+  maxSharePercent  Decimal  @default(50) @db.Decimal(5, 2)
+  /// Every named customer joins, or only these customer groups.
+  joinAll          Boolean  @default(true)
+  customerGroupIds String[] @db.Uuid
+  /// Where expired points go back: loyalty_expense or other_income.
+  expiryTo         String   @default("loyalty_expense")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+}
+
+/// An optional tier: from this yearly spend, earn at its own rate.
+model LoyaltyTier {
+  id         String  @id @default(uuid()) @db.Uuid
+  companyId  String  @db.Uuid
+  name       String
+  spendFrom  Decimal @db.Decimal(16, 2)
+  earnSpend  Decimal @db.Decimal(16, 2)
+  earnPoints Int
+  sortOrder  Int     @default(0)
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  @@unique([companyId, name])
+}
+
+/// Points earned, spent, expired or reversed. Balance = sum of points; earned entries keep what is left unspent.
+model LoyaltyEntry {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @db.Uuid
+  customerId    String    @db.Uuid
+  /// earn, spend, expire, reverse_earn or restore_spend.
+  kind          String
+  /// Plus for earned and restored, minus for spent, expired and reversed.
+  points        Int
+  /// points × point value at the time.
+  value         Decimal   @db.Decimal(16, 2)
+  billId        String?   @db.Uuid
+  /// Earned entries: the date the points lapse, and how many are still unspent.
+  expiresOn     DateTime? @db.Date
+  remaining     Int?
+  /// Spend, expire and reverse entries: the earned entry they draw on.
+  sourceEntryId String?   @db.Uuid
+  entryDate     DateTime  @db.Date
+  storeId       String?   @db.Uuid
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  @@index([customerId, entryDate])
+  @@index([billId])
+  @@index([companyId, expiresOn])
+}
+
+/// A reloadable prepaid gift card: money the shop owes the holder.
+model GiftCard {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @db.Uuid
+  number        String   @unique
+  holderName    String?
+  holderPhone   String?
+  customerId    String?  @db.Uuid
+  issuedStoreId String   @db.Uuid
+  issuedOn      DateTime @db.Date
+  loadedTotal   Decimal  @default(0) @db.Decimal(16, 2)
+  balance       Decimal  @default(0) @db.Decimal(16, 2)
+  expiresOn     DateTime @db.Date
+  /// active, blocked or expired.
+  status        String   @default("active")
+  blockedReason String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+  updatedAt   DateTime @updatedAt
+  updatedById String?  @db.Uuid
+
+  entries GiftCardEntry[]
+
+  @@index([companyId, status, expiresOn])
+}
+
+/// Every load, spend, refund and expiry of a gift card.
+model GiftCardEntry {
+  id           String   @id @default(uuid()) @db.Uuid
+  cardId       String   @db.Uuid
+  /// load, spend, refund or expire.
+  kind         String
+  /// Plus for load and refund, minus for spend and expire.
+  amount       Decimal  @db.Decimal(16, 2)
+  balanceAfter Decimal  @db.Decimal(16, 2)
+  billId       String?  @db.Uuid
+  storeId      String?  @db.Uuid
+  entryDate    DateTime @db.Date
+  remark       String?
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  card GiftCard @relation(fields: [cardId], references: [id])
+
+  @@index([cardId, createdAt])
+  @@index([billId])
+}

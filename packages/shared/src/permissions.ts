@@ -94,6 +94,12 @@ export const PERMISSIONS = {
   // Module 8 (e-invoice and e-way bill files)
   'einvoice.manage': 'See e-invoices, export them for the e-invoice portal, import its answer and record cancellations',
   'eway.manage': 'Make e-way bills for bills and transfers, export them for the e-way bill portal and record their numbers',
+  // Plan 13 (loyalty points and gift cards)
+  'loyalty.manage': 'Change the loyalty scheme: what earns a point, what a point is worth, how long points last, limits and tiers',
+  'loyalty.view': 'See customers’ loyalty points and the points reports',
+  'giftcards.sell': 'Sell and reload gift cards at the till',
+  'giftcards.view': 'See gift cards, their history and the gift card reports',
+  'giftcards.manage': 'Block and unblock gift cards',
 } as const;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -161,6 +167,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'einvoice.manage',
     'eway.manage',
     'gst.returns',
+    'loyalty.view',
+    'giftcards.view',
   ],
   store_manager: [
     'company.view',
@@ -201,9 +209,13 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'orders.manage',
     'alterations.manage',
     'eway.manage',
+    'loyalty.view',
+    'giftcards.sell',
+    'giftcards.view',
+    'giftcards.manage',
   ],
   // Decision 70: cashiers never see cost, margin, buying prices or stock valuation.
-  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close', 'orders.manage', 'alterations.manage'],
+  cashier: ['catalogue.view', 'prices.view', 'customers.view', 'customers.quick_add', 'stock.view', 'pos.sell', 'pos.return', 'pos.close', 'orders.manage', 'alterations.manage', 'giftcards.sell'],
   stock_receiving: ['stores.view', 'catalogue.view', 'suppliers.view', 'stock.view', 'stock.move', 'stock.count', 'purchase.view', 'purchase.receive', 'labels.print'],
   viewer_auditor: [
     'company.view',
@@ -223,6 +235,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'accounts.view',
     'export.masters',
     'gst.returns',
+    'loyalty.view',
+    'giftcards.view',
   ],
 };
 

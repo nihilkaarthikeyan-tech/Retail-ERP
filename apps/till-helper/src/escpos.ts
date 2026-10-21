@@ -85,6 +85,26 @@ export class EscPos {
     return this.raw(Commands.cut);
   }
 
+  /**
+   * A CODE128 barcode with its text printed below (plan 13: gift card numbers).
+   * GS h 80 (height in dots), GS w 2 (bar width), GS H 2 (text below), GS f 0
+   * (text font A), then GS k 73 n data. An even-length string of digits uses
+   * code set C (two digits per symbol, shorter); anything else code set B.
+   * Only printable ASCII is accepted, at most 80 characters.
+   */
+  barcode128(data: string): this {
+    if (!/^[ -~]{1,80}$/.test(data)) throw new Error('A barcode holds 1 to 80 plain characters');
+    let payload: number[];
+    if (/^\d+$/.test(data) && data.length % 2 === 0) {
+      payload = [0x7b, 0x43];
+      for (let i = 0; i < data.length; i += 2) payload.push(Number(data.slice(i, i + 2)));
+    } else {
+      payload = [0x7b, 0x42];
+      for (let i = 0; i < data.length; i++) payload.push(data.charCodeAt(i));
+    }
+    return this.raw([GS, 0x68, 80, GS, 0x77, 2, GS, 0x48, 2, GS, 0x66, 0, GS, 0x6b, 73, payload.length, ...payload]).raw([LF]);
+  }
+
   drawerKick(pin: 2 | 5 = 2): this {
     return this.raw(drawerKickBytes(pin));
   }

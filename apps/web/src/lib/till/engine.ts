@@ -8,13 +8,13 @@ import { businessDate, type CurrentUser, Decimal, type OpenShiftInput, type PosT
 import { ApiError, errorMessage } from "../api";
 import type { TillDeviceInfo } from "../till-device";
 import { NumberCounter, prefixFor } from "./numbers";
-import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, isNoBillReturn, priceBill, usesOnAccount } from "./pricing";
+import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, isNoBillReturn, priceBill, usesOnAccount, usesPointsOrCards } from "./pricing";
 import { type QueueItem, type QueueResult, SendQueue } from "./queue";
 import { localReceipts } from "./receipt";
 import { isStale, loadSnapshot, REFRESH_MS, refreshSnapshot } from "./snapshot";
 import type { KeyValueStore } from "./storage";
 import { isOfflineError, priceChangedTotal, type TillApi } from "./till-api";
-import type { BillDto, LocalShift, Person, Receipt, ServerShift, StoredSnapshot, TransactionResult } from "./types";
+import type { BillDto, GiftCardSaleResult, LocalShift, Person, Receipt, ServerShift, StoredSnapshot, TillCustomerPoints, TillGiftCard, TransactionResult } from "./types";
 
 const DRAFT_KEY = "draft";
 const SHIFT_KEY = "shift";
@@ -115,6 +115,13 @@ export function creditOverride(err: unknown): string | null {
   if (!err.message.startsWith("Over the credit limit") && !/^₹[\d,.]+ is overdue/.test(err.message)) return null;
   return err.message;
 }
+
+/** Plan 13: points and gift cards are checked on the server, so a bill using them is never kept offline. */
+export const POINTS_OFFLINE = "Points and gift cards need the connection: the balance is checked on the server. Take them off the bill and use another payment method, or wait until the till is online.";
+export const POINTS_DROPPED = "The connection dropped while sending this bill. Points and gift cards need the connection, so the bill was not kept on the till: try again when the till is online, or take them off and use another payment method.";
+export const GIFT_CARD_SALE_OFFLINE = "Selling or reloading a gift card needs the connection: the card is made and checked on the server. Try again when the till is online.";
+/** Plan 13: shown on the till's own receipt for a named customer's offline bill. */
+export const POINTS_LATER = "Points for this bill are added when the till is back online.";
 
 /** Plain messages for returns without the original bill (plan 11 A9): a manager approves them on the server, so they are never kept offline. */
 export const NO_BILL_RETURN_OFFLINE = "A return without a bill needs the connection: a manager approves it on the server. Try again when the till is online, or find the original bill.";
@@ -529,6 +536,8 @@ export class TillEngine {
     if (noBill && (!this.state.online || this.state.signedOut)) throw new Error(NO_BILL_RETURN_OFFLINE);
     const needsServer = !!draft.order || !!draft.alteration || bill.credit.gt(0);
     if (needsServer && (!this.state.online || this.state.signedOut)) throw new Error(ORDER_OFFLINE);
+    const pointsOrCards = usesPointsOrCards(draft);
+    if (pointsOrCards && (!this.state.online || this.state.signedOut)) throw new Error(POINTS_OFFLINE);
 
     // The identity and the numbers are given once and saved before anything is sent (pos-offline §3–§4).
     draft.clientId = draft.clientId ?? this.uuid();
@@ -575,9 +584,11 @@ export class TillEngine {
         if (onAccount) throw new Error(ON_ACCOUNT_DROPPED);
         if (noBill) throw new Error(NO_BILL_RETURN_DROPPED);
         if (needsServer) throw new Error(ORDER_OFFLINE);
+        if (pointsOrCards) throw new Error(POINTS_DROPPED);
       }
     }
     if (needsServer) throw new Error(ORDER_OFFLINE);
+    if (pointsOrCards) throw new Error(POINTS_OFFLINE);
     if (onAccount) throw new Error(ON_ACCOUNT_OFFLINE);
     if (noBill) throw new Error(NO_BILL_RETURN_OFFLINE);
 
@@ -585,10 +596,17 @@ export class TillEngine {
     const tx = buildTransaction(draft, bill, methods, { ...opts, offline: true });
     const label = [draft.numbers.ret, draft.numbers.sale].filter(Boolean).join(" + ");
     await this.queue.enqueue({ clientId: draft.clientId, kind: "bill", label: `Bill ${label}`, payload: tx, cashierId: cashier?.id });
+    // A return of a bill paid with points or gift cards: the server gives those back by itself (plan 13).
+    const back = bill.back
+      ? [
+          ...(bill.back.points > 0 ? [{ paymentMethodId: "points", amount: bill.back.pointsValue.neg().toFixed(2), reference: `${bill.back.points} points back`, name: "Loyalty points" }] : []),
+          ...bill.back.giftCards.map((g) => ({ paymentMethodId: "giftcard", amount: g.amount.neg().toFixed(2), reference: g.number, name: "Gift card" })),
+        ]
+      : [];
     const receipts = localReceipts(bill, draft.numbers, {
       soldAt: draft.soldAt,
       till: snapshot.till,
-      payments: tx.payments,
+      payments: [...tx.payments, ...back],
       change: pay.change,
       extras: {
         staff: snapshot.salesStaff,
@@ -598,6 +616,8 @@ export class TillEngine {
         buyer: draft.buyer,
         customer: draft.customer ? { name: draft.customer.name, gstin: draft.customer.gstin } : null,
         originalNumber: draft.ret?.originalNumber ?? null,
+        // Plan 13: a named customer's points are worked out when the bill reaches the server.
+        loyaltyNote: snapshot.till.loyalty && bill.sale && hasNamedCustomer(draft, snapshot.till.walkInCustomerId) ? { scheme: snapshot.till.loyalty.schemeName, note: POINTS_LATER } : null,
       },
     });
     for (const r of receipts) await this.store.set(`${RECENT}${r.number}`, { number: r.number, savedAt: this.now().toISOString(), bill: null, receipts: [r] } satisfies RecentBill);
@@ -606,6 +626,41 @@ export class TillEngine {
     await this.updateCounts();
     if (this.state.online) void this.sync();
     return { receipts, offline: true, change: pay.change.toFixed(2), paidCash };
+  }
+
+  // ---- Plan 13: points and gift cards (online only) ----
+
+  /** A customer's points: balance, what can be spent today, tier. */
+  async customerPoints(customerId: string): Promise<TillCustomerPoints> {
+    if (!this.state.online || this.state.signedOut) throw new Error("The points balance needs the connection");
+    return this.api.customerPoints(customerId);
+  }
+
+  /** Checks a gift card typed or scanned at the till. */
+  async checkGiftCard(number: string): Promise<TillGiftCard> {
+    if (!this.state.online || this.state.signedOut) throw new Error(POINTS_OFFLINE);
+    return this.api.checkGiftCard(number);
+  }
+
+  /**
+   * Sells a new gift card or loads more onto one (plan 13 §2). Online only;
+   * the same sale sent twice (a retry) is saved once, under `clientId`.
+   */
+  async sellGiftCard(body: { clientId: string; amount: string; paymentMethodId: string; reference?: string | null; number?: string | null; holderName?: string | null; holderPhone?: string | null; customerId?: string | null }): Promise<GiftCardSaleResult> {
+    if (!this.state.shift) throw new Error("Open a shift first");
+    if (!this.state.online || this.state.signedOut) throw new Error(GIFT_CARD_SALE_OFFLINE);
+    try {
+      const res = await this.api.sellGiftCard(body);
+      await this.store.set(LAST_RECEIPTS_KEY, [res.receipt]);
+      return res;
+    } catch (err) {
+      if (err instanceof ApiError && err.statusCode === 401) this.set({ signedOut: true });
+      else if (isOfflineError(err)) {
+        this.set({ online: false });
+        throw new Error(GIFT_CARD_SALE_OFFLINE);
+      }
+      throw err;
+    }
   }
 
   // ---- Recent bills (returns and reprints) ----

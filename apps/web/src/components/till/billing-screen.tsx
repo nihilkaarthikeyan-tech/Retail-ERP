@@ -4,7 +4,9 @@
 // of the bill and of each line (plan 11 C1), home delivery (plan 11 B4), totals
 // with the offers used and the GST table, park / recall, return / exchange,
 // cash in/out, pay and print. Plan 12: buttons of switched-off optional modules
-// (salesperson, delivery, customer orders, alterations, coupons, credit sales) are not shown.
+// (salesperson, delivery, customer orders, alterations, coupons, credit sales,
+// loyalty points, gift cards) are not shown. Plan 13: the customer's points
+// after picking them, paying with points and gift cards, selling gift cards.
 // Every change is saved on the till at once (crash recovery, pos-offline §6).
 // Figures come from the shared calculations, the same as the server's.
 "use client";
@@ -18,10 +20,11 @@ import { qty, rupees } from "@/lib/till/format";
 import { tillModuleOn, withoutSwitchedOff } from "@/lib/till/modules";
 import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
-import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillOrder } from "@/lib/till/types";
+import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillCustomerPoints, TillOrder } from "@/lib/till/types";
 import { BillOptionsDialog, CustomerDialog, HelperDialog, ParkedDialog } from "./bill-dialogs";
 import { NumPad } from "./num-pad";
 import { PayDialog } from "./pay-dialog";
+import { GiftCardSaleDialog } from "./points-cards";
 import { type ApprovalRequest, ManagerApprovalDialog } from "./pin-dialogs";
 import { PrintArea, ReceiptPaper } from "./receipt-paper";
 import { ReturnDialog } from "./return-dialog";
@@ -29,7 +32,7 @@ import { BuyerDialog, DeliveryDialog, SalespersonDialog } from "./extras-dialogs
 import { AlterationsDialog, customerForOrder, OrdersDialog } from "./order-dialogs";
 import { CashDialog, CloseShiftDialog } from "./shift-dialogs";
 
-type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery" | "orders" | "alterations" | "buyer";
+type DialogName = "pay" | "customer" | "options" | "parked" | "return" | "cash" | "close" | "helper" | "salesperson" | "delivery" | "orders" | "alterations" | "buyer" | "giftcard";
 type PadMode = "qty" | "price" | "disc";
 
 const PAD_LABEL: Record<PadMode, string> = { qty: "Quantity", price: "Price", disc: "Discount %" };
@@ -86,6 +89,11 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const [clearArmed, setClearArmed] = useState(false);
   /** Plan 11 C1: choosing the salesperson for one line (its key), or for the bill (null). */
   const [staffLine, setStaffLine] = useState<string | null>(null);
+  /** Plan 13: the chosen customer's points (read online when the customer is picked). */
+  const [custPoints, setCustPoints] = useState<TillCustomerPoints | null>(null);
+  const [pointsNote, setPointsNote] = useState<string | null>(null);
+  /** Plan 13: one id per gift card sale, so a retry is saved once. */
+  const [giftSaleId, setGiftSaleId] = useState<string>("");
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -112,6 +120,29 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const ordersOn = on("customer_orders");
   const alterationsOn = on("alterations");
   const offersOn = on("offers");
+  const loyaltyOn = on("loyalty") && !!till.loyalty;
+  const giftCardsOn = on("gift_cards") && !!till.giftCards;
+  const customerId = draft?.customer?.id ?? (draft?.ret?.originalBillId && draft.ret.customerId !== till.walkInCustomerId ? draft.ret.customerId : null);
+  const online = state.online && !state.signedOut;
+
+  // Plan 13: the customer's points, read when the customer is picked (needs the connection).
+  useEffect(() => {
+    setCustPoints(null);
+    setPointsNote(null);
+    if (!loyaltyOn || !customerId) return;
+    if (!online) {
+      setPointsNote("Points: needs the connection");
+      return;
+    }
+    let cancelled = false;
+    engine.customerPoints(customerId).then(
+      (p) => !cancelled && setCustPoints(p),
+      (err: unknown) => !cancelled && setPointsNote(`Points: ${errorMessage(err)}`),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [engine, loyaltyOn, customerId, online]);
   const staff = salespersonOn ? (snapshot.salesStaff ?? []) : [];
   const staffOf = (id: string | null | undefined) => (id ? staff.find((s) => s.id === id) : undefined);
   const canReturn = hasPermission(state.user, "pos.return");
@@ -700,6 +731,15 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <span className="muted">Customer (F6)</span>
             <strong>{draft.customer ? draft.customer.name : "Walk-in customer"}</strong>
             {draft.customer?.mobile ? <span className="muted">{draft.customer.mobile}</span> : null}
+            {loyaltyOn && custPoints ? (
+              <span className="muted" data-testid="customer-points">
+                {custPoints.member ? `${custPoints.balance} points (${rupees(custPoints.balanceValue)})${custPoints.tier ? ` · ${custPoints.tier.name}` : ""}` : (custPoints.reason ?? "Not in the loyalty scheme")}
+              </span>
+            ) : loyaltyOn && pointsNote ? (
+              <span className="muted" data-testid="customer-points">
+                {pointsNote}
+              </span>
+            ) : null}
           </button>
           {staff.length ? (
             <button
@@ -763,12 +803,37 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               <span>{bill.net.isNegative() ? "Refund" : "Total"}</span>
               <strong data-testid="bill-total">{rupees(bill.net.abs())}</strong>
             </div>
-            {bill.credit.gt(0) ? (
+            {bill.credit.gt(0) || bill.pointsPaid.gt(0) || bill.giftCardsPaid.gt(0) || bill.back ? (
               <dl>
-                <dt>Advance / credit used</dt>
-                <dd>−{rupees(bill.credit)}</dd>
-                <dt>To pay</dt>
-                <dd data-testid="bill-due">{rupees(bill.due)}</dd>
+                {bill.credit.gt(0) ? (
+                  <>
+                    <dt>Advance / credit used</dt>
+                    <dd>−{rupees(bill.credit)}</dd>
+                  </>
+                ) : null}
+                {bill.pointsPaid.gt(0) ? (
+                  <>
+                    <dt>Paid with points ({draft.points?.points})</dt>
+                    <dd>−{rupees(bill.pointsPaid)}</dd>
+                  </>
+                ) : null}
+                {bill.giftCardsPaid.gt(0) ? (
+                  <>
+                    <dt>Paid with gift cards</dt>
+                    <dd>−{rupees(bill.giftCardsPaid)}</dd>
+                  </>
+                ) : null}
+                {bill.back?.points ? (
+                  <>
+                    <dt>Points given back ({bill.back.points})</dt>
+                    <dd>{rupees(bill.back.pointsValue)}</dd>
+                  </>
+                ) : null}
+                {bill.back?.giftCards.map((g) => (
+                  <BackOnCard key={g.key} number={g.number} amount={g.amount} />
+                ))}
+                <dt>{bill.due.isNegative() ? "To refund" : "To pay"}</dt>
+                <dd data-testid="bill-due">{rupees(bill.due.abs())}</dd>
               </dl>
             ) : null}
             {gstByRate.size ? (
@@ -841,6 +906,20 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             {ordersOn ? (
               <button type="button" className="till-action" onClick={() => void applyCustomerCredit()} disabled={!state.online || !draft.customer?.id || !bill.sale}>
                 Use customer credit
+              </button>
+            ) : null}
+            {giftCardsOn && hasPermission(state.user, "giftcards.sell") ? (
+              <button
+                type="button"
+                className="till-action"
+                disabled={!online}
+                title={online ? undefined : "Needs the connection"}
+                onClick={() => {
+                  setGiftSaleId(engine.uuid());
+                  setDialog("giftcard");
+                }}
+              >
+                Sell gift card
               </button>
             ) : null}
             <button type="button" className="till-action" onClick={() => setDialog("cash")}>
@@ -927,6 +1006,19 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         namedCustomer={hasNamedCustomer(draft, till.walkInCustomerId)}
         refundOnAccount={!!draft.ret?.paidOnAccount}
         creditSales={on("credit_sales")}
+        special={
+          loyaltyOn || giftCardsOn
+            ? {
+                loyalty: loyaltyOn ? (till.loyalty ?? null) : null,
+                giftCardsOn,
+                customerPoints: custPoints,
+                billTotal: Decimal.max(bill.net, 0),
+                onPoints: (p) => change({ ...draft, points: p, payments: [] }),
+                onGiftCards: (cards) => change({ ...draft, giftCards: cards, payments: [] }),
+                checkCard: (n) => engine.checkGiftCard(n),
+              }
+            : undefined
+        }
         onChange={(payments) => change({ ...draft, payments })}
         onFinish={() => void finish()}
         onClose={() => setDialog(null)}
@@ -937,7 +1029,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         current={draft.customer}
         newId={engine.uuid}
         onPick={(c) => {
-          change({ ...draft, customer: c, payments: [] });
+          // Points belong to the customer they were read for.
+          change({ ...draft, customer: c, payments: [], points: c?.id === draft.customer?.id ? draft.points : null });
           setDialog(null);
         }}
         onClose={() => setDialog(null)}
@@ -1024,6 +1117,23 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         <AlterationsDialog open engine={engine} snapshot={snapshot} online={state.online && !state.signedOut} customer={draft.customer} today={today} onCharge={chargeAlteration} onClose={() => setDialog(null)} />
       ) : null}
       <CashDialog open={dialog === "cash"} engine={engine} onClose={() => setDialog(null)} />
+      {dialog === "giftcard" && giftCardsOn ? (
+        <GiftCardSaleDialog
+          open
+          online={online}
+          methods={methods}
+          customer={draft.customer ? { id: draft.customer.id, name: draft.customer.name, mobile: draft.customer.mobile } : null}
+          onSell={async (body) => {
+            const res = await engine.sellGiftCard({ clientId: giftSaleId, ...body });
+            const receipts = printable([res.receipt]);
+            setDialog(null);
+            setDone({ receipts, change: "0.00", offline: false, warnings: [] });
+            if (methods.find((m) => m.id === body.paymentMethodId)?.kind === "cash") void openDrawer();
+            if (till.autoPrint) void printReceipts(receipts);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
       <CloseShiftDialog
         open={dialog === "close"}
         engine={engine}
@@ -1066,6 +1176,16 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
 }
 
 /** Plan 11 B3: an offer used on the bill and what it saves the customer. */
+/** Plan 13: money a return puts back on a gift card. */
+function BackOnCard({ number, amount }: { number: string; amount: Decimal }) {
+  return (
+    <>
+      <dt>Back on gift card {number}</dt>
+      <dd>{rupees(amount)}</dd>
+    </>
+  );
+}
+
 function OfferSaving({ name, saving }: { name: string; saving: Decimal }) {
   return (
     <>

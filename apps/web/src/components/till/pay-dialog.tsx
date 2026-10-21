@@ -4,14 +4,16 @@
 // change shown big. Refunds only by methods allowed for refunds. The payments
 // are part of the saved bill, so they survive a crash too. On account (the
 // customer pays later, plan 07 §1a) needs a named customer and the connection.
+// Plan 13: points and gift cards pay part of a sale (online only).
 "use client";
 
 import { useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { rupees } from "@/lib/till/format";
-import { checkPayments, type DraftBill, type DraftPayment, usesOnAccount } from "@/lib/till/pricing";
-import type { SnapPaymentMethod } from "@/lib/till/types";
+import { checkPayments, type DraftBill, type DraftGiftCard, type DraftPayment, usesOnAccount } from "@/lib/till/pricing";
+import type { SnapLoyalty, SnapPaymentMethod, TillCustomerPoints, TillGiftCard } from "@/lib/till/types";
+import { PointsAndCards } from "./points-cards";
 
 const QUICK_CASH = ["100", "200", "500", "2000"];
 
@@ -33,6 +35,17 @@ interface PayDialogProps {
   onChange: (payments: DraftPayment[]) => void;
   onFinish: () => void;
   onClose: () => void;
+  /** Plan 13: points and gift cards (sales only; online only). Left out, the part is not shown. */
+  special?: {
+    loyalty: SnapLoyalty | null;
+    giftCardsOn: boolean;
+    customerPoints: TillCustomerPoints | null;
+    /** The sale's total, for the share of points. */
+    billTotal: Decimal;
+    onPoints: (p: DraftBill["points"]) => void;
+    onGiftCards: (cards: DraftGiftCard[]) => void;
+    checkCard: (number: string) => Promise<TillGiftCard>;
+  };
 }
 
 function sum(rows: DraftPayment[]): Decimal {
@@ -47,7 +60,7 @@ function sum(rows: DraftPayment[]): Decimal {
 
 export const ON_ACCOUNT_WALK_IN = "On account is only for a named customer. Close this and choose the customer with F6 Customer.";
 
-export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, creditSales = true, onChange, onFinish, onClose }: PayDialogProps) {
+export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, creditSales = true, onChange, onFinish, onClose, special }: PayDialogProps) {
   const refund = net.isNegative();
   const due = net.abs();
   const usable = methods.filter((m) => m.active && (!refund || m.allowRefund) && (m.kind !== "on_account" || (refund ? refundOnAccount && namedCustomer : creditSales)));
@@ -111,6 +124,22 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
           <span>{refund ? "To refund" : "To pay"}</span>
           <strong data-testid="pay-due">{rupees(due)}</strong>
         </div>
+        {special && !refund ? (
+          <PointsAndCards
+            loyalty={special.loyalty}
+            giftCardsOn={special.giftCardsOn}
+            online={online}
+            namedCustomer={namedCustomer}
+            customerPoints={special.customerPoints}
+            billTotal={special.billTotal}
+            due={due}
+            points={draft.points ?? null}
+            giftCards={draft.giftCards ?? []}
+            onPoints={special.onPoints}
+            onGiftCards={special.onGiftCards}
+            checkCard={special.checkCard}
+          />
+        ) : null}
         <div className="till-pay-methods" role="group" aria-label="Payment methods">
           {usable.map((m) => {
             const offline = m.kind === "on_account" && !online;

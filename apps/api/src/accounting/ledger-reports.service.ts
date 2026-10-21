@@ -5,6 +5,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ageBand, ageBandLabels, type AsOfQuery, type CurrentUser, Decimal, type LedgerQuery, naturalBalance, type PeriodQuery } from 'shared';
 import type { Account, Prisma } from '../generated/prisma/client.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { GiftCardsService } from '../loyalty/gift-cards.service.js';
+import { LoyaltyService } from '../loyalty/loyalty.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AccountingCommon, D, fromIso, iso } from './accounting-common.service.js';
 
@@ -17,6 +19,8 @@ export class LedgerReportsService {
     private readonly prisma: PrismaService,
     private readonly common: AccountingCommon,
     private readonly ledger: LedgerService,
+    private readonly loyalty: LoyaltyService,
+    private readonly giftCards: GiftCardsService,
   ) {}
 
   /** Lines of entries that are not cancelled and are not cancellations (unless asked for). */
@@ -387,6 +391,8 @@ export class LedgerReportsService {
       const b = D(s._sum.debit ?? 0).sub(D(s._sum.credit ?? 0));
       if (!b.isZero()) problems.push(`Stock transfer clearing is ₹${money(b)}, not zero`);
     }
+    // Plan 13: the points liability equals points held × point value; the gift card liability equals the cards' balances.
+    problems.push(...(await this.loyalty.liabilityProblems()), ...(await this.giftCards.liabilityProblems()));
     return { totalDebit: money(dr), totalCredit: money(cr), partiesChecked: checked, problems, ok: problems.length === 0 };
   }
 

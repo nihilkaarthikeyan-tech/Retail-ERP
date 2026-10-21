@@ -19,8 +19,8 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 
 | Launch version (build now) | Later updates (deferred) |
 | --- | --- |
-| Users, roles, shops, audit history | Loyalty points (15, 16) |
-| Products, prices, barcodes | Gift cards (14) |
+| Users, roles, shops, audit history | — |
+| Products, prices, barcodes | — |
 | Customers and suppliers | Wholesale quotations (45) |
 | Buying stock and receiving goods | Weighing-scale barcodes (9), unless the first sector is grocery |
 | Stock, inter-shop transfers, stock counts | Bank statement matching (53) |
@@ -28,6 +28,7 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | Basic accounts | Direct e-invoice provider connection (63); launch with JSON/Excel export only |
 | GST invoices and GST return data (after CA approval) | WhatsApp receipts (67, 74), label designer (73) |
 | Key daily reports, Excel import | Tally, Marg and Busy imports (77) |
+| Loyalty points and reloadable gift cards (14–16; added 21 October 2026, plan 13) | |
 
 ---
 
@@ -39,7 +40,6 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | Which shops need true offline billing | 1 / 38 |
 | Number of legal companies and GST registrations at launch | 2, 4, 64 |
 | Weighing-scale barcodes (depends on first sector) | 9 |
-| Reloadable gift cards (depends on launch plan) | 14 |
 | Card terminal and UPI providers | 44 |
 | Bank statement formats | 53 |
 | Old software to import from | 77 |
@@ -79,7 +79,7 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 
 ## Pricing and promotions
 
-**14.** Reloadable gift cards: only if part of the launch plan; otherwise defer. **OPEN**.
+**14.** Reloadable gift cards: **decided 21 October 2026** — in scope as an optional module (plan 13): prepaid cards held as a liability, reloadable, usable in parts, 12-month validity by default.
 
 **15.** Track loyalty points as a loyalty liability in the accounts.
 
@@ -257,3 +257,4 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | 2026-10-18 | — | Design principle added to CLAUDE.md: one common core for all businesses; everything that differs is a setting with a sensible default, filled in by shop-type templates | Owner: one product for all retail shop types, no per-industry versions |
 | 2026-10-18 | 43, 56–64 | Owner approved `docs/plans/08-gst.md`: GST core built once from official sources, everything that differs as settings; business tax invoices at the till only; GSTR-1 as Excel and portal JSON; e-invoice and e-way bill as portal files with response import, provider connection later (63) | GST needed before any shop goes live; CA approves the settings before production use |
 | 2026-10-21 | — | Owner approved `docs/plans/12-setup-modules-settings.md`: core modules always on, optional modules switched on or off per company (hiding never deletes data), shop-type templates, step-by-step setup, getting-started checklist, one settings centre; existing companies start with every optional module on; AI setup helper later | One product for every retail shop type, simple for each |
+| 2026-10-21 | 14, 15, 16 | Owner approved `docs/plans/13-loyalty-gift-cards.md`, bringing loyalty points and gift cards into scope as optional modules: points kept as a liability (15), returns reverse earned and restore spent points (16); gift cards decided (14): reloadable prepaid cards held as a liability, no GST at sale and GST on the goods when spent (CA to confirm); starting values ₹100 = 1 point, 1 point = ₹1 | Clothing and fancy shops expect both |

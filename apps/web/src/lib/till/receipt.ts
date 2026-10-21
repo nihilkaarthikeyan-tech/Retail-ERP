@@ -25,6 +25,8 @@ export interface LocalReceiptExtras {
   customer?: { name: string; gstin: string | null } | null;
   /** Plan 08 G6: the bill a return is against. */
   originalNumber?: string | null;
+  /** Plan 13: offline, a named customer's sale says its points are added once the bill reaches the server. */
+  loyaltyNote?: { scheme: string; note: string } | null;
 }
 
 const stateOf = (code: string | null | undefined) => (code ? { code, name: INDIAN_STATES[code] ?? code } : null);
@@ -111,6 +113,8 @@ function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string
     totals: { gross: part.gross.toFixed(2), discount: part.discount.toFixed(2), taxable: part.taxable.toFixed(2), rounding: part.rounding.toFixed(2), total: part.total.toFixed(2) },
     payments: o.payments,
     change: o.change.toFixed(2),
+    loyalty: kind === "sale" && o.extras.loyaltyNote ? { scheme: o.extras.loyaltyNote.scheme, earned: 0, spent: 0, restored: 0, reversed: 0, balance: null, note: o.extras.loyaltyNote.note } : null,
+    giftCards: [],
   };
 }
 
@@ -118,11 +122,11 @@ function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string
 export function localReceipts(
   bill: ComputedBill,
   numbers: { sale?: string; ret?: string },
-  o: { soldAt: string; till: SnapTill; payments: { paymentMethodId: string; amount: string; reference?: string | null }[]; change: Decimal; extras?: LocalReceiptExtras },
+  o: { soldAt: string; till: SnapTill; payments: { paymentMethodId: string; amount: string; reference?: string | null; name?: string }[]; change: Decimal; extras?: LocalReceiptExtras },
 ): Receipt[] {
   const extras = o.extras ?? {};
   const names = new Map<string, SnapPaymentMethod>(o.till.paymentMethods.map((m) => [m.id, m]));
-  const pays = o.payments.filter((p) => !new Decimal(p.amount).isZero()).map((p) => ({ method: names.get(p.paymentMethodId)?.name ?? "Payment", amount: new Decimal(p.amount).toFixed(2), reference: p.reference ?? null }));
+  const pays = o.payments.filter((p) => !new Decimal(p.amount).isZero()).map((p) => ({ method: names.get(p.paymentMethodId)?.name ?? p.name ?? "Payment", amount: new Decimal(p.amount).toFixed(2), reference: p.reference ?? null }));
   // The bill that carries the payments, as on the server: the sale unless money goes back.
   const holder = bill.net.gte(0) ? (bill.sale ? "sale" : "return") : bill.ret ? "return" : "sale";
   const out: Receipt[] = [];

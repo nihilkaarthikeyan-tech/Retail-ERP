@@ -3,7 +3,7 @@
 // and each store's cash accounts (plan 07 §1). Idempotent and safe when two
 // requests ask at the same moment: existing rows are skipped, never an error.
 import { Injectable } from '@nestjs/common';
-import { ACCOUNT_ROLES, STORE_ACCOUNT_ROLES, type StoreAccountRole } from 'shared';
+import { ACCOUNT_ROLES, type AccountRole, ROLE_DEFAULT_ACCOUNT, STORE_ACCOUNT_ROLES, type StoreAccountRole } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import type { Account } from '../generated/prisma/client.js';
 import { CHART_TEMPLATE, STORE_ACCOUNTS, type TemplateAccount } from './chart-template.js';
@@ -39,16 +39,44 @@ export class AccountingSetup {
       });
       level = level.flatMap((l) => (l.node.children ?? []).map((c) => ({ node: c, family: l.family, parentKey: l.node.key })));
     }
-    const byKey = new Map((await db.account.findMany({ where: { companyId, systemKey: { in: Object.keys(ACCOUNT_ROLES) } } })).map((a) => [a.systemKey!, a.id]));
+    await this.createMissing(db, companyId);
+    // A role's default is the standard account with the same key, or the one ROLE_DEFAULT_ACCOUNT names (plan 13).
+    const keyOf = (role: string) => ROLE_DEFAULT_ACCOUNT[role as AccountRole] ?? role;
+    const byKey = new Map((await db.account.findMany({ where: { companyId, systemKey: { in: Object.keys(ACCOUNT_ROLES).map(keyOf) } } })).map((a) => [a.systemKey!, a.id]));
     await db.accountDefault.createMany({
       data: Object.keys(ACCOUNT_ROLES)
-        .filter((role) => byKey.has(role))
-        .map((role) => ({ companyId, role, accountId: byKey.get(role)! })),
+        .filter((role) => byKey.has(keyOf(role)))
+        .map((role) => ({ companyId, role, accountId: byKey.get(keyOf(role))! })),
       skipDuplicates: true,
     });
     await db.accountingSettings.createMany({ data: [{ companyId }], skipDuplicates: true });
     const stores = await db.store.findMany({ where: { companyId }, select: { id: true } });
     for (const s of stores) await this.ensureStore(db, companyId, s.id);
+  }
+
+  /**
+   * Standard accounts added to the template later (plan 13: loyalty and gift
+   * card accounts) reach existing companies through createChart. If the
+   * accountant already used the template's number for an account of their own,
+   * the standard account is made without a number instead of being left out.
+   */
+  private async createMissing(db: Db, companyId: string) {
+    const all: { node: TemplateAccount; family: (typeof CHART_TEMPLATE)[number]['family']; parentKey: string | null }[] = [];
+    const walk = (node: TemplateAccount, family: (typeof CHART_TEMPLATE)[number]['family'], parentKey: string | null) => {
+      all.push({ node, family, parentKey });
+      for (const c of node.children ?? []) walk(c, family, node.key);
+    };
+    for (const f of CHART_TEMPLATE) walk(f.root, f.family, null);
+    const existing = new Set((await db.account.findMany({ where: { companyId, systemKey: { in: all.map((a) => a.node.key) } }, select: { systemKey: true } })).map((a) => a.systemKey!));
+    for (const a of all) {
+      if (existing.has(a.node.key) || !a.parentKey) continue;
+      const parent = await db.account.findUnique({ where: { companyId_systemKey: { companyId, systemKey: a.parentKey } } });
+      if (!parent) continue;
+      await db.account.createMany({
+        data: [{ companyId, parentId: parent.id, number: null, name: a.node.name, isGroup: !!a.node.children, family: a.family, kind: a.node.children ? null : (a.node.kind ?? null), balanceMustBe: a.node.balanceMustBe ?? null, locked: false, systemKey: a.node.key }],
+        skipDuplicates: true,
+      });
+    }
   }
 
   /** Cash in till and cash in hand for a store, under "Cash in hand". */

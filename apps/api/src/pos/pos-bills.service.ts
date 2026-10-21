@@ -26,6 +26,15 @@ import {
   type ModuleKey,
   INDIAN_STATES,
   isCountedOffer,
+  isSpecialPaymentMethod,
+  GIFT_CARD_PAYMENT_ROLE,
+  LOYALTY_PAYMENT_ROLE,
+  maskGiftCardNumber,
+  paymentUse,
+  type ReceiptGiftCard,
+  type ReceiptLoyalty,
+  returnRatio,
+  returnRefundSplit,
   isCreditNoteLate,
   isExpiredOn,
   planOffers,
@@ -59,6 +68,8 @@ import { CustomersService } from '../parties/customers.service.js';
 import { PartySettingsService } from '../parties/party-settings.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { type CardSpend, GiftCardsService } from '../loyalty/gift-cards.service.js';
+import { LoyaltyService, type RedeemPlan, type RestorePlan } from '../loyalty/loyalty.service.js';
 import { assertModuleOn, currentModuleMap, moduleOffError, moduleOn } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
@@ -67,7 +78,7 @@ import { type OpenAdvance, PosCredit } from './pos-credit.service.js';
 
 export const billInclude = {
   lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { id: true, code: true, name: true, hsnCode: true, isStockItem: true, trackSerials: true, trackBatches: true } } } },
-  payments: { include: { paymentMethod: { select: { id: true, code: true, name: true, kind: true } } } },
+  payments: { include: { paymentMethod: { select: { id: true, code: true, name: true, kind: true, accountRole: true } } } },
   till: { select: { id: true, code: true, name: true, storeId: true, receiptFooter: true } },
 } satisfies Prisma.PosBillInclude;
 export type BillRow = Prisma.PosBillGetPayload<{ include: typeof billInclude }>;
@@ -193,6 +204,33 @@ interface BillExtras {
   originals: Map<string, { number: string; date: string }>;
   gstins: Map<string, string>;
   gst: GstSettings | null;
+  /** Plan 13: points earned and spent on each bill, and the gift cards it used. */
+  loyalty: Map<string, ReceiptLoyalty>;
+  giftCards: Map<string, ReceiptGiftCard[]>;
+  /** Plan 13: for a sale paid partly with points or gift cards, what a return can give back. */
+  refundParts: Map<string, RefundParts>;
+}
+
+/** Plan 13 (decision 16): what a sale paid with points or gift cards can give back on a return. */
+export interface RefundParts {
+  /** Completed returns against the bill so far (a positive amount). */
+  returnedTotal: string;
+  /** What a point is worth today (points go back at today's value). */
+  pointValue: string;
+  points: { spent: number; restoredBefore: number } | null;
+  giftCards: { key: string; number: string; paid: string; refundedBefore: string; usable: boolean }[];
+}
+
+/** Plan 13: the points and gift card side of a till transaction, worked out before it is saved. */
+interface SpecialPayments {
+  redeem: RedeemPlan | null;
+  spends: CardSpend[];
+  restore: RestorePlan | null;
+  refunds: { cardId: string; amount: Decimal }[];
+  /** The return's share of its original bill (taking back earned points). */
+  returnRatio: Decimal | null;
+  /** Payment rows the server adds to the bill that carries the payments. */
+  rows: { paymentMethodId: string; amount: Decimal; reference: string | null }[];
 }
 
 /** The delivery charge line follows the bill's own lines (the till numbers its lines 1, 2, 3 …). */
@@ -215,6 +253,8 @@ export class PosBillsService {
     private readonly engine: StockEngine,
     private readonly ledger: LedgerService,
     private readonly credit: PosCredit,
+    private readonly loyalty: LoyaltyService,
+    private readonly giftCards: GiftCardsService,
   ) {}
 
   // ---- Saving a sale, return or exchange ----
@@ -303,22 +343,32 @@ export class PosBillsService {
     for (const p of input.payments) {
       const m = methods.get(p.paymentMethodId);
       if (!m || !m.active) throw new BadRequestException('That payment method is not used on this till');
+      // Plan 13: points and gift cards are paid with their own fields (redeemPoints, giftCards), checked on the server.
+      if (isSpecialPaymentMethod(m)) throw new BadRequestException(`${m.name} is paid with its own button at the till`);
       if (D(p.amount).lt(0) && !m.allowRefund) throw new BadRequestException(`${m.name} cannot be used for refunds`);
       if (m.needsReference && !D(p.amount).eq(0) && !p.reference?.trim()) throw new BadRequestException(`${m.name} needs the approval code or reference`);
     }
     await this.checkOnAccount(company.id, input, till, customer, methods, date, approvals, flags, pending);
     // Plan 11 part 2: the order's advance and the customer's credit pay part of the bill (carried on account, then linked).
     const credit = await this.creditFor(company.id, input, customer, order, net);
+    // Plan 13: points and gift cards paying part of the sale; a return's points and gift card money going back.
+    const special = await this.specialPayments(company.id, input, customer, ret, retTotals?.total ?? null, net, date);
     const paid = changeDue({
       total: net,
-      payments: [...input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })), ...credit.rows.map((r) => ({ amount: r.amount, isCash: false }))],
+      payments: [
+        ...input.payments.map((p) => ({ amount: p.amount, isCash: methods.get(p.paymentMethodId)?.kind === 'cash' })),
+        ...credit.rows.map((r) => ({ amount: r.amount, isCash: false })),
+        ...special.rows.map((r) => ({ amount: r.amount, isCash: false })),
+      ],
     });
     if (net.gte(0)) {
       if (paid.short.gt(0)) throw new BadRequestException(`₹${paid.short.toFixed(2)} is still to be paid`);
       if (paid.overpaidWithoutCash) throw new BadRequestException('More than the bill was entered without cash; only cash can give change');
       if (input.payments.some((p) => D(p.amount).lt(0))) throw new BadRequestException('A sale cannot have a refund payment');
     } else if (!paid.paid.eq(net)) {
-      throw new BadRequestException(`The refund must be exactly ₹${net.neg().toFixed(2)}`);
+      // Plan 13: points and gift card money given back are part of the refund; the till refunds the rest.
+      const auto = [...credit.rows, ...special.rows].reduce((s, r) => s.add(r.amount), new Decimal(0));
+      throw new BadRequestException(`The refund must be exactly ₹${net.sub(auto).neg().toFixed(2)}`);
     }
     if (!input.offline && input.expectedTotal !== undefined && !D(input.expectedTotal).eq(net)) {
       throw new ConflictException(`PRICE_CHANGED: the server total is ₹${net.toFixed(2)}, the till showed ₹${D(input.expectedTotal).toFixed(2)}; check the bill again`);
@@ -392,6 +442,7 @@ export class PosBillsService {
                       create: [
                         ...input.payments.filter((p) => !D(p.amount).eq(0)).map((p) => ({ paymentMethodId: p.paymentMethodId, amount: D(p.amount).toFixed(2), reference: p.reference ?? null })),
                         ...credit.rows.map((r) => ({ paymentMethodId: credit.methodId!, amount: r.amount.toFixed(2), reference: r.reference })),
+                        ...special.rows.filter((r) => !r.amount.isZero()).map((r) => ({ paymentMethodId: r.paymentMethodId, amount: r.amount.toFixed(2), reference: r.reference })),
                       ],
                     },
                   }
@@ -427,6 +478,7 @@ export class PosBillsService {
           await this.useCredit(tx, company.id, customer.id, holderId, date, actor, credit, order);
         }
         if (order && saleId) await this.collectOrder(tx, order, saleId, actor);
+        await this.recordSpecial(tx, { companyId: company.id, storeId: till.storeId, date, customer, actor, created, holder, special, sale, ret, saleTotal: saleTotals?.total ?? null, retTotal: retTotals?.total ?? null });
         if (alteration && saleId) await this.chargeAlteration(tx, alteration, saleId, input.alteration?.deliver ?? false, actor);
         for (const p of newPrices) {
           const row = await tx.price.create({ data: { priceListId: till.priceListId, itemId: p.itemId, unitId: p.unitId, price: p.price.toFixed(4), startDate: fromIso(date), createdById: actor.userId, updatedById: actor.userId } });
@@ -437,6 +489,121 @@ export class PosBillsService {
       { timeout: 60_000, maxWait: 30_000 },
     );
     return { ...(await this.transactionDto(saved, user, false)), warnings };
+  }
+
+  /**
+   * Plan 13: points and gift cards on a till transaction, checked before it is
+   * saved. A sale may be paid partly with points (the minimum, the maximum
+   * share and the balance on the bill date; blueprint 04 process 7) and with
+   * gift cards (active, not expired, with the balance): both need the
+   * connection. A return against a bill paid that way gives back the points
+   * and the gift card money in proportion (decision 16; plan 13 §2), even if
+   * the module was switched off since; the rest is refunded by the till.
+   */
+  private async specialPayments(companyId: string, input: PosTransactionInput, customer: Customer, ret: BuiltBill | null, retTotal: Decimal | null, net: Decimal, date: string): Promise<SpecialPayments> {
+    const out: SpecialPayments = { redeem: null, spends: [], restore: null, refunds: [], returnRatio: null, rows: [] };
+    const wantsPoints = !!input.redeemPoints;
+    const wantsCards = !!input.giftCards?.length;
+    const methodFor = async (role: string, spending: boolean) => {
+      const m = await this.prisma.paymentMethod.findFirst({ where: { companyId, accountRole: role, ...(spending ? { active: true } : {}) }, orderBy: { createdAt: 'asc' } });
+      if (!m) throw new BadRequestException(role === LOYALTY_PAYMENT_ROLE ? 'The “Loyalty points” payment method is switched off' : 'The “Gift card” payment method is switched off');
+      return m;
+    };
+
+    if (ret?.returnOfId && retTotal && retTotal.lt(0)) {
+      const orig = await this.prisma.posBill.findUniqueOrThrow({ where: { id: ret.returnOfId }, include: { lines: true } });
+      const allReturned = orig.lines.every((o) => {
+        const now = ret.lines.filter((l) => l.returnOfLineId === o.id).reduce((s, l) => s.add(l.basicQuantity.abs()), new Decimal(0));
+        return D(o.returnedQuantity).add(now).gte(D(o.basicQuantity).sub(QUANTITY_TOLERANCE));
+      });
+      const returnedBefore = await this.returnedTotal(this.prisma, orig.id);
+      out.returnRatio = returnRatio({ originalTotal: orig.total.toString(), returnedTotal: D(returnedBefore).add(retTotal.abs()), allReturned });
+      const parts = await this.refundPartsFor(this.prisma, orig.id, date);
+      if (parts) {
+        const pointValue = await this.loyalty.pointValue(this.prisma, companyId);
+        const split = returnRefundSplit({
+          originalTotal: orig.total.toString(),
+          returnedBefore,
+          thisReturn: retTotal.abs(),
+          allReturned,
+          points: parts.points,
+          pointValue,
+          giftCards: parts.giftCards.map((g) => ({ key: g.key, paid: g.paid, refundedBefore: g.refundedBefore, usable: g.usable })),
+        });
+        if (split.points > 0) {
+          out.restore = { originalBillId: orig.id, points: split.points, pointValue };
+          out.rows.push({ paymentMethodId: (await methodFor(LOYALTY_PAYMENT_ROLE, false)).id, amount: split.pointsValue.neg(), reference: `${split.points} points back` });
+        }
+        for (const g of split.giftCards) {
+          if (g.amount.lte(0)) continue;
+          const card = parts.giftCards.find((c) => c.key === g.key)!;
+          out.refunds.push({ cardId: g.key, amount: g.amount });
+          out.rows.push({ paymentMethodId: (await methodFor(GIFT_CARD_PAYMENT_ROLE, false)).id, amount: g.amount.neg(), reference: card.number });
+        }
+      }
+    }
+
+    if (!wantsPoints && !wantsCards) return out;
+    if (!input.sale) throw new BadRequestException('Points and gift cards pay only for a sale');
+    const payable = Decimal.max(net, 0).add(out.rows.reduce((s, r) => s.add(r.amount.neg()), new Decimal(0)));
+    if (wantsPoints) {
+      out.redeem = await this.loyalty.planRedeem(this.prisma, { companyId, customer, points: input.redeemPoints!, billAmount: Decimal.max(net, 0), date, offline: input.offline });
+      out.rows.push({ paymentMethodId: (await methodFor(LOYALTY_PAYMENT_ROLE, true)).id, amount: out.redeem.value, reference: `${out.redeem.points} points` });
+    }
+    if (wantsCards) {
+      out.spends = await this.giftCards.planSpends(this.prisma, { companyId, cards: input.giftCards!, date, offline: input.offline, billAmount: payable.sub(out.redeem?.value ?? 0) });
+      const method = await methodFor(GIFT_CARD_PAYMENT_ROLE, true);
+      for (const sp of out.spends) out.rows.push({ paymentMethodId: method.id, amount: sp.amount, reference: maskGiftCardNumber(sp.card.number) });
+    }
+    return out;
+  }
+
+  /** Completed returns against a bill so far, as a positive amount. */
+  private async returnedTotal(db: Db, billId: string): Promise<string> {
+    const s = await db.posBill.aggregate({ where: { returnOfId: billId, status: 'completed' }, _sum: { total: true } });
+    return D(s._sum.total ?? 0).abs().toFixed(2);
+  }
+
+  /** What a sale paid with points or gift cards can give back on a return; null when it used neither. */
+  private async refundPartsFor(db: Db, billId: string, date: string): Promise<RefundParts | null> {
+    const points = await this.loyalty.returnPoints(db, billId);
+    const cards = await this.giftCards.returnCards(db, billId, date);
+    if (points.spent <= 0 && !cards.length) return null;
+    const company = await this.common.currentCompany(db);
+    return {
+      returnedTotal: await this.returnedTotal(db, billId),
+      pointValue: (await this.loyalty.pointValue(db, company.id)).toString(),
+      points: points.spent > 0 ? { spent: points.spent, restoredBefore: points.restoredBefore } : null,
+      giftCards: cards.map((c) => ({ key: c.cardId, number: maskGiftCardNumber(c.number), paid: c.paid.toFixed(2), refundedBefore: c.refundedBefore.toFixed(2), usable: c.usable })),
+    };
+  }
+
+  /** Plan 13: the points and gift card entries of a saved transaction, in its own database transaction. */
+  private async recordSpecial(
+    tx: Db,
+    s: { companyId: string; storeId: string; date: string; customer: Customer; actor: Actor; created: string[]; holder: 'sale' | 'return'; special: SpecialPayments; sale: BuiltBill | null; ret: BuiltBill | null; saleTotal: Decimal | null; retTotal: Decimal | null },
+  ) {
+    const bills = await tx.posBill.findMany({ where: { id: { in: s.created } }, select: { id: true, kind: true, number: true, checkFlags: true } });
+    const saleBill = bills.find((b) => b.kind === 'sale') ?? null;
+    const retBill = bills.find((b) => b.kind === 'return') ?? null;
+    const holderBill = bills.find((b) => b.kind === s.holder)!;
+    const flags = await this.loyalty.recordTransaction(tx, {
+      companyId: s.companyId,
+      storeId: s.storeId,
+      date: s.date,
+      customer: s.customer,
+      actorId: s.actor.userId,
+      sale: saleBill && s.saleTotal ? { id: saleBill.id, kind: 'sale', total: s.saleTotal, returnOfId: null } : null,
+      ret: retBill && s.retTotal ? { id: retBill.id, kind: 'return', total: s.retTotal, returnOfId: s.ret?.returnOfId ?? null } : null,
+      holderId: holderBill.id,
+      redeem: s.special.redeem,
+      restore: s.special.restore,
+      returnRatio: s.special.returnRatio,
+      giftCardPaid: s.special.spends.reduce((sum, sp) => sum.add(sp.amount), new Decimal(0)),
+    });
+    if (s.special.spends.length) await this.giftCards.recordSpends(tx, { spends: s.special.spends, billId: holderBill.id, storeId: s.storeId, date: s.date, actorId: s.actor.userId, billNumber: holderBill.number });
+    if (s.special.refunds.length && retBill) await this.giftCards.recordRefunds(tx, { refunds: s.special.refunds, billId: retBill.id, storeId: s.storeId, date: s.date, actorId: s.actor.userId, billNumber: retBill.number });
+    if (flags.length && retBill) await tx.posBill.update({ where: { id: retBill.id }, data: { checkFlags: [...new Set([...retBill.checkFlags, ...flags])] } });
   }
 
   /**
@@ -1456,6 +1623,9 @@ export class PosBillsService {
         throw new BadRequestException(`Goods from bill ${b.number} were returned; cancel the return first`);
       }
     }
+    // Plan 13: points earned and spent since, or gift card money spent since, can stop a cancellation.
+    const pointsProblem = (await this.loyalty.cancelProblem(this.prisma, pair.map((b) => b.id))) ?? (await this.giftCards.cancelProblem(this.prisma, pair.map((b) => b.id)));
+    if (pointsProblem) throw new BadRequestException(pointsProblem);
     const managerId = await this.common.useApproval(this.prisma, approvalToken, till.id, ['cancel_bill'], bill.number);
     const after = await this.prisma.$transaction(
       async (tx) => {
@@ -1478,6 +1648,9 @@ export class PosBillsService {
           await tx.posBill.update({ where: { id: b.id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: user.id, cancelReason: reason } });
           await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_bill', entityId: b.id, changes: { status: { old: 'completed', new: 'cancelled' }, number: b.number, approvedBy: managerId }, reason });
         }
+        // Plan 13: the bills' points and gift card entries are undone (nothing of them is in the ledger yet).
+        await this.loyalty.cancelBills(tx, pair, actor.userId, iso(bill.businessDate)!);
+        await this.giftCards.cancelBills(tx, pair.map((b) => b.id), actor.userId, iso(bill.businessDate)!, till.storeId);
         return tx.posBill.findMany({ where: { id: { in: pair.map((b) => b.id) } }, include: billInclude });
       },
       { timeout: 60_000, maxWait: 30_000 },
@@ -1592,6 +1765,16 @@ export class PosBillsService {
       regIds.length ? this.prisma.gstRegistration.findMany({ where: { id: { in: regIds } }, select: { id: true, gstin: true } }) : [],
       bills.length ? this.prisma.gstSettings.findUnique({ where: { companyId: bills[0].companyId } }) : null,
     ]);
+    // Plan 13: points and gift cards (only bills that used them cost extra reads).
+    const loyalty = await this.loyalty.receiptInfo(this.prisma, bills.map((b) => ({ id: b.id, customerId: b.customerId })));
+    const giftCards = await this.giftCards.receiptInfo(this.prisma, bills.map((b) => b.id));
+    const refundParts = new Map<string, RefundParts>();
+    const today = businessDate();
+    for (const b of bills) {
+      if (b.kind !== 'sale' || !b.payments.some((p) => isSpecialPaymentMethod(p.paymentMethod))) continue;
+      const parts = await this.refundPartsFor(this.prisma, b.id, today);
+      if (parts) refundParts.set(b.id, parts);
+    }
     return {
       offers: new Map(offers.map((o) => [o.id, o])),
       staff: new Map(staff.map((x) => [x.id, x])),
@@ -1599,6 +1782,9 @@ export class PosBillsService {
       originals: new Map(originals.map((o) => [o.id, { number: o.number, date: iso(o.businessDate)! }])),
       gstins: new Map(regs.map((r) => [r.id, r.gstin])),
       gst,
+      loyalty,
+      giftCards,
+      refundParts,
     };
   }
 
@@ -1689,7 +1875,11 @@ export class PosBillsService {
         approvedById: l.approvedById,
         ...(cost ? { costValue: l.costValue.toFixed(2) } : {}),
       })),
-      payments: b.payments.map((p) => ({ paymentMethod: p.paymentMethod, amount: p.amount.toFixed(2), reference: p.reference })),
+      payments: b.payments.map((p) => ({ paymentMethod: { ...p.paymentMethod, use: paymentUse(p.paymentMethod) }, amount: p.amount.toFixed(2), reference: p.reference })),
+      // Plan 13: points on the bill, and what a return of it gives back in points and on gift cards.
+      loyalty: extras.loyalty.get(b.id) ?? null,
+      giftCards: extras.giftCards.get(b.id) ?? [],
+      refundParts: extras.refundParts.get(b.id) ?? null,
     };
   }
 
@@ -1738,6 +1928,9 @@ export class PosBillsService {
       totals: { gross: b.grossAmount.toFixed(2), discount: b.discountAmount.toFixed(2), taxable: b.taxableAmount.toFixed(2), rounding: b.roundingAdjustment.toFixed(2), total: b.total.toFixed(2) },
       payments: b.payments.map((p) => ({ method: p.paymentMethod.name, amount: p.amount.toFixed(2), reference: p.reference })),
       change: b.changeAmount.toFixed(2),
+      // Plan 13: points earned and spent with the new balance; gift cards used with the balance left.
+      loyalty: extras.loyalty.get(b.id) ?? null,
+      giftCards: extras.giftCards.get(b.id) ?? [],
     };
   }
 }

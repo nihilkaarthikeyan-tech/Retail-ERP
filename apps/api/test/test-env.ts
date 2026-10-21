@@ -27,4 +27,6 @@ export function useTestDatabase(): void {
   // Emails are kept in memory, never sent (plan 09).
   process.env.MAIL_TRANSPORT = 'memory';
   process.env.SUMMARY_EMAIL_SCHEDULE = 'off';
+  // Plan 13: the nightly points and gift card expiry runs only when a test calls it.
+  process.env.EXPIRY_SCHEDULE = 'off';
 }

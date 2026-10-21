@@ -98,6 +98,9 @@ export const CHART_TEMPLATE: TemplateFamily[] = [
             { key: 'loans_overdraft', number: '2140', name: 'Loans and overdraft', children: [] },
             // Plan 11 part 2: sale-or-return goods in our stock, owed only once sold (no party: the statement settles it).
             { key: 'consignment_payable', number: '2150', name: 'Owed to suppliers on consignment', kind: 'other' },
+            // Plan 13 (decisions 14, 15): unspent loyalty points and money on gift cards are owed to customers.
+            { key: 'loyalty_liability', number: '2160', name: 'Loyalty points owed to customers', kind: 'other' },
+            { key: 'gift_card_liability', number: '2170', name: 'Gift card balances owed', kind: 'other' },
           ],
         },
       ],
@@ -172,6 +175,8 @@ export const CHART_TEMPLATE: TemplateFamily[] = [
             { key: 'card_commission', number: '5290', name: 'Card and UPI commission', kind: 'expense' },
             { key: 'bank_charges', number: '5300', name: 'Bank charges', kind: 'expense' },
             { key: 'bad_debts', number: '5310', name: 'Small amounts written off', kind: 'expense' },
+            // Plan 13 (decision 15): the cost of points given to customers.
+            { key: 'loyalty_expense', number: '5320', name: 'Loyalty points expense', kind: 'expense' },
           ],
         },
       ],

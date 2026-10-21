@@ -18,6 +18,8 @@ export interface PaymentMethodDto {
   allowRefund: boolean;
   needsReference: boolean;
   accountRole: string;
+  /** Plan 13: what the method is used for ('points' and 'gift_card' have their own buttons at the till). */
+  use?: string;
   active: boolean;
 }
 

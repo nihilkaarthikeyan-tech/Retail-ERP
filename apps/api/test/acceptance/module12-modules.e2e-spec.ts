@@ -400,7 +400,7 @@ describe('12.5 shop types fill in settings', () => {
     const groupHistory = await prisma.auditLog.count({ where: { entityType: 'item_group', action: 'create' } });
     const ask = (await owner.post('/modules/shop-type').send({ type: 'clothing' }).expect(200)).body;
     expect(ask).toMatchObject({ done: false, needsConfirm: true, type: 'clothing', label: 'Clothing', itemGroups: [...SHOP_TYPES.clothing.itemGroups], attributes: ['Size', 'Colour'] });
-    expect(ask.switchOff).toEqual(['batches', 'serials', 'consignment', 'credit_sales', 'expenses', 'einvoice', 'eway', 'tally']);
+    expect(ask.switchOff).toEqual(['batches', 'serials', 'consignment', 'credit_sales', 'expenses', 'einvoice', 'eway', 'tally', 'loyalty', 'gift_cards']);
     expect(ask.message).toMatch(/Nothing is deleted/);
     // Nothing changed yet.
     expect((await modules()).shopType).toBeNull();

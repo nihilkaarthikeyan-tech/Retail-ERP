@@ -8,6 +8,7 @@ import { PartyBalance } from "@/components/accounts/party-balance";
 import { AuditTable } from "@/components/audit-table";
 import { CustomerCredit } from "@/components/parties/customer-credit";
 import { CustomerForm } from "@/components/parties/customer-form";
+import { CustomerLoyalty } from "@/components/parties/customer-loyalty";
 import { CustomerPurchases } from "@/components/parties/customer-purchases";
 import { PartyAddresses } from "@/components/parties/party-addresses";
 import { PartyContacts } from "@/components/parties/party-contacts";
@@ -15,10 +16,11 @@ import { PartyStatusBadge } from "@/components/parties/status-badge";
 import { Alert, Badge } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useModules } from "@/lib/modules";
 import type { CustomerDetailDto, CustomerDto, PartyGroupNode, PaymentTermsDto, PriceListDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
-type Tab = "details" | "addresses" | "contacts" | "credit" | "purchases" | "history";
+type Tab = "details" | "addresses" | "contacts" | "credit" | "purchases" | "loyalty" | "history";
 
 export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -27,6 +29,8 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
   const canCredit = hasPermission(user, "customers.credit");
   const canSeePrices = hasPermission(user, "prices.view");
   const canSeeHistory = hasPermission(user, "audit.view");
+  // Plan 13: the customer's loyalty points, while the module is on.
+  const showLoyalty = useModules().isOn("loyalty");
 
   const customer = useLoad(() => api.get<CustomerDetailDto>(`/customers/${id}`), [id]);
   const groups = useLoad(() => api.get<PartyGroupNode[]>("/customer-groups"));
@@ -63,6 +67,7 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
     { key: "contacts", label: `Contacts (${c.contacts.filter((x) => x.active).length})` },
     { key: "credit", label: "Credit" },
     { key: "purchases", label: "Purchases" },
+    ...(showLoyalty && !c.isWalkIn ? [{ key: "loyalty" as const, label: "Loyalty points" }] : []),
     ...(canSeeHistory ? [{ key: "history" as const, label: "History" }] : []),
   ];
 
@@ -120,6 +125,7 @@ export function CustomerEditor({ params }: { params: Promise<{ id: string }> }) 
         {tab === "contacts" ? <PartyContacts basePath={`/customers/${c.id}`} contacts={c.contacts} readOnly={!canManage} onChanged={() => customer.reload()} /> : null}
         {tab === "credit" ? <CustomerCredit key={c.id + c.updatedAt} customer={c} canEdit={canCredit} onSaved={merge} /> : null}
         {tab === "purchases" ? <CustomerPurchases customerId={c.id} /> : null}
+        {tab === "loyalty" ? <CustomerLoyalty customerId={c.id} /> : null}
         {tab === "history" ? (
           <>
             <p className="muted">Changes to this customer, including credit limits and status with their reasons. Addresses and contacts are listed under Change history as their own records.</p>

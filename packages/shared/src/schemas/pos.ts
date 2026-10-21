@@ -7,6 +7,7 @@ import { isStateCode } from '../india.js';
 import { DENOMINATIONS } from '../pos.js';
 import { nonNegativeDecimalString, positiveDecimalString } from './catalogue.js';
 import { posBuyerSchema } from './gst-core.js';
+import { giftCardNumberSchema } from './loyalty.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
@@ -292,10 +293,18 @@ export const posTransactionSchema = z
     alteration: z.object({ jobId: uuid, deliver: z.boolean().optional() }).optional().nullable(),
     /** Plan 08 G4, G5: the buyer's GSTIN (business tax invoice) or name, address and state. */
     buyer: posBuyerSchema.optional().nullable(),
+    /** Plan 13: loyalty points paid with (online only; the server checks the balance and the limits). */
+    redeemPoints: z.number().int().min(1).max(10_000_000).optional().nullable(),
+    /** Plan 13: gift cards paid with (online only), each with the amount taken from it. */
+    giftCards: z
+      .array(z.object({ number: giftCardNumberSchema, amount: positiveDecimalString }))
+      .max(5, 'At most 5 gift cards on one bill')
+      .optional(),
   })
   .refine((t) => t.ret || t.sale, 'A bill needs a sale or a return')
   .refine((t) => !t.sale || t.sale.lines.length > 0 || !!t.alteration, { message: 'Add at least one item', path: ['sale', 'lines'] })
-  .refine((t) => !t.delivery || t.sale, { message: 'Home delivery is for a sale', path: ['delivery'] });
+  .refine((t) => !t.delivery || t.sale, { message: 'Home delivery is for a sale', path: ['delivery'] })
+  .refine((t) => !t.giftCards || new Set(t.giftCards.map((g) => g.number)).size === t.giftCards.length, { message: 'The same gift card is on the bill twice', path: ['giftCards'] });
 export type PosTransactionInput = z.infer<typeof posTransactionSchema>;
 
 export const cancelBillSchema = z.object({ reason: trimmed(300), approvalToken: z.string() });

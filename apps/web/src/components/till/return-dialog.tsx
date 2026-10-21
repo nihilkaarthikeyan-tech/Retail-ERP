@@ -131,7 +131,13 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
     const paidOnAccount = bill.payments.some((p) => p.paymentMethod.kind === "on_account");
     // Plan 08 G6: the credit note keeps the original bill's GST (IGST when it was to another state; none on a bill of supply).
     const supply = { interState: !!bill.igst && !new Decimal(bill.igst).isZero(), noTax: bill.invoiceKind === "bill_of_supply" };
-    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null, paidOnAccount, supply }, bill);
+    // Plan 13 (decision 16): points and gift card money paid on the bill go back in proportion (worked out as the server does).
+    const allReturned = bill.lines.every((l) => {
+      const left = leftToReturn(l);
+      const chosen = lines.find((x) => x.key === l.id);
+      return left.lte(0) || (!!chosen && new Decimal(chosen.quantity).gte(left));
+    });
+    onChosen({ originalBillId: bill.id, originalNumber: bill.number, customerId: bill.customerId, lines, reason: reason.trim() || null, paidOnAccount, supply, originalTotal: bill.total, refundParts: bill.refundParts ?? null, allReturned }, bill);
     setBill(null);
     setNumber("");
     setCounts({});

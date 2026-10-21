@@ -89,5 +89,11 @@ export async function moduleWarnings(db: Db, companyId: string, key: ModuleKey):
     case 'tally':
       // Expenses are already in the accounts; the Tally export only reads them.
       return [];
+    case 'loyalty': {
+      const points = await db.loyaltyEntry.aggregate({ where: { companyId }, _sum: { points: true } });
+      return say(points._sum.points ?? 0, 'loyalty point is still unspent', 'loyalty points are still unspent');
+    }
+    case 'gift_cards':
+      return say(await db.giftCard.count({ where: { companyId, status: 'active', balance: { gt: 0 } } }), 'gift card still has money on it', 'gift cards still have money on them');
   }
 }

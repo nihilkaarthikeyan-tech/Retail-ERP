@@ -39,4 +39,22 @@ describe('ESC/POS encoder', () => {
   it('kicks the cash drawer on pin 5 when asked', () => {
     expect(drawerKickBytes(5)).toEqual([0x1b, 0x70, 0x01, 0x19, 0xfa]);
   });
+
+  it('prints a CODE128 barcode of an even number of digits in code set C, text below', () => {
+    expect([...new EscPos().barcode128('612345').toBuffer()]).toEqual([
+      0x1d, 0x68, 80, // GS h 80 height
+      0x1d, 0x77, 2, // GS w 2 bar width
+      0x1d, 0x48, 2, // GS H 2 text below
+      0x1d, 0x66, 0, // GS f 0 font A
+      0x1d, 0x6b, 73, 5, 0x7b, 0x43, 61, 23, 45, // GS k 73 n {C 61 23 45
+      0x0a,
+    ]);
+  });
+
+  it('uses code set B for other text, and refuses what a barcode cannot hold', () => {
+    expect([...new EscPos().barcode128('A1').toBuffer()].slice(12)).toEqual([0x1d, 0x6b, 73, 4, 0x7b, 0x42, 0x41, 0x31, 0x0a]);
+    expect([...new EscPos().barcode128('123').toBuffer()].slice(15, 20)).toEqual([5, 0x7b, 0x42, 0x31, 0x32]);
+    expect(() => new EscPos().barcode128('')).toThrow(/1 to 80/);
+    expect(() => new EscPos().barcode128('₹5')).toThrow(/plain characters/);
+  });
 });

@@ -47,6 +47,31 @@ export interface ReceiptGst {
   creditNoteLate?: boolean;
 }
 
+/** Plan 13: the points block (earned, spent, given and taken back, balance). */
+export interface ReceiptLoyalty {
+  scheme: string;
+  earned: number;
+  spent: number;
+  restored: number;
+  reversed: number;
+  /** The customer's balance after this bill; null when not known (offline). */
+  balance: number | null;
+  note?: string | null;
+}
+
+export const GIFT_CARD_ACTIONS = ['sold', 'loaded', 'spent', 'refunded'] as const;
+
+/** Plan 13: a gift card on the receipt. Sold or loaded: the full number (with a barcode); spent or refunded: the last 4 digits. */
+export interface ReceiptGiftCard {
+  action: (typeof GIFT_CARD_ACTIONS)[number];
+  number: string;
+  barcode: boolean;
+  amount: Amount;
+  balance: Amount;
+  /** The first day the card no longer works (YYYY-MM-DD). */
+  expiresOn: string;
+}
+
 export interface Receipt {
   number: string;
   kind: 'sale' | 'return';
@@ -67,6 +92,10 @@ export interface Receipt {
   customer?: string | null;
   /** Plan 08: title, buyer, place of supply, original bill and declaration. */
   gst?: ReceiptGst | null;
+  /** Plan 13: a title in place of the usual one (e.g. "GIFT CARD RECEIPT"). */
+  title?: string | null;
+  loyalty?: ReceiptLoyalty | null;
+  giftCards?: ReceiptGiftCard[] | null;
 }
 
 export type PaperWidth = 80 | 58;
@@ -172,8 +201,44 @@ export function checkReceipt(input: unknown): Check {
       if (g[k] !== undefined && typeof g[k] !== 'boolean') return fail(`receipt.gst.${k} must be true or false`);
     }
   }
+  if (!isOptText(r.title)) return fail('receipt.title must be text');
+  if (r.loyalty !== undefined && r.loyalty !== null) {
+    const l = r.loyalty;
+    if (!isObj(l) || !isText(l.scheme)) return fail('receipt.loyalty.scheme is required');
+    for (const k of ['earned', 'spent', 'restored', 'reversed'] as const) {
+      if (!isPoints(l[k])) return fail(`receipt.loyalty.${k} must be a whole number of points`);
+    }
+    if (l.balance !== null && l.balance !== undefined && !(typeof l.balance === 'number' && Number.isInteger(l.balance))) return fail('receipt.loyalty.balance must be a whole number or empty');
+    if (!isOptText(l.note)) return fail('receipt.loyalty.note must be text');
+  }
+  if (r.giftCards !== undefined && r.giftCards !== null) {
+    if (!Array.isArray(r.giftCards) || r.giftCards.length > 10) return fail('receipt.giftCards must be a list of at most 10');
+    for (const [i, g] of r.giftCards.entries()) {
+      if (!isObj(g)) return fail(`receipt.giftCards[${i}] must be an object`);
+      if (!(GIFT_CARD_ACTIONS as readonly unknown[]).includes(g.action)) return fail(`receipt.giftCards[${i}].action must be sold, loaded, spent or refunded`);
+      if (!isText(g.number) || !g.number || g.number.length > 40) return fail(`receipt.giftCards[${i}].number is required`);
+      if (typeof g.barcode !== 'boolean') return fail(`receipt.giftCards[${i}].barcode must be true or false`);
+      if (g.barcode && !/^\d{1,40}$/.test(g.number.replace(/\s/g, ''))) return fail(`receipt.giftCards[${i}].number must be digits for a barcode`);
+      if (!isAmount(g.amount) || !isAmount(g.balance)) return fail(`receipt.giftCards[${i}] amount and balance must be numbers`);
+      if (!isText(g.expiresOn) || !/^\d{4}-\d{2}-\d{2}$/.test(g.expiresOn)) return fail(`receipt.giftCards[${i}].expiresOn must be a date (YYYY-MM-DD)`);
+    }
+  }
   return { ok: true, receipt: input as unknown as Receipt };
 }
+
+function isPoints(v: unknown): boolean {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+/** The day before `expiresOn` (the last day a card works), as DD-MM-YYYY. A date, not money. */
+export function lastValidDay(expiresOn: string): string {
+  const d = new Date(`${expiresOn}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()}`;
+}
+
+const GIFT_CARD_LABEL = { sold: 'Gift card sold', loaded: 'Gift card loaded', spent: 'Paid by gift card', refunded: 'Back on gift card' } as const;
 
 // ---------------------------------------------------------------------------
 // Formatting (display only — no arithmetic on amounts).
@@ -299,7 +364,8 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
 
   // Title.
   p.line().bold(true);
-  lines(wrap(g ? g.title.toUpperCase() : receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE', w));
+  const title = receipt.title?.trim() || (g ? g.title : receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE');
+  lines(wrap(title.toUpperCase(), w));
   if (receipt.duplicate) lines(wrap('DUPLICATE', w));
   p.bold(false);
   if (g?.declaration) lines(wrap(g.declaration, w));
@@ -367,6 +433,33 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   }
   if (receipt.change !== undefined && receipt.change !== null && !isZero(receipt.change)) {
     lines(leftRight('Change', rs(receipt.change), w));
+  }
+
+  // Plan 13: gift cards (a sold or loaded card with its barcode) and points.
+  for (const c of receipt.giftCards ?? []) {
+    p.line(rule);
+    lines(leftRight(GIFT_CARD_LABEL[c.action], rs(c.amount), w));
+    lines(wrap(`Card: ${c.number}`, w));
+    lines(leftRight('Balance on card', rs(c.balance), w));
+    lines(wrap(`Valid until ${lastValidDay(c.expiresOn)}`, w));
+    if (c.barcode) {
+      p.align('centre').barcode128(c.number.replace(/\s/g, ''));
+      p.align('left');
+    }
+  }
+  const pts = receipt.loyalty;
+  if (pts) {
+    p.line(rule);
+    lines(wrap(pts.scheme, w));
+    const rowsOf: [string, number][] = [
+      ['Points earned', pts.earned],
+      ['Points spent', pts.spent],
+      ['Points given back', pts.restored],
+      ['Points taken back', pts.reversed],
+    ];
+    for (const [label, n] of rowsOf) if (n !== 0) lines(leftRight(label, String(n), w));
+    if (pts.balance !== null && pts.balance !== undefined) lines(leftRight('Points balance', String(pts.balance), w));
+    if (pts.note) lines(wrap(pts.note, w));
   }
 
   if (g?.creditNoteLate) lines(wrap('Issued after the GST time limit: the tax of the original bill is not reduced in the return.', w));

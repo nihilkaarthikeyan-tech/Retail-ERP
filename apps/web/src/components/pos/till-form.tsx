@@ -3,7 +3,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { tillSchema, updateTillSchema } from "shared";
+import { isSpecialPaymentMethod, tillSchema, updateTillSchema } from "shared";
 import { useStockLocations } from "@/components/stock/use-stock-refs";
 import { Alert, Button, CheckInput, Field, RadioInput, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -214,7 +214,8 @@ export function TillForm({ till, canEdit, onSaved }: { till: TillDto | null; can
           </thead>
           <tbody>
             {(methods.data ?? [])
-              .filter((m) => m.active || form.methods.includes(m.id))
+              // Plan 13: loyalty points and gift cards have their own buttons at the till; they are never ticked here.
+              .filter((m) => !isSpecialPaymentMethod(m) && (m.active || form.methods.includes(m.id)))
               .map((m) => (
                 <tr key={m.id}>
                   <td>

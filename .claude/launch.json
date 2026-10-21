@@ -4,14 +4,38 @@
     {
       "name": "api",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "api", "run", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "api",
+        "run",
+        "dev"
+      ],
       "port": 4000
     },
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "web", "run", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "web-3001",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "web",
+        "exec",
+        "next",
+        "dev",
+        "--port",
+        "3001"
+      ],
+      "port": 3001
     }
   ]
 }

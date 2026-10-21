@@ -23,6 +23,8 @@ import {
   needsBuyerDetails,
   pickGstRate,
   planOffers,
+  pointsValue,
+  returnRefundSplit,
   type PosTransactionInput,
   quantityProblem,
   rateForLine,
@@ -36,7 +38,7 @@ import {
   supplyLineTax,
   taxSituationOf,
 } from "shared";
-import type { SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, TillSnapshot } from "./types";
+import type { RefundParts, SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, TillSnapshot } from "./types";
 
 const D = (v: DecimalInput) => new Decimal(v);
 const ZERO = new Decimal(0);
@@ -173,6 +175,10 @@ export interface DraftBill {
     /** Without a bill: the manager's single-use approval (action return_without_bill). */
     approvalToken?: string;
     approvedBy?: string;
+    /** Plan 13 (decision 16): the original bill's total, what its points and gift cards can give back, and whether everything left comes back now. */
+    originalTotal?: string | null;
+    refundParts?: RefundParts | null;
+    allReturned?: boolean;
   } | null;
   payments: DraftPayment[];
   /** Given once when the cashier first presses Finish; the idempotency key (pos-offline §4). */
@@ -193,6 +199,20 @@ export interface DraftBill {
   credit?: string | null;
   /** Plan 11 part 2: an alteration job whose charge is billed on this sale (handed back now when `deliver`). */
   alteration?: { jobId: string; number: string; charge: string; deliver: boolean } | null;
+  /** Plan 13: loyalty points paid with (online only; the server checks the balance and the limits). */
+  points?: { points: number; value: string } | null;
+  /** Plan 13: gift cards paid with (online only), each with the amount taken from it. */
+  giftCards?: DraftGiftCard[] | null;
+}
+
+/** Plan 13: a gift card paying part of the bill, as checked on the server a moment ago. */
+export interface DraftGiftCard {
+  number: string;
+  /** Last four digits, for the screen and the offline copy. */
+  masked: string;
+  amount: string;
+  /** The card's balance when it was checked. */
+  balance: string;
 }
 
 export function emptyDraft(id: string, now: Date = new Date()): DraftBill {
@@ -283,8 +303,22 @@ export interface ComputedBill {
   offers: { offer: SnapOffer; saving: Decimal }[];
   /** Plan 11 part 2: the order's advance and the customer's credit used on the bill. */
   credit: Decimal;
-  /** What is left to pay (or refund) with the till's payment methods: net less credit. */
+  /** Plan 13: points and gift cards paying part of the sale. */
+  pointsPaid: Decimal;
+  giftCardsPaid: Decimal;
+  /** Plan 13 (decision 16): what a return gives back in points and onto gift cards (the till refunds the rest). */
+  back: ReturnBack | null;
+  /** What is left to pay (or refund) with the till's payment methods: net less credit, points and gift cards; a return less what goes back by itself. */
   due: Decimal;
+}
+
+/** Plan 13: points and gift card money going back on a return, worked out as the server will. */
+export interface ReturnBack {
+  points: number;
+  pointsValue: Decimal;
+  giftCards: { key: string; number: string; amount: Decimal }[];
+  /** Points value plus gift card money (positive). */
+  total: Decimal;
 }
 
 export interface PricingContext {
@@ -945,7 +979,62 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     if (D(draft.credit).gt(payable.sub(advance))) problems.push("More credit is used than the bill");
     else credit = credit.add(D(draft.credit));
   }
-  return { sale, ret, net, billDiscount, billOffer, coupon, interState, supply, problems, approvals, provisional, delivery, offers: offersUsed(sale?.lines ?? []), credit, due: net.sub(credit) };
+  // Plan 13 (decision 16): a return of a bill paid with points or gift cards gives them back in proportion.
+  let back: ReturnBack | null = null;
+  const parts = draft.ret?.refundParts;
+  if (ret && parts && draft.ret?.originalTotal && ret.total.lt(0)) {
+    const split = returnRefundSplit({
+      originalTotal: draft.ret.originalTotal,
+      returnedBefore: parts.returnedTotal,
+      thisReturn: ret.total.abs(),
+      allReturned: !!draft.ret.allReturned,
+      points: parts.points,
+      pointValue: parts.pointValue,
+      giftCards: parts.giftCards.map((g) => ({ key: g.key, paid: g.paid, refundedBefore: g.refundedBefore, usable: g.usable })),
+    });
+    const giftCards = split.giftCards.filter((g) => g.amount.gt(0)).map((g) => ({ key: g.key, number: parts.giftCards.find((c) => c.key === g.key)?.number ?? "", amount: g.amount }));
+    const total = split.pointsValue.add(giftCards.reduce((s, g) => s.add(g.amount), ZERO));
+    if (total.gt(0)) back = { points: split.points, pointsValue: split.pointsValue, giftCards, total };
+  }
+  // Plan 13: points and gift cards pay part of a sale (the server checks the balances and limits again).
+  let pointsPaid = ZERO;
+  let giftCardsPaid = ZERO;
+  if (draft.points?.points || draft.giftCards?.length) {
+    if (!sale) problems.push("Points and gift cards pay only for a sale");
+    else {
+      pointsPaid = draft.points?.points ? pointsValue(draft.points.points, till.loyalty?.pointValue ?? draft.points.value) : ZERO;
+      giftCardsPaid = (draft.giftCards ?? []).reduce((s, g) => s.add(D(g.amount)), ZERO);
+      const payable = Decimal.max(net, 0).sub(credit).add(back?.total ?? ZERO);
+      if (pointsPaid.add(giftCardsPaid).gt(payable)) problems.push("Points and gift cards pay more than the bill; take some off in Pay");
+      const share = till.loyalty ? roundMoney(Decimal.max(net, 0).mul(D(till.loyalty.maxSharePercent)).div(100)) : null;
+      if (share && pointsPaid.gt(share)) problems.push(`At most ${D(till.loyalty!.maxSharePercent).toString()}% of the bill (₹${share.toFixed(2)}) can be paid with points; change the points in Pay`);
+    }
+  }
+  return {
+    sale,
+    ret,
+    net,
+    billDiscount,
+    billOffer,
+    coupon,
+    interState,
+    supply,
+    problems,
+    approvals,
+    provisional,
+    delivery,
+    offers: offersUsed(sale?.lines ?? []),
+    credit,
+    pointsPaid,
+    giftCardsPaid,
+    back,
+    due: net.sub(credit).sub(pointsPaid).sub(giftCardsPaid).add(back?.total ?? ZERO),
+  };
+}
+
+/** Plan 13: the bill uses points or gift cards, which need the connection. */
+export function usesPointsOrCards(draft: DraftBill): boolean {
+  return !!draft.points?.points || !!draft.giftCards?.length;
 }
 
 // ---- Payments ----
@@ -1067,6 +1156,9 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
   // Plan 11 part 2: the order collected, the customer's credit used and an alteration charge.
   if (draft.order) input.orderId = draft.order.id;
   if (draft.credit && D(draft.credit).gt(0)) input.useCredit = D(draft.credit).toFixed(2);
+  // Plan 13: points and gift cards (the server adds them as payments and checks the balances).
+  if (bill.sale && draft.points?.points) input.redeemPoints = draft.points.points;
+  if (bill.sale && draft.giftCards?.length) input.giftCards = draft.giftCards.map((g) => ({ number: g.number, amount: D(g.amount).toFixed(2) }));
   if (draft.alteration && bill.sale) input.alteration = { jobId: draft.alteration.jobId, ...(draft.alteration.deliver ? { deliver: true } : {}) };
   if (draft.delivery && bill.sale && bill.delivery) {
     const d = draft.delivery;

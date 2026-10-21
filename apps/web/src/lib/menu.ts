@@ -91,6 +91,9 @@ export const MENU: MenuEntry[] = [
   // Plan 11 part 2
   { href: "/orders", label: "Customer orders", permissions: ["orders.manage"], section: "Billing counter", icon: "file", module: "customer_orders" },
   { href: "/alterations", label: "Alterations", permissions: ["alterations.manage"], section: "Billing counter", icon: "ruler", module: "alterations" },
+  // Plan 13
+  { href: "/loyalty", label: "Loyalty points", permissions: ["loyalty.view", "loyalty.manage"], section: "Billing counter", icon: "percent", module: "loyalty" },
+  { href: "/gift-cards", label: "Gift cards", permissions: ["giftcards.view", "giftcards.manage"], section: "Billing counter", icon: "tag", module: "gift_cards" },
   { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
   { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
   { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },

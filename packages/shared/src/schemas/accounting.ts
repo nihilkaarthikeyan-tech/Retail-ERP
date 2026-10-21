@@ -90,8 +90,19 @@ export const ACCOUNT_ROLES = {
   bank_charges: 'Bank charges',
   bad_debts: 'Small amounts written off',
   retained_earnings: 'Retained earnings',
+  /** Plan 13 (decision 15): points earned are an expense and a liability until spent or expired. */
+  loyalty_expense: 'Loyalty points expense',
+  loyalty_liability: 'Loyalty points owed to customers',
+  /** Plan 13 (decision 14): money on gift cards is owed to the holders. */
+  gift_card_liability: 'Gift card balances owed',
+  /** Plan 13: where expired points (when chosen) and expired gift card balances are written back. */
+  other_income: 'Other income',
+  gift_card_expiry: 'Expired gift card balances',
 } as const;
 export type AccountRole = keyof typeof ACCOUNT_ROLES;
+
+/** Roles whose default account is another role's standard account (the accountant can point them elsewhere). */
+export const ROLE_DEFAULT_ACCOUNT: Partial<Record<AccountRole, string>> = { gift_card_expiry: 'other_income' };
 
 /** Per-store accounts, created for every store (plan 07 §1.5). */
 export const STORE_ACCOUNT_ROLES = { cash_in_till: 'Cash in till', cash_in_hand: 'Cash in hand' } as const;

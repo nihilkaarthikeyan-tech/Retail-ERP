@@ -31,7 +31,7 @@ Each item says what is unclear and what decision is needed.
 
 14. **Gift cards with stored value.** A coupon is not a stored balance. Retailers usually want sellable gift cards with a balance that can be partly spent. Proposal: treat a gift card as a prepaid liability (sell it as a non-stock item posting to a gift-card liability account; redeem it as a payment method). Decide if version 1 needs this.
 15. **Loyalty liability accounting.** If points earned create no accounting entry, only redemption posts an expense. Accountants may want an accrued liability at earn time. Decide the policy.
-16. **Points on returns.** Reference re-computes earned points net of returns but never refunds redeemed points. Decide what happens to redeemed points when a bill is returned.
+16. **Points on returns.** One option re-computes earned points net of returns but never refunds redeemed points. Decide what happens to redeemed points when a bill is returned.
 17. **Conflicting rules at the till.** Reference blocks the sale when two rules tie. Proposal: never block at the till; pick the rule that gives the customer the larger benefit and log the tie. Owner to confirm.
 18. **Cumulative and mixed rules offline.** They need sales history; decide whether offline tills simply skip them.
 19. **Manual discount approval.** Reference caps discounts per item but has no manager-PIN style override. Decide whether a manager approval flow is needed for discounts above a store limit.

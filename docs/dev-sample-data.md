@@ -45,3 +45,9 @@ To start again from an empty database:
 ```bash
 pnpm --filter api prisma migrate reset
 ```
+
+## Till demo data (added 21 October 2026)
+
+- Owner's till PIN (test only): `2468` — unlocks the till and approves manager actions.
+- Till T1 is registered to the browser at http://localhost:3001 ("Demo counter").
+- Fancy and T-shirt items with barcodes 8903000000006 to 8903000000099 (20 in stock each at MAIN floor), customers Priya Raman (9840011001), Arjun Kumar (9840011002), Meena Stores (9840011003), and the offer FANCY10 (10% off fancy and gifts).

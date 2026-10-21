@@ -249,3 +249,78 @@ describe('plan 08: GST details on the receipt', () => {
     expect(checkReceipt({ ...sampleSale(), gst: { title: 'Tax invoice', reverseCharge: 'no' } }).ok).toBe(false);
   });
 });
+
+describe('plan 13: gift cards and loyalty points', () => {
+  const BARCODE_16 = [0x1d, 0x68, 80, 0x1d, 0x77, 2, 0x1d, 0x48, 2, 0x1d, 0x66, 0, 0x1d, 0x6b, 73, 10, 0x7b, 0x43, 61, 23, 45, 67, 89, 1, 23, 45, 0x0a];
+
+  function giftCardSale(): Receipt {
+    return {
+      ...sampleSale(),
+      number: 'GC-2026-27-00001',
+      title: 'Gift card receipt',
+      footer: null,
+      gst: null,
+      lines: [{ name: 'Gift card (new)', code: '', hsn: null, quantity: '1', price: '1000.00', discount: '0.00', amount: '1000.00', free: false, serials: [] }],
+      gstTable: [],
+      totals: { gross: '1000.00', discount: '0.00', taxable: '0.00', rounding: '0.00', total: '1000.00' },
+      payments: [{ method: 'Cash', amount: '1000.00', reference: null }],
+      change: '0.00',
+      giftCards: [{ action: 'sold', number: '6123 4567 8901 2345', barcode: true, amount: '1000.00', balance: '1000.00', expiresOn: '2027-10-21' }],
+    };
+  }
+
+  it('a gift card sale prints its title, the full number with a CODE128 barcode, and no GST table', () => {
+    const r = giftCardSale();
+    expect(checkReceipt(r)).toEqual({ ok: true, receipt: r });
+    const buf = buildReceipt(r, 80);
+    const text = asText(buf);
+    expect(text).toContain('GIFT CARD RECEIPT');
+    expect(text).not.toContain('TAX INVOICE');
+    expect(text.some((l) => /^GST\s/.test(l))).toBe(false);
+    expect(text).toContain(row('Gift card sold', 'Rs. 1000.00', 48));
+    expect(text).toContain('Card: 6123 4567 8901 2345');
+    expect(text).toContain(row('Balance on card', 'Rs. 1000.00', 48));
+    expect(text).toContain('Valid until 20-10-2027');
+    expect(buf.includes(Buffer.from([...CENTRE, ...BARCODE_16, ...LEFT]))).toBe(true);
+  });
+
+  it('a bill paid by gift card prints the last 4 digits and the balance left, without a barcode', () => {
+    const r: Receipt = { ...sampleSale(), giftCards: [{ action: 'spent', number: '**** 2345', barcode: false, amount: '600.00', balance: '900.00', expiresOn: '2027-10-21' }] };
+    expect(checkReceipt(r).ok).toBe(true);
+    const buf = buildReceipt(r, 58);
+    const text = asText(buf);
+    expect(text).toContain(row('Paid by gift card', 'Rs. 600.00', 32));
+    expect(text).toContain('Card: **** 2345');
+    expect(text).toContain(row('Balance on card', 'Rs. 900.00', 32));
+    expect(buf.includes(Buffer.from([0x1d, 0x6b]))).toBe(false);
+  });
+
+  it('the points block prints only the lines that are not zero, the balance and the offline note', () => {
+    const r: Receipt = { ...sampleSale(), loyalty: { scheme: 'Bazaar points', earned: 4, spent: 100, restored: 0, reversed: 0, balance: 54, note: null } };
+    const text = asText(buildReceipt(r, 80));
+    expect(text).toContain('Bazaar points');
+    expect(text).toContain(row('Points earned', '4', 48));
+    expect(text).toContain(row('Points spent', '100', 48));
+    expect(text.some((l) => l.startsWith('Points given back') || l.startsWith('Points taken back'))).toBe(false);
+    expect(text).toContain(row('Points balance', '54', 48));
+
+    const offline: Receipt = { ...sampleSale(), loyalty: { scheme: 'Bazaar points', earned: 0, spent: 0, restored: 0, reversed: 0, balance: null, note: 'Points for this bill are added when the till is back online.' } };
+    const t2 = asText(buildReceipt(offline, 80));
+    expect(t2.some((l) => l.startsWith('Points balance'))).toBe(false);
+    expect(t2.join(' ')).toContain('Points for this bill are added when the till is back online.');
+  });
+
+  it('refuses gift card and points details of the wrong shape', () => {
+    const bad = (patch: Record<string, unknown>) => checkReceipt({ ...sampleSale(), ...patch });
+    expect(bad({ title: 5 })).toEqual({ ok: false, error: 'receipt.title must be text' });
+    expect(bad({ loyalty: { scheme: 'P', earned: 1.5, spent: 0, restored: 0, reversed: 0, balance: 0 } })).toEqual({ ok: false, error: 'receipt.loyalty.earned must be a whole number of points' });
+    expect(bad({ loyalty: { earned: 1 } })).toEqual({ ok: false, error: 'receipt.loyalty.scheme is required' });
+    expect(bad({ loyalty: { scheme: 'P', earned: 1, spent: 0, restored: 0, reversed: 0, balance: '5' } })).toEqual({ ok: false, error: 'receipt.loyalty.balance must be a whole number or empty' });
+    const card = giftCardSale().giftCards![0];
+    expect(bad({ giftCards: [{ ...card, action: 'stolen' }] })).toEqual({ ok: false, error: 'receipt.giftCards[0].action must be sold, loaded, spent or refunded' });
+    expect(bad({ giftCards: [{ ...card, number: '**** 2345' }] })).toEqual({ ok: false, error: 'receipt.giftCards[0].number must be digits for a barcode' });
+    expect(bad({ giftCards: [{ ...card, expiresOn: '21-10-2027' }] })).toEqual({ ok: false, error: 'receipt.giftCards[0].expiresOn must be a date (YYYY-MM-DD)' });
+    expect(bad({ giftCards: [{ ...card, amount: null }] })).toEqual({ ok: false, error: 'receipt.giftCards[0] amount and balance must be numbers' });
+    expect(bad({ giftCards: 'card' })).toEqual({ ok: false, error: 'receipt.giftCards must be a list of at most 10' });
+  });
+});

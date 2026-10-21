@@ -317,6 +317,11 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   payment: "Receipt / payment",
   opening_bill: "Opening bill",
   year_end_closing: "Year-end closing",
+  // Plan 13
+  gift_card_load: "Gift card sold or reloaded",
+  gift_card_expiry: "Gift cards expired",
+  loyalty_expiry: "Loyalty points expired",
+  loyalty_revaluation: "Loyalty point value changed",
 };
 
 export function documentLabel(type: string | null | undefined): string {

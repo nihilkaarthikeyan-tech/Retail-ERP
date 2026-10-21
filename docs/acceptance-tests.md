@@ -761,3 +761,55 @@ Amounts use test rates entered for these scenarios; the CA approves the real rat
   - "back to default" restores it;
   - settings of switched-off modules are hidden;
   - search finds a setting by name.
+
+## Module 13 — Loyalty points and gift cards (plan 13)
+
+Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; minimum 100 points to spend; at most 50% of a bill in points; gift cards last 12 months.
+
+### 13.1 Earning points
+- **Given** member Priya buys for ₹2,450
+- **Then:**
+  - she earns 24 points (fractions dropped), expiring in 365 days;
+  - loyalty expense is debited and loyalty points liability credited ₹24.00;
+  - the receipt shows her new balance.
+- **Then** a walk-in bill earns nothing.
+
+### 13.2 Spending points
+- **Given** Priya has 150 points
+- **Then:**
+  - on a ₹500 bill she can spend 100 points: the bill shows ₹100.00 paid with points and she pays ₹400.00;
+  - the liability goes down ₹100.00;
+  - the bill earns points only on the ₹400.00 she paid (4 points).
+- **Then:**
+  - spending 90 points is refused (minimum 100);
+  - spending 300 points on a ₹500 bill is refused (more than 50%);
+  - spending offline is refused with a plain message.
+
+### 13.3 Returns and cancelling (decision 16)
+- **Then:**
+  - returning half of the 13.2 bill takes back the points earned on the returned lines and gives back the points spent on them, in proportion;
+  - cancelling the bill reverses both completely.
+
+### 13.4 Expiry and tiers
+- **Then** points not spent within 365 days expire; the liability goes down by their value, credited back as set.
+- **Given** a Gold tier from ₹25,000 spent in a year at ₹100 = 2 points
+- **Then** her bills after crossing ₹25,000 earn at the Gold rate.
+- **Then** the liability always equals unexpired points × point value.
+
+### 13.5 Selling and reloading a gift card
+- **Then:**
+  - selling a ₹1,000 gift card for cash puts cash up ₹1,000.00 and gift card liability up ₹1,000.00, with no GST and no stock movement;
+  - the card number is unique and the receipt shows it;
+  - reloading ₹500 more makes the balance ₹1,500.00.
+
+### 13.6 Spending a gift card
+- **Then:**
+  - a ₹600 bill (GST included) paid with the card charges GST on the goods as usual, reduces the liability by ₹600.00 and leaves ₹900.00 on the card;
+  - a blocked card is refused;
+  - an expired card is refused.
+
+### 13.7 Returns and expiry of gift cards
+- **Then:**
+  - returning goods paid with a gift card puts the money back on the card;
+  - when a card expires, its balance is written back as set, after appearing in the expiring-cards report;
+  - the gift card liability always equals the sum of card balances.

@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { Module } from '@nestjs/common';
 import { CompanyModule } from '../company/company.module.js';
+import { LoyaltyModule } from '../loyalty/loyalty.module.js';
 import { NumberingModule } from '../numbering/numbering.module.js';
 import { PosModule } from '../pos/pos.module.js';
 import { PurchasingModule } from '../purchasing/purchasing.module.js';
@@ -17,7 +18,7 @@ import { PaymentsService } from './payments.service.js';
 import { TallyExportService } from './tally-export.service.js';
 
 @Module({
-  imports: [CompanyModule, NumberingModule, PurchasingModule, PosModule],
+  imports: [CompanyModule, NumberingModule, PurchasingModule, PosModule, LoyaltyModule],
   controllers: [AccountingController],
   providers: [AccountingCommon, CatchUpService, ChartService, JournalsService, PaymentsService, ClosingService, LedgerReportsService, ExpensesService, CashBookService, TallyExportService],
   exports: [AccountingCommon, LedgerReportsService, ClosingService],

@@ -6,11 +6,14 @@
 // cost of goods sold against stock. A separate drawer entry moves the starting
 // float and cash in/out between cash in hand and the till, takes the counted
 // cash back to cash in hand and posts any shortage, so the till's account is
-// zero after every shift.
+// zero after every shift. Plan 13: points earned on the bills post here too
+// (loyalty expense against the points liability); points and gift cards paid
+// with are payment methods whose accounts are those liabilities.
 import { Injectable } from '@nestjs/common';
 import { Decimal, dueDates } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js';
+import { LoyaltyService } from '../loyalty/loyalty.service.js';
 
 type Amount = { toString(): string };
 const D = (v: Amount) => new Decimal(v.toString());
@@ -18,7 +21,10 @@ const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 @Injectable()
 export class PosPostings {
-  constructor(private readonly ledger: LedgerService) {}
+  constructor(
+    private readonly ledger: LedgerService,
+    private readonly loyalty: LoyaltyService,
+  ) {}
 
   async postShift(tx: Db, shiftId: string, closingDate: string, actorId: string | null): Promise<string | null> {
     const shift = await tx.shift.findUniqueOrThrow({
@@ -34,6 +40,8 @@ export class PosPostings {
     );
     const completed = bills.filter((b) => b.status === 'completed');
     const entryIds: string[] = [];
+    // Plan 13 (decision 15): points earned on the bills (less points taken back by returns) post with the shift.
+    const earned = await this.loyalty.earnedValues(tx, completed.map((b) => b.id));
 
     // Stock: everything the shift's bills moved and that is not in the ledger yet (cancelled bills net to zero).
     const stockIds = (await tx.stockLedgerEntry.findMany({ where: { documentType: 'pos_bill', documentId: { in: bills.map((b) => b.id) } }, select: { id: true } })).map((e) => e.id);
@@ -78,6 +86,8 @@ export class PosPostings {
           } else lines.push({ role: p.paymentMethod.accountRole, storeId, debit: amount });
         }
         if (!D(b.changeAmount).isZero()) lines.push({ role: 'cash_in_till', storeId, credit: D(b.changeAmount), remark: 'Change given' });
+        const points = earned.get(b.id);
+        if (points && !points.isZero()) lines.push({ role: 'loyalty_expense', storeId, debit: points, remark: 'Loyalty points earned' }, { role: 'loyalty_liability', storeId, credit: points, remark: 'Loyalty points earned' });
       }
       for (const s of stockByDate.get(date) ?? []) {
         lines.push(s.transit ? { role: 'goods_in_transit', debit: s.amount } : { role: 'stock', storeId: s.storeId, debit: s.amount });

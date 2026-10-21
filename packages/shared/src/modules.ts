@@ -21,6 +21,8 @@ export const OPTIONAL_MODULES = {
   einvoice: { label: 'E-invoice', description: 'E-invoice files for the government portal and their status. Needed above ₹5 crore turnover.', needs: [] },
   eway: { label: 'E-way bill', description: 'E-way bill files for moving goods over the limit, and the register.', needs: [] },
   tally: { label: 'Tally export', description: 'Vouchers and ledgers for an accountant who uses Tally.', needs: [] },
+  loyalty: { label: 'Loyalty points', description: 'Customers earn points on what they spend and pay with them later.', needs: [] },
+  gift_cards: { label: 'Gift cards', description: 'Reloadable prepaid gift cards, sold and spent at the till.', needs: [] },
 } as const satisfies Record<string, { label: string; description: string; needs: readonly string[] }>;
 
 export type ModuleKey = keyof typeof OPTIONAL_MODULES;

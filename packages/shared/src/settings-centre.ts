@@ -21,7 +21,7 @@ export interface SettingsSource {
   change: SettingsRight;
 }
 
-export type SettingsSourceKey = 'catalogue' | 'parties' | 'stock' | 'purchase' | 'pos' | 'gst' | 'accounting' | 'summaryEmail' | 'print' | 'security';
+export type SettingsSourceKey = 'catalogue' | 'parties' | 'stock' | 'purchase' | 'pos' | 'gst' | 'accounting' | 'summaryEmail' | 'print' | 'security' | 'loyalty' | 'giftCards';
 
 export const SETTINGS_SOURCES: Record<SettingsSourceKey, SettingsSource> = {
   catalogue: { get: '/catalogue/settings', save: { path: '/catalogue/settings', method: 'PATCH' }, read: { any: ['catalogue.view'] }, change: { ownerOnly: true } },
@@ -34,6 +34,9 @@ export const SETTINGS_SOURCES: Record<SettingsSourceKey, SettingsSource> = {
   summaryEmail: { get: '/summary-email/settings', save: { path: '/summary-email/settings', method: 'PUT', fields: ['enabled', 'sendAt', 'recipientIds', 'figures'] }, read: { any: ['reports.summary_email'] }, change: { any: ['reports.summary_email'] } },
   print: { get: '/print/settings', save: { path: '/print/settings', method: 'PUT', fields: ['paperSize', 'showLogo', 'storeLetterhead'] }, read: { any: ['print.settings'] }, change: { any: ['print.settings'] } },
   security: { get: '/settings/security', save: null, read: { ownerOnly: true }, change: { ownerOnly: true } },
+  // Plan 13: the loyalty scheme (its tiers are kept on the loyalty screen) and the gift card rules.
+  loyalty: { get: '/loyalty/settings', save: { path: '/loyalty/settings', method: 'PATCH' }, read: { any: ['loyalty.view', 'loyalty.manage', 'pos.setup'] }, change: { any: ['loyalty.manage'] } },
+  giftCards: { get: '/gift-cards/settings', save: null, read: { any: ['giftcards.view', 'giftcards.sell', 'giftcards.manage'] }, change: { ownerOnly: true } },
 };
 
 export type SettingKind =
@@ -123,6 +126,8 @@ export const SETTINGS_SECTIONS = [
   { key: 'prices', title: 'Prices', lead: 'Which price list is used, and how prices behave on a bill.', area: 'sales', links: [{ href: '/price-lists', label: 'Price lists', right: { any: ['prices.view'] } }, { href: '/prices', label: 'Prices', right: { any: ['prices.view'] } }] },
   { key: 'seasons', title: 'Seasons and markdowns', lead: 'Season tags and the markdown tool.', module: 'seasons', area: 'sales', links: [{ href: '/catalogue/seasons', label: 'Seasons', right: { any: ['catalogue.view'] } }, { href: '/markdowns', label: 'Markdowns', right: { any: ['prices.view'] } }] },
   { key: 'offers', title: 'Offers and coupons', lead: 'Offers, coupons and mix-and-match deals.', module: 'offers', area: 'sales', links: [{ href: '/pos/offers', label: 'Offers and coupons', right: { any: ['offers.manage'] } }] },
+  { key: 'loyalty', title: 'Loyalty points', lead: 'What earns a point, what a point is worth, how long points last and the limits at the till.', module: 'loyalty', area: 'sales', links: [{ href: '/loyalty', label: 'Loyalty tiers, who joins, and the points reports', right: { any: ['loyalty.view', 'loyalty.manage'] } }] },
+  { key: 'gift_cards', title: 'Gift cards', lead: 'Reloadable prepaid cards, sold and spent at the till.', module: 'gift_cards', area: 'sales', links: [{ href: '/gift-cards', label: 'Gift cards (list, history, block, reports)', right: { any: ['giftcards.view', 'giftcards.manage'] } }, { href: '/accounts/defaults', label: 'Default accounts (where expired balances go)', right: { any: ['accounts.view', 'accounts.manage'] } }] },
   { key: 'customers', title: 'Customers', lead: 'How new customers start out and which address decides the GST.', area: 'accounts', links: [{ href: '/customer-groups', label: 'Customer groups', right: { any: ['customers.view'] } }, { href: '/payment-terms', label: 'Payment terms', right: { any: ['customers.view'] } }] },
   { key: 'credit_sales', title: 'Credit sales', lead: 'Selling on account and credit limits.', module: 'credit_sales', area: 'accounts', links: [{ href: '/pos/payment-methods', label: 'Payment methods (On account)', right: { any: ['pos.setup'] } }] },
   { key: 'buying', title: 'Suppliers and buying', lead: 'Checks on goods receipts and supplier bills.', area: 'purchase', links: [{ href: '/supplier-groups', label: 'Supplier groups', right: { any: ['suppliers.view'] } }] },
@@ -159,6 +164,7 @@ const SCREEN = {
   gst: { href: '/gst/settings', label: 'GST settings' },
   summaryEmail: { href: '/reports/summary-email', label: 'Daily summary email' },
   print: { href: '/printing', label: 'Printing settings' },
+  loyalty: { href: '/loyalty', label: 'Loyalty points' },
 } as const;
 
 /** Every company-wide setting there is today, in the order the centre shows them. */
@@ -174,6 +180,22 @@ export const SETTINGS: readonly SettingDef[] = [
   { id: 'catalogue.allowPriceChangeOnBill', section: 'prices', source: 'catalogue', field: 'allowPriceChangeOnBill', label: 'Allow changing the price on a bill', help: 'Off: only a manager, with their PIN, can change a price at the till.', kind: 'boolean', default: false, defaultText: onOff(false), screen: SCREEN.catalogue },
   { id: 'catalogue.blockSellingBelowCost', section: 'prices', source: 'catalogue', field: 'blockSellingBelowCost', label: 'Block selling below cost', help: 'A till line priced under the item’s cost needs a manager’s PIN.', kind: 'boolean', default: false, defaultText: onOff(false), screen: SCREEN.catalogue },
   { id: 'catalogue.saveTypedPrices', section: 'prices', source: 'catalogue', field: 'saveTypedPrices', label: 'Save typed prices into the price list', help: 'When an item has no price, the price typed on the bill becomes its price from that day.', kind: 'boolean', default: false, defaultText: onOff(false), screen: SCREEN.catalogue },
+  // ---- Loyalty points (plan 13; starting values approved by the owner on 21 October 2026) ----
+  { id: 'loyalty.schemeName', section: 'loyalty', source: 'loyalty', field: 'schemeName', label: 'Name of the scheme', help: 'Shown on receipts and the customer page.', kind: 'text', default: 'Loyalty points', defaultText: 'Loyalty points', screen: SCREEN.loyalty },
+  { id: 'loyalty.earnSpend', section: 'loyalty', source: 'loyalty', field: 'earnSpend', label: 'Rupees spent to earn points (₹)', help: 'With the next setting: ₹100 spent earns 1 point. What is paid with points or a gift card does not earn.', kind: 'money', default: '100', defaultText: '₹100', screen: SCREEN.loyalty },
+  { id: 'loyalty.earnPoints', section: 'loyalty', source: 'loyalty', field: 'earnPoints', label: 'Points earned for that much', help: 'Whole points; part of a point is dropped. Tiers can give more.', kind: 'count', unit: 'points', default: 1, defaultText: '1 point', screen: SCREEN.loyalty },
+  { id: 'loyalty.pointValue', section: 'loyalty', source: 'loyalty', field: 'pointValue', label: 'What one point is worth when spent (₹)', help: 'Changing it changes the worth of every unspent point; the accounts are adjusted the same day.', kind: 'money', default: '1', defaultText: '₹1', screen: SCREEN.loyalty },
+  { id: 'loyalty.validityDays', section: 'loyalty', source: 'loyalty', field: 'validityDays', label: 'Points last', help: 'Points not spent by then expire at night and are written back in the accounts.', kind: 'count', unit: 'days', default: 365, defaultText: '365 days', screen: SCREEN.loyalty },
+  { id: 'loyalty.minRedeem', section: 'loyalty', source: 'loyalty', field: 'minRedeem', label: 'Fewest points spent at a time', help: 'A customer must spend at least this many points on a bill.', kind: 'count', unit: 'points', default: 100, defaultText: '100 points', screen: SCREEN.loyalty },
+  { id: 'loyalty.maxSharePercent', section: 'loyalty', source: 'loyalty', field: 'maxSharePercent', label: 'Most of a bill paid with points (%)', help: 'The rest is paid by cash, card or UPI.', kind: 'percent', default: '50', defaultText: '50%', screen: SCREEN.loyalty },
+  { id: 'loyalty.joinAll', section: 'loyalty', source: 'loyalty', field: 'joinAll', label: 'Every named customer joins', help: 'Off: only customers in the groups chosen on the loyalty screen earn points. Walk-in bills never earn.', kind: 'boolean', default: true, defaultText: 'On', screen: SCREEN.loyalty },
+  { id: 'loyalty.customerGroupIds', section: 'loyalty', source: 'loyalty', field: 'customerGroupIds', label: 'Customer groups that join', help: 'Used when not every customer joins.', kind: 'elsewhere', show: 'count', unit: 'groups', default: [], defaultText: 'None chosen', screen: SCREEN.loyalty, note: 'Chosen on the loyalty screen.' },
+  { id: 'loyalty.expiryTo', section: 'loyalty', source: 'loyalty', field: 'expiryTo', label: 'Expired points are written back to', help: 'The account credited when points expire. Your accountant decides.', kind: 'choice', choices: [{ value: 'loyalty_expense', label: 'Loyalty points expense (reduces it)' }, { value: 'other_income', label: 'Other income' }], default: 'loyalty_expense', defaultText: 'Loyalty points expense', screen: SCREEN.loyalty },
+  { id: 'loyalty.tiers', section: 'loyalty', source: 'loyalty', field: 'tiers', label: 'Tiers', help: 'For example Silver from ₹0 and Gold from ₹25,000 spent in a year, each with its own earn rate.', kind: 'elsewhere', show: 'count', unit: 'tiers', default: [], defaultText: 'None (one rate for all)', screen: SCREEN.loyalty, note: 'Kept on the loyalty screen.' },
+  // ---- Gift cards (plan 13 section 2) ----
+  { id: 'giftCards.validityMonths', section: 'gift_cards', source: 'giftCards', field: 'validityMonths', label: 'A card lasts', help: 'From the day it is sold; what is left at the end is written back at night, after showing in the expiring-cards report.', kind: 'elsewhere', show: 'count', unit: 'months', default: 12, defaultText: '12 months', screen: null, note: 'Fixed at 12 months for now (plan 13).' },
+  { id: 'giftCards.refundToCard', section: 'gift_cards', source: 'giftCards', field: 'refundToCard', label: 'Returns go back on the card', help: 'Money for goods paid with a gift card goes back on that card, not in cash (an expired card is refunded by the till).', kind: 'elsewhere', show: 'onOff', default: true, defaultText: 'On', screen: null, note: 'Fixed for now (plan 13).' },
+  { id: 'giftCards.expiryAccountSet', section: 'gift_cards', source: 'giftCards', field: 'expiryAccountSet', label: 'Account expired balances go to', help: 'Other income, unless your accountant chooses another account for Expired gift card balances.', kind: 'elsewhere', show: 'setOrNot', default: true, defaultText: 'Other income', screen: { href: '/accounts/defaults', label: 'Default accounts' }, note: 'Chosen on the Default accounts screen.' },
   // ---- Customers (party settings) ----
   { id: 'parties.defaultCustomerGroupId', section: 'customers', source: 'parties', field: 'defaultCustomerGroupId', label: 'Default customer group', help: 'The group a customer added at the till, or without a group, goes into.', kind: 'reference', lookup: { url: '/customer-groups', tree: true, defaultCode: 'RETAIL' }, default: null, defaultText: 'Retail', screen: SCREEN.parties },
   { id: 'parties.defaultPaymentTermsId', section: 'customers', source: 'parties', field: 'defaultPaymentTermsId', label: 'Default payment terms', help: 'When neither the customer or supplier nor its group names terms.', kind: 'reference', lookup: { url: '/payment-terms', defaultCode: 'CASH' }, default: null, defaultText: 'Cash', screen: SCREEN.parties },

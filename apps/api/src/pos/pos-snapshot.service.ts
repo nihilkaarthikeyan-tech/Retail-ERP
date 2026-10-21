@@ -7,8 +7,9 @@
 // are on (plan 12: the till hides switched-off buttons offline too). Never
 // passwords, PINs or cost prices.
 import { Injectable } from '@nestjs/common';
-import { addDays, businessDate, type CurrentUser, tillNumberSeries } from 'shared';
+import { addDays, businessDate, type CurrentUser, GIFT_CARD_VALIDITY_MONTHS, tillNumberSeries } from 'shared';
 import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
+import { LoyaltyService } from '../loyalty/loyalty.service.js';
 import { currentModuleMap } from '../modules/module-map.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { fromIso, iso, PosCommon } from './pos-common.service.js';
@@ -20,6 +21,7 @@ export class PosSnapshotService {
     private readonly prisma: PrismaService,
     private readonly common: PosCommon,
     private readonly catalogue: CatalogueSettingsService,
+    private readonly loyalty: LoyaltyService,
   ) {}
 
   async snapshot(tillId: string, since: string | undefined, user: CurrentUser, deviceToken: string | undefined) {
@@ -72,6 +74,8 @@ export class PosSnapshotService {
     // Plan 08: the seller's registration and the GST settings the till bills with offline too.
     const seller = await this.common.gst.sellerFor(this.prisma, till.storeId);
     const gstSettings = await this.common.gst.settingsFor(this.prisma, company.id);
+    // Plan 13: the scheme's limits, so the till can show what may be spent (the balance itself needs the connection).
+    const loyalty = modules.loyalty ? await this.loyalty.settingsRow(this.prisma, company.id) : null;
 
     return {
       serverTime,
@@ -100,6 +104,9 @@ export class PosSnapshotService {
         delivery: { charge: store.deliveryCharge.toFixed(2), freeAbove: store.deliveryFreeAbove?.toFixed(2) ?? null, itemId: settings.deliveryItemId },
         // Plan 11 part 2: the service item an alteration charge is billed as.
         alterationItemId: settings.alterationItemId,
+        // Plan 13: points (spent online only) and gift cards (sold and spent online only).
+        loyalty: loyalty ? { schemeName: loyalty.schemeName, pointValue: loyalty.pointValue.toString(), minRedeem: loyalty.minRedeem, maxSharePercent: loyalty.maxSharePercent.toString(), earnSpend: loyalty.earnSpend.toFixed(2), earnPoints: loyalty.earnPoints } : null,
+        giftCards: modules.gift_cards ? { validityMonths: GIFT_CARD_VALIDITY_MONTHS } : null,
       },
       salesStaff,
       financialYears: years.map((y) => ({ name: y.name, startDate: iso(y.startDate), endDate: iso(y.endDate) })),
