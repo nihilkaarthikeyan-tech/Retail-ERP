@@ -70,7 +70,7 @@ export class GettingStartedService {
   /** Plan 12 §5: the security settings, read only (no screen changes them yet). */
   async securitySettings(user: CurrentUser) {
     this.owner(user);
-    const s = await this.prisma.securitySettings.findUniqueOrThrow({ where: { id: 1 } });
+    const s = await this.prisma.securitySettings.findFirstOrThrow();
     return {
       minPasswordLength: s.minPasswordLength,
       lockoutAttempts: s.lockoutAttempts,

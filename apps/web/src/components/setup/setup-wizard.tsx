@@ -1,9 +1,9 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// Plan 12 §3: the step-by-step first-time setup. Each "Next" checks the step
-// and saves the answers so far on the server (PUT /setup/progress), so closing
-// the browser or a power cut loses nothing: opening the setup again comes back
-// at the next step with every answer kept. The owner's password is typed only
-// on the last step and sent only with "Finish setup"; it is never saved.
+// Plan 12 §3 and plan 14: the step-by-step setup of a new shop, for its owner
+// after signing up (logged in). Each "Next" checks the step and saves the answers
+// so far on the server (PUT /setup/progress), so closing the browser or a power
+// cut loses nothing: opening the setup again comes back at the next step with
+// every answer kept.
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -30,7 +30,6 @@ import {
   setupSellSchema,
   type SetupStepKey,
   setupTills,
-  setupYouSchema,
   SHOP_TYPE_KEYS,
   SHOP_TYPES,
   type ShopTypeKey,
@@ -47,7 +46,6 @@ import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 // ---- The form, as typed (strings), and to and from the saved answers ----
 
 export interface WizardForms {
-  you: { firstName: string; lastName: string; email: string };
   business: { legalName: string; tradeName: string; pan: string; stateCode: string; addressLine1: string; addressLine2: string; city: string; pincode: string; phone: string; email: string; startDate: string; endDate: string };
   gst: { registered: "" | "yes" | "no"; gstin: string; legalNameOnCertificate: string; scheme: string; filingFrequency: string; turnoverBand: string };
   shop: { name: string; code: string; tills: string };
@@ -60,7 +58,6 @@ const text = (v: string | null | undefined) => v ?? "";
 /** Empty forms; the financial year is filled in once the page is open (not while it is prerendered). */
 export function blankForms(year: { startDate: string; endDate: string } = { startDate: "", endDate: "" }): WizardForms {
   return {
-    you: { firstName: "", lastName: "", email: "" },
     business: { legalName: "", tradeName: "", pan: "", stateCode: "", addressLine1: "", addressLine2: "", city: "", pincode: "", phone: "", email: "", startDate: year.startDate, endDate: year.endDate },
     gst: { registered: "", gstin: "", legalNameOnCertificate: "", scheme: "regular", filingFrequency: "quarterly", turnoverBand: "up_to_5cr" },
     shop: { name: "", code: "", tills: "1" },
@@ -71,7 +68,6 @@ export function blankForms(year: { startDate: string; endDate: string } = { star
 /** The forms filled from the answers saved on the server. */
 export function formsFromDraft(d: SetupDraft, now: Date = new Date()): WizardForms {
   const f = blankForms(indianFinancialYear(now));
-  if (d.you) f.you = { firstName: d.you.firstName, lastName: text(d.you.lastName), email: d.you.email };
   if (d.business) {
     const b = d.business;
     f.business = { legalName: b.legalName, tradeName: text(b.tradeName), pan: text(b.pan), stateCode: b.stateCode, addressLine1: text(b.addressLine1), addressLine2: text(b.addressLine2), city: text(b.city), pincode: text(b.pincode), phone: text(b.phone), email: text(b.email), startDate: b.financialYear?.startDate ?? f.business.startDate, endDate: b.financialYear?.endDate ?? f.business.endDate };
@@ -85,8 +81,6 @@ export function formsFromDraft(d: SetupDraft, now: Date = new Date()): WizardFor
 /** What one step sends, before checking. */
 export function stepInput(key: SetupAnswerKey, f: WizardForms): unknown {
   switch (key) {
-    case "you":
-      return { firstName: f.you.firstName, lastName: blankToNull(f.you.lastName), email: f.you.email };
     case "business": {
       const b = f.business;
       return { legalName: b.legalName, tradeName: blankToNull(b.tradeName), pan: blankToNull(b.pan.toUpperCase()), stateCode: b.stateCode, addressLine1: blankToNull(b.addressLine1), addressLine2: blankToNull(b.addressLine2), city: blankToNull(b.city), pincode: blankToNull(b.pincode), phone: blankToNull(b.phone), email: blankToNull(b.email), financialYear: { startDate: b.startDate, endDate: b.endDate } };
@@ -102,7 +96,7 @@ export function stepInput(key: SetupAnswerKey, f: WizardForms): unknown {
   }
 }
 
-const STEP_SCHEMAS = { you: setupYouSchema, business: setupBusinessSchema, gst: setupGstSchema, shop: setupShopSchema, sell: setupSellSchema } as const;
+const STEP_SCHEMAS = { business: setupBusinessSchema, gst: setupGstSchema, shop: setupShopSchema, sell: setupSellSchema } as const;
 
 const TURNOVER_LABELS: Record<(typeof TURNOVER_BANDS)[number], string> = {
   up_to_5cr: "Up to ₹5 crore",
@@ -147,16 +141,24 @@ export function SetupWizard() {
     let cancelled = false;
     (async () => {
       try {
-        const status = await api.get<{ needed: boolean }>("/setup/status", { redirectOnUnauthorized: false });
+        // Plan 14: the owner is logged in (signed up just now, or came back later).
+        const status = await api.get<{ needed: boolean }>("/setup/status");
         if (cancelled) return;
         if (!status.needed) {
-          router.replace("/login");
+          router.replace("/dashboard");
           return;
         }
-        const progress = await api.get<{ step: number; data: SetupDraft }>("/setup/progress", { redirectOnUnauthorized: false });
+        const progress = await api.get<{ step: number; data: SetupDraft }>("/setup/progress");
         if (cancelled) return;
         setSaved(progress.data);
-        setForms(formsFromDraft(progress.data));
+        const filled = formsFromDraft(progress.data);
+        // Plan 14: the shop name typed at sign-up starts the legal name.
+        if (!progress.data.business) {
+          const company = await api.get<{ legalName: string }>("/company");
+          if (cancelled) return;
+          filled.business.legalName = company.legalName;
+        }
+        setForms(filled);
         setStep(progress.step);
         if (progress.step > 1) setResumedAt(progress.step);
         setPhase("ready");
@@ -206,7 +208,7 @@ export function SetupWizard() {
     setErrors({});
     setBusy(true);
     try {
-      const res = await api.put<{ step: number; data: SetupDraft }>("/setup/progress", { step: step + 1, data: whole.data }, { redirectOnUnauthorized: false });
+      const res = await api.put<{ step: number; data: SetupDraft }>("/setup/progress", { step: step + 1, data: whole.data });
       setSaved(res.data);
       setResumedAt(null);
       goTo(step + 1);
@@ -254,11 +256,10 @@ export function SetupWizard() {
         <p className="muted">{current.lead}</p>
 
         {key === "done" ? (
-          <DoneStep saved={saved} onChange={goTo} onFinished={() => router.replace("/login?setup=done")} />
+          <DoneStep saved={saved} onChange={goTo} onFinished={() => router.replace("/dashboard")} />
         ) : (
           <form onSubmit={(e) => void next(e)} noValidate>
             <Alert kind="error">{error}</Alert>
-            {key === "you" ? <YouStep forms={forms} setForms={setForms} errors={errors} /> : null}
             {key === "business" ? <BusinessStep forms={forms} setForms={setForms} errors={errors} /> : null}
             {key === "gst" ? <GstStep forms={forms} setForms={setForms} errors={errors} /> : null}
             {key === "shop" ? <ShopStep forms={forms} setForms={setForms} errors={errors} /> : null}
@@ -280,7 +281,7 @@ export function SetupWizard() {
   );
 }
 
-/** The six steps; a step already saved can be opened again. */
+/** The steps; a step already saved can be opened again. */
 function StepTracker({ step, saved, onJump }: { step: number; saved: SetupDraft; onJump: (n: number) => void }) {
   return (
     <ol className="setup-tracker" aria-label="Setup steps">
@@ -317,17 +318,6 @@ interface StepProps {
   forms: WizardForms;
   setForms: (update: (f: WizardForms) => WizardForms) => void;
   errors: FieldErrors;
-}
-
-function YouStep({ forms, setForms, errors }: StepProps) {
-  const set = (k: keyof WizardForms["you"]) => (e: { target: { value: string } }) => setForms((f) => ({ ...f, you: { ...f.you, [k]: e.target.value } }));
-  return (
-    <div className="form-grid">
-      <TextInput id="you-firstName" label="First name" value={forms.you.firstName} onChange={set("firstName")} error={errors.firstName} required autoComplete="given-name" />
-      <TextInput id="you-lastName" label="Last name" value={forms.you.lastName} onChange={set("lastName")} error={errors.lastName} autoComplete="family-name" />
-      <TextInput id="you-email" label="Email" type="email" value={forms.you.email} onChange={set("email")} error={errors.email} required autoComplete="username" hint="You log in with this. You choose your password on the last step." />
-    </div>
-  );
 }
 
 function BusinessStep({ forms, setForms, errors }: StepProps) {
@@ -535,7 +525,7 @@ function SellStep({ forms, setForms, errors }: StepProps) {
   );
 }
 
-// ---- Step 6: summary, password, finish ----
+// ---- Last step: summary and finish ----
 
 function Summary({ title, step, onChange, children }: { title: string; step: number; onChange: (n: number) => void; children: ReactNode }) {
   return (
@@ -561,9 +551,6 @@ const Row = ({ label, value }: { label: string; value: ReactNode }) =>
   );
 
 function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange: (n: number) => void; onFinished: () => void }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const missing = SETUP_STEPS.findIndex((s) => s.key !== "done" && !saved[s.key as SetupAnswerKey]);
@@ -573,14 +560,9 @@ function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange
   async function finish(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const problems: FieldErrors = {};
-    if (!password) problems.password = "Choose a password.";
-    else if (password !== confirm) problems.confirm = "The two passwords are not the same.";
-    setErrors(problems);
-    if (Object.keys(problems).length) return;
     setBusy(true);
     try {
-      await api.post("/setup/finish", { password }, { redirectOnUnauthorized: false });
+      await api.post("/setup/finish", {});
       onFinished();
     } catch (err) {
       const step = err instanceof ApiError && err.body && typeof err.body === "object" && "step" in err.body ? Number((err.body as { step: unknown }).step) : null;
@@ -600,7 +582,6 @@ function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange
       </Alert>
     );
   }
-  const you = saved.you!;
   const b = saved.business!;
   const g = saved.gst!;
   const shop = saved.shop!;
@@ -609,11 +590,7 @@ function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange
   return (
     <>
       <div className="setup-summary">
-        <Summary title="You" step={1} onChange={onChange}>
-          <Row label="Owner" value={[you.firstName, you.lastName].filter(Boolean).join(" ")} />
-          <Row label="Logs in with" value={you.email} />
-        </Summary>
-        <Summary title="Your business" step={2} onChange={onChange}>
+        <Summary title="Your business" step={1} onChange={onChange}>
           <Row label="Legal name" value={b.legalName} />
           <Row label="Name on bills" value={b.tradeName} />
           <Row label="PAN" value={b.pan} />
@@ -621,7 +598,7 @@ function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange
           <Row label="Address" value={[b.addressLine1, b.addressLine2, b.city, b.pincode].filter(Boolean).join(", ")} />
           <Row label="Financial year" value={`${formatDate(year.startDate)} to ${formatDate(year.endDate)}`} />
         </Summary>
-        <Summary title="GST" step={3} onChange={onChange}>
+        <Summary title="GST" step={2} onChange={onChange}>
           {g.registered ? (
             <>
               <Row label="GSTIN" value={<span className="mono">{g.gstin}</span>} />
@@ -633,24 +610,17 @@ function DoneStep({ saved, onChange, onFinished }: { saved: SetupDraft; onChange
             <Row label="Registration" value="Not registered yet" />
           )}
         </Summary>
-        <Summary title="Your first shop" step={4} onChange={onChange}>
+        <Summary title="Your first shop" step={3} onChange={onChange}>
           <Row label="Shop" value={`${shop.name} (${shop.code})`} />
           <Row label="Tills" value={shop.tills === 0 ? "None yet" : `${setupTills(shop.tills).map((t) => t.name).join(", ")}, each taking cash, card and UPI`} />
         </Summary>
-        <Summary title="What you sell" step={5} onChange={onChange}>
+        <Summary title="What you sell" step={4} onChange={onChange}>
           <Row label="Kind of shop" value={SHOP_TYPES[sell.shopType].label} />
           <Row label="Switched on" value={on.length ? on.map((k) => OPTIONAL_MODULES[k].label).join(", ") : "Only the core: billing, stock, accounts and GST"} />
         </Summary>
       </div>
 
       <form onSubmit={(e) => void finish(e)} noValidate>
-        <fieldset>
-          <legend>Your password</legend>
-          <div className="form-grid">
-            <TextInput id="done-password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} error={errors.password} required autoComplete="new-password" hint="At least 10 characters. It is not saved until you finish." />
-            <TextInput id="done-confirm" label="Type it again" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} error={errors.confirm} required autoComplete="new-password" />
-          </div>
-        </fieldset>
         <Alert kind="error">{error}</Alert>
         <div className="actions setup-actions">
           <Button onClick={() => onChange(SETUP_STEPS.length - 1)} disabled={busy}>

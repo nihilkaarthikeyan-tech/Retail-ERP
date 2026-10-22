@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Stock locations, reorder levels and inventory settings.
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   type CreateLocationInput,
   type CurrentUser,
@@ -14,14 +14,11 @@ import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { ensureCompanyInventory, ensureStoreLocations } from './location-defaults.js';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 
 @Injectable()
-export class InventoryMastersService implements OnModuleInit {
-  private readonly log = new Logger(InventoryMastersService.name);
-
+export class InventoryMastersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -29,14 +26,6 @@ export class InventoryMastersService implements OnModuleInit {
   ) {}
 
   /** Stores created before module 4 get their locations on the first start. */
-  async onModuleInit(): Promise<void> {
-    try {
-      for (const c of await this.prisma.company.findMany({ select: { id: true } })) await ensureCompanyInventory(this.prisma, c.id);
-      for (const s of await this.prisma.store.findMany()) await ensureStoreLocations(this.prisma, s);
-    } catch (err) {
-      this.log.error('Could not ensure stock locations', err instanceof Error ? err.stack : String(err));
-    }
-  }
 
   // ---- Locations ----
 

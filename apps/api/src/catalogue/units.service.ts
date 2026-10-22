@@ -66,7 +66,7 @@ export class UnitsService {
   }
 
   async create(input: CreateUnitInput, actor: Actor) {
-    if (await this.prisma.unit.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.unit.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`Unit ${input.code} already exists`);
     }
     const allowsFractions = input.allowsFractions ?? fractionsAllowedForKind(input.kind);

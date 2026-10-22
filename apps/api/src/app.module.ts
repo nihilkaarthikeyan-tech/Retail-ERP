@@ -1,5 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { runRequest } from './prisma/tenancy.js';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -25,6 +26,7 @@ import { PartiesModule } from './parties/parties.module.js';
 import { PricingModule } from './pricing/pricing.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RolesModule } from './roles/roles.module.js';
+import { PlatformModule } from './platform/platform.module.js';
 import { SetupModule } from './setup/setup.module.js';
 import { StoresModule } from './stores/stores.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -39,6 +41,7 @@ import { UsersModule } from './users/users.module.js';
     AuthModule,
     HealthModule,
     SetupModule,
+    PlatformModule,
     RolesModule,
     CompanyModule,
     StoresModule,
@@ -61,4 +64,9 @@ import { UsersModule } from './users/users.module.js';
     OrdersModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  /** Plan 14: every request starts with no shop; logging in or the session check sets it. */
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply((_req: unknown, _res: unknown, next: () => void) => runRequest(next)).forRoutes('*');
+  }
+}

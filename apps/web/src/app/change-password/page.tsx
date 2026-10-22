@@ -71,7 +71,7 @@ export default function ChangePasswordPage() {
       )}
       {done ? (
         <Alert kind="success">
-          Your password has been changed. Other sessions have been ended. <Link href="/">Go to the dashboard</Link>.
+          Your password has been changed. Other sessions have been ended. <Link href="/dashboard">Go to the dashboard</Link>.
         </Alert>
       ) : null}
       <form onSubmit={onSubmit} noValidate>
@@ -121,7 +121,7 @@ export default function ChangePasswordPage() {
               Log out
             </Button>
           ) : (
-            <Link href="/" className="btn btn-link">
+            <Link href="/dashboard" className="btn btn-link">
               Back
             </Link>
           )}

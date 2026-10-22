@@ -5,11 +5,11 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { addDays, businessDate } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let loc: Record<string, string>;
@@ -28,7 +28,7 @@ const T = (r: ReturnType<Agent['post']>) => r.set('x-till-token', tillToken);
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -40,7 +40,7 @@ async function freshTill(extra: Record<string, unknown> = {}) {
   n = 0;
   MAIN = await storeId(prisma, 'MAIN');
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'GROC', name: 'Grocery' }).expect(201)).body.id;
   listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
   for (const [hsnCode, rate] of [['1006', '5'], ['3402', '18'], ['1905', '18'], ['0902', '5'], ['1101', '5']]) await owner.post('/pos/gst-rates').send({ hsnCode, rate, effectiveFrom: '2026-04-01' }).expect(201);

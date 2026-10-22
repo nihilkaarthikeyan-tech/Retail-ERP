@@ -46,7 +46,8 @@ import { CompanyService } from '../company/company.service.js';
 import type { GiftCard, GiftCardEntry, Prisma } from '../generated/prisma/client.js';
 import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js';
 import { moduleOffError, moduleOn } from '../modules/module-map.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { D, fromIso, iso } from './loyalty.service.js';
 
 const ZERO = new Decimal(0);
@@ -76,6 +77,7 @@ export class GiftCardsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly ledger: LedgerService,
     private readonly company: CompanyService,
@@ -96,7 +98,7 @@ export class GiftCardsService {
   // ---- Reading ----
 
   async byNumber(db: Db, companyId: string, number: string): Promise<GiftCard> {
-    const card = await db.giftCard.findUnique({ where: { number: normaliseGiftCardNumber(number) } });
+    const card = await db.giftCard.findFirst({ where: { number: normaliseGiftCardNumber(number) } });
     if (!card || card.companyId !== companyId) throw new NotFoundException('No gift card has that number');
     return card;
   }
@@ -215,7 +217,7 @@ export class GiftCardsService {
       let made: GiftCard | null = null;
       for (let i = 0; i < 5 && !made; i++) {
         const number = this.newNumber();
-        if (await tx.giftCard.findUnique({ where: { number }, select: { id: true } })) continue;
+        if (await tx.giftCard.findFirst({ where: { number }, select: { id: true } })) continue;
         made = await tx.giftCard.create({
           data: {
             companyId: s.companyId,
@@ -380,14 +382,17 @@ export class GiftCardsService {
   @Cron('25 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
     if (process.env.EXPIRY_SCHEDULE === 'off') return;
-    try {
-      for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
-        const r = await this.expire(c.id, businessDate(), { userId: null, ipAddress: null });
-        if (r.cards) this.log.log(`${r.cards} gift card(s) expired, ₹${r.value} written back`);
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Nightly gift card expiry', async () => {
+      try {
+        for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
+          const r = await this.expire(c.id, businessDate(), { userId: null, ipAddress: null });
+          if (r.cards) this.log.log(`${r.cards} gift card(s) expired, ₹${r.value} written back`);
+        }
+      } catch (err) {
+        this.log.error('Nightly gift card expiry failed', err instanceof Error ? err.stack : String(err));
       }
-    } catch (err) {
-      this.log.error('Nightly gift card expiry failed', err instanceof Error ? err.stack : String(err));
-    }
+    });
   }
 
   /**

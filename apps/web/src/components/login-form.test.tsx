@@ -95,6 +95,6 @@ describe("LoginForm", () => {
     fireEvent.change(screen.getByLabelText(/Password/), { target: { value: "correct-password" } });
     fireEvent.click(screen.getByRole("button", { name: /Log in/ }));
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
   });
 });

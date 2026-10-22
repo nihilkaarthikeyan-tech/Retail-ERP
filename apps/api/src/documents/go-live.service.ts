@@ -83,8 +83,11 @@ export class GoLiveService {
           for (const t of s.tables) rows += Number((await tx.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM "${t}"`))[0].n);
           steps.push({ step: s.step, rows, outcome: 'cleared' });
         }
-        // TRUNCATE does not run the row guards that protect posted ledger and stock lines: clearing is the one deliberate exception (decision 72).
-        await tx.$executeRawUnsafe(`TRUNCATE TABLE ${TRANSACTION_TABLES.flatMap((s) => s.tables).map((t) => `"${t}"`).join(', ')} RESTART IDENTITY`);
+        // Plan 14: only this shop's rows are deleted (row-level security), never another shop's. Posted ledger and
+        // stock lines are protected against deleting; clearing is the one deliberate exception (decision 72), allowed
+        // by this setting inside this transaction only.
+        await tx.$executeRaw`SELECT set_config('app.clear_trial', 'on', true)`;
+        for (const t of TRANSACTION_TABLES.flatMap((s) => s.tables)) await tx.$executeRawUnsafe(`DELETE FROM "${t}"`);
         const prices = await tx.price.deleteMany({ where: { batchId: { not: null } } });
         await tx.coupon.updateMany({ data: { usedCount: 0 } });
         await tx.item.updateMany({ data: { lastPurchasePrice: null } });

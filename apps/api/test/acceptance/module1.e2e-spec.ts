@@ -7,7 +7,7 @@ import { SYSTEM_ROLES } from 'shared';
 import { AuditService } from '../../src/audit/audit.service.js';
 import { FinancialYearsService } from '../../src/financial-years/financial-years.service.js';
 import { NumberingService } from '../../src/numbering/numbering.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import {
   type Agent,
   createTestApp,
@@ -21,12 +21,12 @@ import {
 } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -66,12 +66,13 @@ describe('1.1 First-time setup', () => {
     await resetDatabase(prisma);
   });
 
-  it('creates owner, company, year and store, then refuses a second run', async () => {
-    expect((await request(app.getHttpServer()).get('/setup/status').expect(200)).body).toEqual({ needed: true });
+  it('creates owner, company, year and store; the same email cannot make a second shop (plan 14)', async () => {
+    // Plan 14: the setup status belongs to a logged-in person's shop.
+    await request(app.getHttpServer()).get('/setup/status').expect(401);
     await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(201);
-    expect((await request(app.getHttpServer()).get('/setup/status').expect(200)).body).toEqual({ needed: false });
 
     owner = await login(app, OWNER.email, OWNER.password);
+    expect((await owner.get('/setup/status').expect(200)).body).toEqual({ needed: false });
     const me = (await owner.get('/auth/me').expect(200)).body;
     expect(me.isOwnerAdmin).toBe(true);
     expect(me.mustChangePassword).toBe(false);
@@ -87,7 +88,8 @@ describe('1.1 First-time setup', () => {
     expect(stores).toHaveLength(1);
     expect(stores[0]).toMatchObject({ code: 'MAIN', active: true, gstRegistration: { gstin: '33AAACR1234A1ZV' } });
 
-    await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(409);
+    const again = await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(409);
+    expect(again.body.message).toMatch(/already exists/);
 
     const history = (await owner.get('/audit').expect(200)).body.rows as { entityType: string; action: string; user: { email: string } | null }[];
     const created = history.filter((h) => h.action === 'create').map((h) => h.entityType).sort();

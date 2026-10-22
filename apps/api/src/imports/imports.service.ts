@@ -10,7 +10,7 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { ImportJob } from '../generated/prisma/client.js';
 import { assertModuleOn, moduleOn } from '../modules/module-map.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { type Importer, type ImportContext, matchColumns, parseRow, type ParsedRow } from './importers.js';
 import { ImportKindsService } from './kinds.service.js';
 import { type Cell, readSpreadsheet, writeCsv, writeXlsx } from './spreadsheet.js';
@@ -24,6 +24,7 @@ export class ImportsService implements OnApplicationBootstrap {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly company: CompanyService,
     private readonly kinds: ImportKindsService,
@@ -31,7 +32,8 @@ export class ImportsService implements OnApplicationBootstrap {
 
   /** An import cut off by a server restart is marked as stopped; running it again skips the rows already done. */
   async onApplicationBootstrap() {
-    await this.prisma.importJob.updateMany({ where: { status: 'running' }, data: { status: 'failed', message: 'The server restarted during the import; run the file again (rows already done are skipped)', finishedAt: new Date() } });
+    // Plan 14: every shop's imports (the system client sees them all).
+    await this.system.importJob.updateMany({ where: { status: 'running' }, data: { status: 'failed', message: 'The server restarted during the import; run the file again (rows already done are skipped)', finishedAt: new Date() } });
   }
 
   private importer(kind: string, user: CurrentUser): Importer {

@@ -45,12 +45,16 @@ model Company {
   goLiveDate           DateTime? @db.Date
   goLiveById           String?   @db.Uuid
   active               Boolean   @default(true)
+  /// Plan 14: when the owner finished the setup wizard; until then the shop shows the wizard.
+  setupCompletedAt     DateTime?
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
+  users             User[]
+  sessions          Session[]
   gstRegistrations  GstRegistration[]
   stores            Store[]
   financialYears    FinancialYear[]
@@ -66,7 +70,7 @@ model Company {
 model GstRegistration {
   id                     String  @id @default(uuid()) @db.Uuid
   companyId              String  @db.Uuid
-  gstin                  String  @unique
+  gstin                  String
   stateCode              String
   legalNameOnCertificate String?
   addressLine1           String?
@@ -84,6 +88,7 @@ model GstRegistration {
   company Company @relation(fields: [companyId], references: [id])
   stores  Store[]
 
+  @@unique([companyId, gstin])
   @@index([companyId])
 }
 
@@ -181,6 +186,8 @@ model NumberSeries {
 
 /// One running number per filled-in prefix; locked row-by-row when allocating.
 model NumberSeriesCounter {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId      String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id             String @id @default(uuid()) @db.Uuid
   numberSeriesId String @db.Uuid
   filledPrefix   String
@@ -191,6 +198,7 @@ model NumberSeriesCounter {
   numberSeries NumberSeries @relation(fields: [numberSeriesId], references: [id])
 
   @@unique([numberSeriesId, filledPrefix])
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +206,8 @@ model NumberSeriesCounter {
 // ---------------------------------------------------------------------------
 
 model User {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId          String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id                 String    @id @default(uuid()) @db.Uuid
   email              String    @unique
   firstName          String
@@ -221,11 +231,16 @@ model User {
   roles    UserRole[]
   stores   UserStore[]
   sessions Session[]
+  company  Company     @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
 }
 
 model Role {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
-  code        String  @unique
+  code        String
   name        String
   description String?
   /// Seeded roles cannot be deleted or renamed in code; their permissions can be edited.
@@ -239,28 +254,39 @@ model Role {
 
   permissions RolePermission[]
   users       UserRole[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model RolePermission {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId     String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   roleId        String @db.Uuid
   permissionKey String
 
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionKey])
+  @@index([companyId])
 }
 
 model UserRole {
-  userId String @db.Uuid
-  roleId String @db.Uuid
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  userId    String @db.Uuid
+  roleId    String @db.Uuid
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
+  @@index([companyId])
 }
 
 model UserStore {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   userId    String  @db.Uuid
   storeId   String  @db.Uuid
   isDefault Boolean @default(false)
@@ -269,9 +295,12 @@ model UserStore {
   store Store @relation(fields: [storeId], references: [id])
 
   @@id([userId, storeId])
+  @@index([companyId])
 }
 
 model Session {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId    String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id           String    @id @default(uuid()) @db.Uuid
   userId       String    @db.Uuid
   tokenHash    String    @unique
@@ -282,14 +311,17 @@ model Session {
   expiresAt    DateTime
   revokedAt    DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
 
   @@index([userId])
+  @@index([companyId])
 }
 
 /// Single-row table of security settings.
 model SecuritySettings {
-  id                   Int     @id @default(1)
+  /// Plan 14: one row per shop.
+  companyId            String  @id @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   minPasswordLength    Int     @default(10)
   lockoutAttempts      Int     @default(5)
   lockoutSeconds       Int     @default(900)
@@ -307,6 +339,8 @@ model SecuritySettings {
 // ---------------------------------------------------------------------------
 
 model AuditLog {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId  String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id         BigInt   @id @default(autoincrement())
   at         DateTime @default(now())
   userId     String?  @db.Uuid
@@ -321,6 +355,7 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([userId, at])
   @@index([at])
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------
@@ -338,8 +373,10 @@ enum UnitKind {
 }
 
 model Unit {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id              String   @id @default(uuid()) @db.Uuid
-  code            String   @unique
+  code            String
   name            String
   kind            UnitKind
   /// Decision 11: may be true only for weight, length and volume.
@@ -357,10 +394,15 @@ model Unit {
   itemUnits       ItemUnit[]
   barcodes        Barcode[]
   prices          Price[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// Standard conversion stored once: 1 fromUnit = factor toUnit (1 KG = 1000 G).
 model UnitConversion {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId  String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id         String  @id @default(uuid()) @db.Uuid
   fromUnitId String  @db.Uuid
   toUnitId   String  @db.Uuid
@@ -375,18 +417,21 @@ model UnitConversion {
   toUnit   Unit @relation("toUnit", fields: [toUnitId], references: [id])
 
   @@unique([fromUnitId, toUnitId])
+  @@index([companyId])
 }
 
 model ItemGroup {
-  id       String  @id @default(uuid()) @db.Uuid
-  parentId String? @db.Uuid
-  code     String  @unique
-  name     String
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  parentId  String? @db.Uuid
+  code      String
+  name      String
   /// "/id-of-root/id-of-child/" for subtree queries.
-  path     String
-  depth    Int     @default(0)
-  hsnCode  String?
-  active   Boolean @default(true)
+  path      String
+  depth     Int     @default(0)
+  hsnCode   String?
+  active    Boolean @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -397,14 +442,18 @@ model ItemGroup {
   children ItemGroup[] @relation("groupTree")
   items    Item[]
 
+  @@unique([companyId, code])
   @@index([path])
+  @@index([companyId])
 }
 
 model Brand {
-  id     String  @id @default(uuid()) @db.Uuid
-  code   String  @unique
-  name   String
-  active Boolean @default(true)
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  code      String
+  name      String
+  active    Boolean @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -412,12 +461,17 @@ model Brand {
   updatedById String?  @db.Uuid
 
   items Item[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// HSN (goods) and SAC (services) codes; the GST rate per code comes with the GST module.
 model HsnCode {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
-  code        String  @unique
+  code        String
   description String
   isService   Boolean @default(false)
   active      Boolean @default(true)
@@ -426,6 +480,9 @@ model HsnCode {
   createdById String?  @db.Uuid
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 enum AttributeKind {
@@ -434,8 +491,10 @@ enum AttributeKind {
 }
 
 model VariantAttribute {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId  String        @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id         String        @id @default(uuid()) @db.Uuid
-  code       String        @unique
+  code       String
   name       String
   kind       AttributeKind @default(list)
   rangeStart Decimal?      @db.Decimal(12, 4)
@@ -451,9 +510,14 @@ model VariantAttribute {
   values         VariantAttributeValue[]
   itemAttributes ItemVariantAttribute[]
   itemValues     ItemVariantValue[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model VariantAttributeValue {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String @id @default(uuid()) @db.Uuid
   attributeId String @db.Uuid
   value       String
@@ -466,6 +530,7 @@ model VariantAttributeValue {
 
   @@unique([attributeId, valueKey])
   @@unique([attributeId, shortCode])
+  @@index([companyId])
 }
 
 enum BarcodeType {
@@ -477,8 +542,10 @@ enum BarcodeType {
 }
 
 model Item {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId           String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id                  String    @id @default(uuid()) @db.Uuid
-  code                String    @unique
+  code                String
   name                String
   description         String?
   image               Bytes?
@@ -540,33 +607,40 @@ model Item {
   posBillLines       PosBillLine[]
 
   @@unique([parentItemId, variantKey])
+  @@unique([companyId, code])
   @@index([name])
   @@index([seasonId])
   @@index([itemGroupId])
+  @@index([companyId])
 }
 
 /// Units an item is bought or sold in. The basic unit row always has factor 1.
 model ItemUnit {
-  id     String   @id @default(uuid()) @db.Uuid
-  itemId String   @db.Uuid
-  unitId String   @db.Uuid
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
+  itemId    String   @db.Uuid
+  unitId    String   @db.Uuid
   /// Basic units in one of this unit (BOX = 12 PCS → 12).
-  factor Decimal  @db.Decimal(18, 6)
-  mrp    Decimal? @db.Decimal(14, 2)
+  factor    Decimal  @db.Decimal(18, 6)
+  mrp       Decimal? @db.Decimal(14, 2)
 
   item Item @relation(fields: [itemId], references: [id], onDelete: Cascade)
   unit Unit @relation(fields: [unitId], references: [id])
 
   @@unique([itemId, unitId])
+  @@index([companyId])
 }
 
 model Barcode {
-  id     String      @id @default(uuid()) @db.Uuid
-  code   String      @unique
-  itemId String      @db.Uuid
-  unitId String?     @db.Uuid
-  type   BarcodeType @default(other)
-  active Boolean     @default(true)
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String      @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String      @id @default(uuid()) @db.Uuid
+  code      String
+  itemId    String      @db.Uuid
+  unitId    String?     @db.Uuid
+  type      BarcodeType @default(other)
+  active    Boolean     @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -575,10 +649,15 @@ model Barcode {
 
   item Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
   unit Unit? @relation(fields: [unitId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// Which attributes a style varies by.
 model ItemVariantAttribute {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   itemId      String @db.Uuid
   attributeId String @db.Uuid
   sortOrder   Int    @default(0)
@@ -587,10 +666,13 @@ model ItemVariantAttribute {
   attribute VariantAttribute @relation(fields: [attributeId], references: [id])
 
   @@id([itemId, attributeId])
+  @@index([companyId])
 }
 
 /// A variant's value for each of its parent's attributes.
 model ItemVariantValue {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   itemId      String @db.Uuid
   attributeId String @db.Uuid
   value       String
@@ -600,6 +682,7 @@ model ItemVariantValue {
   attribute VariantAttribute @relation(fields: [attributeId], references: [id])
 
   @@id([itemId, attributeId])
+  @@index([companyId])
 }
 
 model PriceList {
@@ -630,6 +713,8 @@ model PriceList {
 }
 
 model Price {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String    @id @default(uuid()) @db.Uuid
   priceListId String    @db.Uuid
   itemId      String    @db.Uuid
@@ -658,6 +743,7 @@ model Price {
 
   @@index([priceListId, itemId])
   @@index([itemId])
+  @@index([companyId])
 }
 
 /// One row per company.
@@ -709,6 +795,8 @@ enum DueBasis {
 
 /// Postal address of a customer or supplier. GSTIN per address (decision 21).
 model Address {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId    String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id           String    @id @default(uuid()) @db.Uuid
   partyType    PartyType
   partyId      String    @db.Uuid
@@ -734,9 +822,12 @@ model Address {
   updatedById String?  @db.Uuid
 
   @@index([partyType, partyId])
+  @@index([companyId])
 }
 
 model ContactPerson {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId    String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id           String    @id @default(uuid()) @db.Uuid
   partyType    PartyType
   partyId      String    @db.Uuid
@@ -755,13 +846,16 @@ model ContactPerson {
   updatedById String?  @db.Uuid
 
   @@index([partyType, partyId])
+  @@index([companyId])
 }
 
 model PaymentTerms {
-  id     String  @id @default(uuid()) @db.Uuid
-  code   String  @unique
-  name   String
-  active Boolean @default(true)
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  code      String
+  name      String
+  active    Boolean @default(true)
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -773,9 +867,14 @@ model PaymentTerms {
   customers      Customer[]
   supplierGroups SupplierGroup[]
   suppliers      Supplier[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model PaymentTermsPart {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId            String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id                   String   @id @default(uuid()) @db.Uuid
   paymentTermsId       String   @db.Uuid
   sortOrder            Int      @default(0)
@@ -787,12 +886,16 @@ model PaymentTermsPart {
   earlyDiscountDays    Int?
 
   paymentTerms PaymentTerms @relation(fields: [paymentTermsId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model CustomerGroup {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id              String  @id @default(uuid()) @db.Uuid
   parentId        String? @db.Uuid
-  code            String  @unique
+  code            String
   name            String
   path            String
   depth           Int     @default(0)
@@ -813,12 +916,15 @@ model CustomerGroup {
   priceList    PriceList?      @relation(fields: [priceListId], references: [id])
   paymentTerms PaymentTerms?   @relation(fields: [paymentTermsId], references: [id])
   customers    Customer[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model Customer {
   id                    String      @id @default(uuid()) @db.Uuid
   companyId             String      @db.Uuid
-  code                  String      @unique
+  code                  String
   name                  String
   isBusiness            Boolean     @default(false)
   mobile                String?
@@ -858,14 +964,17 @@ model Customer {
   linkedSupplier Supplier?     @relation("customerSupplierLink", fields: [linkedSupplierId], references: [id])
   prices         Price[]
 
+  @@unique([companyId, code])
   @@index([mobile])
   @@index([name])
 }
 
 model SupplierGroup {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId      String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id             String  @id @default(uuid()) @db.Uuid
   parentId       String? @db.Uuid
-  code           String  @unique
+  code           String
   name           String
   path           String
   depth          Int     @default(0)
@@ -883,12 +992,15 @@ model SupplierGroup {
   priceList    PriceList?      @relation(fields: [priceListId], references: [id])
   paymentTerms PaymentTerms?   @relation(fields: [paymentTermsId], references: [id])
   suppliers    Supplier[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 model Supplier {
   id                      String      @id @default(uuid()) @db.Uuid
   companyId               String      @db.Uuid
-  code                    String      @unique
+  code                    String
   name                    String
   isBusiness              Boolean     @default(true)
   mobile                  String?
@@ -927,6 +1039,7 @@ model Supplier {
   goodsReceipts     GoodsReceipt[]
   supplierBills     SupplierBill[]
 
+  @@unique([companyId, code])
   @@index([name])
 }
 
@@ -1014,7 +1127,7 @@ model StockLocation {
 model StockDocument {
   id             String         @id @default(uuid()) @db.Uuid
   companyId      String         @db.Uuid
-  number         String         @unique
+  number         String
   kind           StockDocKind
   reason         String?
   /// Counts: opening or normal.
@@ -1049,11 +1162,14 @@ model StockDocument {
   sendDocument StockDocument?      @relation("transferPair", fields: [sendDocumentId], references: [id])
   receipts     StockDocument[]     @relation("transferPair")
 
+  @@unique([companyId, number])
   @@index([companyId, kind, status])
   @@index([storeId, postingDate])
 }
 
 model StockDocumentLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId        String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id               String    @id @default(uuid()) @db.Uuid
   documentId       String    @db.Uuid
   lineNo           Int
@@ -1086,6 +1202,7 @@ model StockDocumentLine {
   batch    Batch?        @relation(fields: [batchId], references: [id])
 
   @@index([documentId])
+  @@index([companyId])
 }
 
 /// Stock history: one line per item, location and movement. Append-only
@@ -1152,6 +1269,8 @@ model StockPosition {
 }
 
 model Batch {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id              String    @id @default(uuid()) @db.Uuid
   itemId          String    @db.Uuid
   batchNumber     String
@@ -1170,10 +1289,13 @@ model Batch {
   positions BatchPosition[]
 
   @@unique([itemId, batchNumber])
+  @@index([companyId])
 }
 
 /// Quantity of a batch in a location (values are kept per item, decision 34).
 model BatchPosition {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId  String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   batchId    String   @db.Uuid
   locationId String   @db.Uuid
   quantity   Decimal  @default(0) @db.Decimal(18, 3)
@@ -1182,9 +1304,12 @@ model BatchPosition {
   batch Batch @relation(fields: [batchId], references: [id])
 
   @@id([batchId, locationId])
+  @@index([companyId])
 }
 
 model SerialNumber {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId     String       @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id            String       @id @default(uuid()) @db.Uuid
   itemId        String       @db.Uuid
   serial        String
@@ -1202,9 +1327,12 @@ model SerialNumber {
 
   @@unique([itemId, serial])
   @@index([locationId])
+  @@index([companyId])
 }
 
 model ReorderLevel {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
   itemId      String  @db.Uuid
   storeId     String  @db.Uuid
@@ -1220,6 +1348,7 @@ model ReorderLevel {
   updatedById String?  @db.Uuid
 
   @@unique([itemId, storeId])
+  @@index([companyId])
 }
 
 /// One row per company.
@@ -1285,7 +1414,7 @@ enum PurchaseDocStatus {
 model PurchaseOrder {
   id                 String               @id @default(uuid()) @db.Uuid
   companyId          String               @db.Uuid
-  number             String               @unique
+  number             String
   supplierId         String               @db.Uuid
   /// Indian business dates (rule 15).
   orderDate          DateTime             @db.Date
@@ -1323,11 +1452,14 @@ model PurchaseOrder {
   store    Store               @relation(fields: [storeId], references: [id])
   lines    PurchaseOrderLine[]
 
+  @@unique([companyId, number])
   @@index([companyId, status])
   @@index([supplierId])
 }
 
 model PurchaseOrderLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId        String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id               String   @id @default(uuid()) @db.Uuid
   orderId          String   @db.Uuid
   lineNo           Int
@@ -1363,12 +1495,13 @@ model PurchaseOrderLine {
 
   @@index([orderId])
   @@index([itemId])
+  @@index([companyId])
 }
 
 model GoodsReceipt {
   id              String             @id @default(uuid()) @db.Uuid
   companyId       String             @db.Uuid
-  number          String             @unique
+  number          String
   supplierId      String             @db.Uuid
   /// Plan 11 part 2: sale-or-return goods; owed only when sold (consignment statement).
   isConsignment   Boolean            @default(false)
@@ -1416,11 +1549,14 @@ model GoodsReceipt {
   returns  GoodsReceipt[]     @relation("receiptReturns")
   lines    GoodsReceiptLine[]
 
+  @@unique([companyId, number])
   @@index([companyId, status])
   @@index([supplierId])
 }
 
 model GoodsReceiptLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId                String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id                       String    @id @default(uuid()) @db.Uuid
   receiptId                String    @db.Uuid
   lineNo                   Int
@@ -1471,12 +1607,13 @@ model GoodsReceiptLine {
 
   @@index([receiptId])
   @@index([orderLineId])
+  @@index([companyId])
 }
 
 model SupplierBill {
   id                           String             @id @default(uuid()) @db.Uuid
   companyId                    String             @db.Uuid
-  number                       String             @unique
+  number                       String
   supplierId                   String             @db.Uuid
   kind                         SupplierBillKind
   /// The supplier's own number and date; unique per supplier per financial year.
@@ -1523,11 +1660,14 @@ model SupplierBill {
   returns  SupplierBill[]     @relation("billReturns")
   lines    SupplierBillLine[]
 
+  @@unique([companyId, number])
   @@index([companyId, status])
   @@index([supplierId, supplierBillNo])
 }
 
 model SupplierBillLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId        String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id               String  @id @default(uuid()) @db.Uuid
   billId           String  @db.Uuid
   lineNo           Int
@@ -1566,12 +1706,13 @@ model SupplierBillLine {
 
   @@index([billId])
   @@index([receiptLineId])
+  @@index([companyId])
 }
 
 model LandedCharge {
   id                String            @id @default(uuid()) @db.Uuid
   companyId         String            @db.Uuid
-  number            String            @unique
+  number            String
   postingDate       DateTime          @db.Date
   status            PurchaseDocStatus @default(draft)
   /// quantity, value or manual.
@@ -1594,10 +1735,13 @@ model LandedCharge {
   items  LandedChargeItem[]
   shares LandedChargeShare[]
 
+  @@unique([companyId, number])
   @@index([companyId, status])
 }
 
 model LandedChargeItem {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
   chargeId    String  @db.Uuid
   lineNo      Int
@@ -1607,9 +1751,13 @@ model LandedChargeItem {
   amount      Decimal @db.Decimal(16, 2)
 
   charge LandedCharge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model LandedChargeShare {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId     String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id            String  @id @default(uuid()) @db.Uuid
   chargeId      String  @db.Uuid
   receiptLineId String  @db.Uuid
@@ -1619,6 +1767,7 @@ model LandedChargeShare {
   receiptLine GoodsReceiptLine @relation(fields: [receiptLineId], references: [id])
 
   @@unique([chargeId, receiptLineId])
+  @@index([companyId])
 }
 
 model ReorderSuggestion {
@@ -1707,6 +1856,8 @@ enum PosBillStatus {
 /// Decision 56: effective-dated HSN rate list. Since 22 Oct 2026 a rate applies as soon as it is saved
 /// and may be edited (audit history); approvedAt/approvedById are kept only as history.
 model GstRate {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId     String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id            String    @id @default(uuid()) @db.Uuid
   hsnCode       String
   rate          Decimal   @db.Decimal(5, 2)
@@ -1726,10 +1877,11 @@ model GstRate {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  @@unique([hsnCode, effectiveFrom, priceFrom])
+  @@unique([companyId, hsnCode, effectiveFrom, priceFrom])
   /// PostgreSQL treats nulls as different, so this stops two plain (no price band) rates on one date.
-  @@unique([hsnCode, effectiveFrom], where: raw("\"priceFrom\" IS NULL"), map: "GstRate_hsn_date_no_band_key")
+  @@unique([companyId, hsnCode, effectiveFrom], where: raw("\"priceFrom\" IS NULL"), map: "GstRate_hsn_date_no_band_key")
   @@index([hsnCode])
+  @@index([companyId])
 }
 
 model PaymentMethod {
@@ -1788,6 +1940,8 @@ model Till {
 }
 
 model TillPaymentMethod {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   tillId          String  @db.Uuid
   paymentMethodId String  @db.Uuid
   isDefault       Boolean @default(false)
@@ -1796,10 +1950,13 @@ model TillPaymentMethod {
   paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
 
   @@id([tillId, paymentMethodId])
+  @@index([companyId])
 }
 
 /// A till computer paired with a till (pos-offline §9); the token is stored only as a hash.
 model TillDevice {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId      String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id             String    @id @default(uuid()) @db.Uuid
   tillId         String    @db.Uuid
   deviceName     String
@@ -1812,10 +1969,14 @@ model TillDevice {
   updatedAt DateTime @updatedAt
 
   till Till @relation(fields: [tillId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 /// Decisions 40 and 68: a 4–6 digit PIN, stored only as a strong hash (rule 12).
 model UserPin {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   userId      String    @id @db.Uuid
   pinHash     String
   failedCount Int       @default(0)
@@ -1823,6 +1984,8 @@ model UserPin {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 model Shift {
@@ -1856,6 +2019,8 @@ model Shift {
 }
 
 model ShiftCash {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   shiftId         String  @db.Uuid
   paymentMethodId String  @db.Uuid
   amount          Decimal @db.Decimal(16, 2)
@@ -1863,10 +2028,13 @@ model ShiftCash {
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@id([shiftId, paymentMethodId])
+  @@index([companyId])
 }
 
 /// Decision 41: cash put in or taken out during a shift.
 model CashMovement {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        String   @id @default(uuid()) @db.Uuid
   shiftId   String   @db.Uuid
   clientId  String   @db.Uuid
@@ -1881,9 +2049,12 @@ model CashMovement {
   shift Shift @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@unique([shiftId, clientId])
+  @@index([companyId])
 }
 
 model ShiftClosing {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId     String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id            String   @id @default(uuid()) @db.Uuid
   shiftId       String   @unique @db.Uuid
   closedById    String   @db.Uuid
@@ -1907,9 +2078,13 @@ model ShiftClosing {
 
   shift Shift              @relation(fields: [shiftId], references: [id])
   lines ShiftClosingLine[]
+
+  @@index([companyId])
 }
 
 model ShiftClosingLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id              String  @id @default(uuid()) @db.Uuid
   closingId       String  @db.Uuid
   paymentMethodId String  @db.Uuid
@@ -1919,6 +2094,8 @@ model ShiftClosingLine {
   difference      Decimal @db.Decimal(16, 2)
 
   closing ShiftClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model PosBill {
@@ -1926,7 +2103,7 @@ model PosBill {
   companyId          String        @db.Uuid
   tillId             String        @db.Uuid
   shiftId            String        @db.Uuid
-  number             String        @unique
+  number             String
   /// Idempotency (pos-offline §4): one bill per till + client id + kind.
   clientId           String        @db.Uuid
   kind               PosBillKind
@@ -1986,11 +2163,14 @@ model PosBill {
   payments PosPayment[]
 
   @@unique([tillId, clientId, kind])
+  @@unique([companyId, number])
   @@index([shiftId])
   @@index([companyId, businessDate])
 }
 
 model PosBillLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId        String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id               String   @id @default(uuid()) @db.Uuid
   billId           String   @db.Uuid
   lineNo           Int
@@ -2034,9 +2214,12 @@ model PosBillLine {
 
   @@index([billId])
   @@index([itemId])
+  @@index([companyId])
 }
 
 model PosPayment {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId       String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id              String  @id @default(uuid()) @db.Uuid
   billId          String  @db.Uuid
   paymentMethodId String  @db.Uuid
@@ -2046,6 +2229,8 @@ model PosPayment {
 
   bill          PosBill       @relation(fields: [billId], references: [id], onDelete: Cascade)
   paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  @@index([companyId])
 }
 
 model Offer {
@@ -2126,6 +2311,8 @@ model PosSettings {
 
 /// A manager PIN approval (decision 40): single use, short-lived, kept for the history.
 model PosApproval {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        String    @id @default(uuid()) @db.Uuid
   tokenHash String    @unique
   tillId    String    @db.Uuid
@@ -2137,10 +2324,14 @@ model PosApproval {
   usedFor   String?
 
   createdAt DateTime @default(now())
+
+  @@index([companyId])
 }
 
 /// A cashier who switched in on a till with their PIN (decision 68).
 model PosCashierToken {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        String   @id @default(uuid()) @db.Uuid
   tokenHash String   @unique
   tillId    String   @db.Uuid
@@ -2148,6 +2339,8 @@ model PosCashierToken {
   expiresAt DateTime
 
   createdAt DateTime @default(now())
+
+  @@index([companyId])
 }
 
 /// A transaction from a till that the server could not accept (pos-offline §5 "Sync problems").
@@ -2374,6 +2567,8 @@ model Journal {
 }
 
 model JournalLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
   journalId   String  @db.Uuid
   lineNo      Int
@@ -2389,6 +2584,8 @@ model JournalLine {
   remark      String?
 
   journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 /// Money received from a customer, paid to a supplier, or moved between own accounts.
@@ -2436,6 +2633,8 @@ model Payment {
 
 /// On a draft payment: which bills it will settle. Turned into Settlement links when posted.
 model PaymentAllocation {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        String  @id @default(uuid()) @db.Uuid
   paymentId String  @db.Uuid
   billType  String
@@ -2443,10 +2642,14 @@ model PaymentAllocation {
   amount    Decimal @db.Decimal(16, 2)
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 /// Bank charges, card commission, a small short payment written off.
 model PaymentDeduction {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        String  @id @default(uuid()) @db.Uuid
   paymentId String  @db.Uuid
   accountId String  @db.Uuid
@@ -2454,6 +2657,8 @@ model PaymentDeduction {
   remark    String?
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 /// An unpaid customer or supplier bill from before going live (against the temporary opening account).
@@ -2637,6 +2842,8 @@ model ImportJob {
 }
 
 model ImportRow {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id        BigInt  @id @default(autoincrement())
   jobId     String  @db.Uuid
   rowNumber Int
@@ -2652,6 +2859,7 @@ model ImportRow {
   job ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId, rowNumber])
+  @@index([companyId])
 }
 
 /// Each clearing of trial data, step by step (decision 72; blueprint 15 process 7).
@@ -2762,7 +2970,7 @@ model CustomerOrder {
   id              String    @id @default(uuid()) @db.Uuid
   companyId       String    @db.Uuid
   storeId         String    @db.Uuid
-  number          String    @unique
+  number          String
   customerId      String    @db.Uuid
   /// open, ready, collected or cancelled.
   status          String    @default("open")
@@ -2784,24 +2992,28 @@ model CustomerOrder {
 
   lines CustomerOrderLine[]
 
+  @@unique([companyId, number])
   @@index([storeId, status])
   @@index([customerId])
 }
 
 model CustomerOrderLine {
-  id       String  @id @default(uuid()) @db.Uuid
-  orderId  String  @db.Uuid
-  lineNo   Int
-  itemId   String  @db.Uuid
-  unitId   String  @db.Uuid
-  quantity Decimal @db.Decimal(18, 3)
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  orderId   String  @db.Uuid
+  lineNo    Int
+  itemId    String  @db.Uuid
+  unitId    String  @db.Uuid
+  quantity  Decimal @db.Decimal(18, 3)
   /// The agreed price per unit, GST included.
-  price    Decimal @db.Decimal(16, 4)
-  remarks  String?
+  price     Decimal @db.Decimal(16, 4)
+  remarks   String?
 
   order CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+  @@index([companyId])
 }
 
 /// Stock set aside for a ready customer order; released when collected or cancelled.
@@ -2827,7 +3039,7 @@ model AlterationJob {
   id             String    @id @default(uuid()) @db.Uuid
   companyId      String    @db.Uuid
   storeId        String    @db.Uuid
-  number         String    @unique
+  number         String
   customerId     String?   @db.Uuid
   name           String?
   phone          String?
@@ -2854,20 +3066,24 @@ model AlterationJob {
 
   lines AlterationJobLine[]
 
+  @@unique([companyId, number])
   @@index([storeId, status, promisedOn])
 }
 
 model AlterationJobLine {
-  id      String  @id @default(uuid()) @db.Uuid
-  jobId   String  @db.Uuid
-  lineNo  Int
-  itemId  String? @db.Uuid
-  garment String
-  work    String
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String  @id @default(uuid()) @db.Uuid
+  jobId     String  @db.Uuid
+  lineNo    Int
+  itemId    String? @db.Uuid
+  garment   String
+  work      String
 
   job AlterationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
+  @@index([companyId])
 }
 
 /// A supplier's sale-or-return statement: sold units become a supplier bill.
@@ -2876,7 +3092,7 @@ model ConsignmentStatement {
   companyId      String   @db.Uuid
   supplierId     String   @db.Uuid
   storeId        String   @db.Uuid
-  number         String   @unique
+  number         String
   fromDate       DateTime @db.Date
   toDate         DateTime @db.Date
   /// draft, billed or cancelled.
@@ -2891,10 +3107,13 @@ model ConsignmentStatement {
 
   lines ConsignmentStatementLine[]
 
+  @@unique([companyId, number])
   @@index([supplierId, storeId])
 }
 
 model ConsignmentStatementLine {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String  @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id          String  @id @default(uuid()) @db.Uuid
   statementId String  @db.Uuid
   itemId      String  @db.Uuid
@@ -2909,6 +3128,7 @@ model ConsignmentStatementLine {
   statement ConsignmentStatement @relation(fields: [statementId], references: [id], onDelete: Cascade)
 
   @@index([statementId])
+  @@index([companyId])
 }
 
 /// Which TallyPrime ledger each of our accounts is exported to.
@@ -3055,7 +3275,8 @@ model CompanyModule {
 
 /// What the step-by-step first-time setup has saved so far, before the company exists. One row.
 model SetupProgress {
-  id        Int      @id @default(1)
+  /// Plan 14: one row per shop.
+  companyId String   @id @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   step      Int      @default(1)
   data      Json     @default("{}")
   updatedAt DateTime @updatedAt
@@ -3138,7 +3359,7 @@ model LoyaltyEntry {
 model GiftCard {
   id            String   @id @default(uuid()) @db.Uuid
   companyId     String   @db.Uuid
-  number        String   @unique
+  number        String
   holderName    String?
   holderPhone   String?
   customerId    String?  @db.Uuid
@@ -3158,11 +3379,14 @@ model GiftCard {
 
   entries GiftCardEntry[]
 
+  @@unique([companyId, number])
   @@index([companyId, status, expiresOn])
 }
 
 /// Every load, spend, refund and expiry of a gift card.
 model GiftCardEntry {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId    String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
   id           String   @id @default(uuid()) @db.Uuid
   cardId       String   @db.Uuid
   /// load, spend, refund or expire.
@@ -3182,4 +3406,26 @@ model GiftCardEntry {
 
   @@index([cardId, createdAt])
   @@index([billId])
+  @@index([companyId])
+}
+
+// ---------------------------------------------------------------------------
+// Plan 14: above the shops (Rademics only, never seen by a shop).
+// ---------------------------------------------------------------------------
+
+/// A "Contact us / book a demo" message from the landing page.
+model Lead {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  phone     String
+  email     String?
+  shopName  String?
+  shopType  String?
+  message   String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+  /// When someone at Rademics dealt with it.
+  handledAt DateTime?
+
+  @@index([createdAt])
 }

@@ -8,7 +8,8 @@ import { Cron } from '@nestjs/schedule';
 import { addDays, businessDate, type CurrentUser, Decimal, grossMarginPercent, hasPermission, INDIA_TIME_ZONE, SUMMARY_FIGURES, type SummaryEmailSettingsInput, type SummaryFigure } from 'shared';
 import { AuditService } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { DashboardsService } from './dashboards.service.js';
 import { MailerService } from './mailer.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
@@ -31,6 +32,7 @@ export class SummaryEmailService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly common: ReportsCommon,
     private readonly sales: SalesReportsService,
@@ -109,20 +111,23 @@ export class SummaryEmailService {
 
   async tick(now = new Date()): Promise<number> {
     let sent = 0;
-    const due = await this.prisma.summaryEmailSettings.findMany({ where: { enabled: true } });
-    for (const s of due) {
-      if (indiaTime(now) < s.sendAt) continue;
-      const today = businessDate(now);
-      // The database allows one scheduled run per company per day; a second attempt stops here.
-      const claimed = await this.prisma.$executeRaw`
-        INSERT INTO "SummaryEmailRun" ("id", "companyId", "businessDate", "kind", "startedAt", "recipients")
-        VALUES (gen_random_uuid(), ${s.companyId}::uuid, ${fromIso(today)}, 'scheduled', now(), '{}')
-        ON CONFLICT DO NOTHING`;
-      if (!claimed) continue;
-      const run = await this.prisma.summaryEmailRun.findFirstOrThrow({ where: { companyId: s.companyId, businessDate: fromIso(today), kind: 'scheduled' } });
-      await this.deliver(run.id, s.companyId, s.recipientIds, s.figures as SummaryFigure[], now);
-      sent++;
-    }
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Daily summary email', async () => {
+      const due = await this.prisma.summaryEmailSettings.findMany({ where: { enabled: true } });
+      for (const s of due) {
+        if (indiaTime(now) < s.sendAt) continue;
+        const today = businessDate(now);
+        // The database allows one scheduled run per company per day; a second attempt stops here.
+        const claimed = await this.prisma.$executeRaw`
+          INSERT INTO "SummaryEmailRun" ("id", "companyId", "businessDate", "kind", "startedAt", "recipients")
+          VALUES (gen_random_uuid(), ${s.companyId}::uuid, ${fromIso(today)}, 'scheduled', now(), '{}')
+          ON CONFLICT DO NOTHING`;
+        if (!claimed) continue;
+        const run = await this.prisma.summaryEmailRun.findFirstOrThrow({ where: { companyId: s.companyId, businessDate: fromIso(today), kind: 'scheduled' } });
+        await this.deliver(run.id, s.companyId, s.recipientIds, s.figures as SummaryFigure[], now);
+        sent++;
+      }
+    });
     return sent;
   }
 

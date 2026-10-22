@@ -1,7 +1,9 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import {
   codeFromName,
+  type CurrentUser,
   defaultHsnDigits,
   indianFinancialYear,
   type ModuleKey,
@@ -15,31 +17,37 @@ import {
   type SetupProgressInput,
   setupTills,
   type ShopTypeKey,
+  type SignupInput,
   SYSTEM_ROLES,
   withAllNeeds,
 } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
-import { AuthService } from '../auth/auth.service.js';
+import { AuthService, type LoginMeta, userAccessInclude } from '../auth/auth.service.js';
 import { hashPassword } from '../auth/password.js';
-import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
-import type { Actor } from '../common/request-context.js';
+import type { Actor, AuthUser } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { ensureGstSettings } from '../gst/gst-core.service.js';
 import { applyShopType } from '../modules/shop-type.js';
-import { PartySettingsService } from '../parties/party-settings.service.js';
 import { ensurePosDefaults } from '../pos/pos-common.service.js';
 import { PosSetupService } from '../pos/pos-setup.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
-import { RolesService } from '../roles/roles.service.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
+import { enterCompany } from '../prisma/tenancy.js';
 import { StoresService } from '../stores/stores.service.js';
+import { CompanyDefaults } from './company-defaults.service.js';
 
-/** Everything first-time setup makes, from the one-page input or the guided steps. */
-interface Founding {
-  admin: { firstName: string; lastName: string | null; email: string; passwordHash: string };
+/** The owner of a new shop. */
+interface Owner {
+  firstName: string;
+  lastName: string | null;
+  email: string;
+  password: string;
+}
+
+/** The business details: from the guided steps, or the one-step setup. */
+interface ShopDetails {
   company: {
-    code: string;
     legalName: string;
     tradeName: string | null;
     pan: string | null;
@@ -55,73 +63,105 @@ interface Founding {
   financialYear: { startDate: string; endDate: string };
   store: { code: string; name: string; addressLine1?: string | null; addressLine2?: string | null; city?: string | null; pincode?: string | null; phone?: string | null; email?: string | null };
   tills: number;
-  /** Plan 12: the shop type and the modules chosen on step 5; none for the one-page setup (every module stays on). */
+  /** Plan 12: the shop type and the modules chosen; none for the one-step setup (every module stays on). */
   shop: { type: ShopTypeKey; modules: Record<ModuleKey, boolean> } | null;
 }
 
-const PROGRESS_ID = 1;
+const ALREADY_SIGNED_UP = 'An account with this email already exists. Log in instead.';
 
 /**
- * First-time setup (blueprint 02, process 1; plan 12 §3): the owner's login,
- * the company, its GSTIN and GST settings, the first financial year, the first
- * shop and its tills, and the modules for the kind of shop — all in one
- * transaction. Refused once a company exists.
+ * Plan 14: a new shop on the shared system.
  *
- * The guided setup saves its answers step by step (SetupProgress) so closing
- * the browser loses nothing; the owner's password is never saved there — it is
- * typed on the last step and sent only with "Finish".
+ * Sign-up makes the shop with its owner's login and every default (roles, units,
+ * groups, settings), and logs the owner in. The owner then goes through the
+ * guided setup (business, GST, first shop, what you sell), saved step by step so
+ * closing the browser loses nothing; "Finish" fills in the shop in one
+ * transaction. The one-step setup makes a complete shop in a single call (the
+ * API and the automated tests). Every shop is made for itself only: the request
+ * switches to the new shop before anything is written.
  */
 @Injectable()
 export class SetupService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly auth: AuthService,
-    private readonly roles: RolesService,
     private readonly company: CompanyService,
     private readonly years: FinancialYearsService,
     private readonly stores: StoresService,
-    private readonly catalogueSettings: CatalogueSettingsService,
-    private readonly partySettings: PartySettingsService,
     private readonly posSetup: PosSetupService,
+    private readonly defaults: CompanyDefaults,
   ) {}
 
+  /** For the logged-in person: does their shop still need the guided setup? */
   async status(): Promise<{ needed: boolean }> {
-    return { needed: (await this.prisma.company.count()) === 0 };
+    const company = await this.prisma.company.findFirstOrThrow({ select: { setupCompletedAt: true } });
+    return { needed: !company.setupCompletedAt };
+  }
+
+  // ---- Sign-up ----
+
+  async signup(input: SignupInput, meta: LoginMeta): Promise<{ token: string; user: CurrentUser; sessionMaxHours: number }> {
+    if (await this.system.user.findUnique({ where: { email: input.email }, select: { id: true } })) throw new ConflictException(ALREADY_SIGNED_UP);
+    const companyId = randomUUID();
+    const code = await this.freeCompanyCode(input.shopName);
+    enterCompany(companyId);
+    const owner = { firstName: input.firstName, lastName: input.lastName ?? null, email: input.email, password: input.password };
+    const userId = await this.prisma.$transaction(
+      async (tx) => {
+        const company = await tx.company.create({ data: { id: companyId, code, legalName: input.shopName, stateCode: '', phone: input.mobile ?? null, email: input.email } });
+        const admin = await this.createOwner(tx, company.id, owner, meta.ipAddress);
+        await this.audit.record(tx, { userId: admin, ipAddress: meta.ipAddress }, { action: 'create', entityType: 'company', entityId: company.id, changes: { code, legalName: company.legalName, signup: true } });
+        return admin;
+      },
+      { timeout: 60_000, maxWait: 15_000 },
+    ).catch(alreadySignedUp);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, include: userAccessInclude });
+    const settings = await this.auth.securitySettings();
+    const session = await this.auth.openSession(user, meta, { userId, ipAddress: meta.ipAddress }, settings);
+    return { ...session, sessionMaxHours: settings.sessionMaxHours };
+  }
+
+  // ---- Guided setup: answers saved step by step, for the logged-in owner ----
+
+  private assertOwner(user: AuthUser) {
+    if (!user.isOwnerAdmin) throw new ForbiddenException('Only the owner sets up the shop');
   }
 
   private async assertNotSetUp(db: Db = this.prisma) {
-    if ((await db.company.count()) > 0) throw new ConflictException('Setup has already been completed');
+    const company = await db.company.findFirstOrThrow({ select: { setupCompletedAt: true } });
+    if (company.setupCompletedAt) throw new ConflictException('Setup has already been completed');
   }
 
-  // ---- Guided setup: answers saved step by step ----
-
   /** Where the guided setup stands: the step to show and the answers so far. */
-  async progress(): Promise<{ step: number; data: SetupDraft; updatedAt: Date | null }> {
+  async progress(user: AuthUser): Promise<{ step: number; data: SetupDraft; updatedAt: Date | null }> {
+    this.assertOwner(user);
     await this.assertNotSetUp();
-    const row = await this.prisma.setupProgress.findUnique({ where: { id: PROGRESS_ID } });
+    const row = await this.prisma.setupProgress.findFirst();
     if (!row) return { step: 1, data: {}, updatedAt: null };
     // Answers saved by an older version that no longer pass are dropped step by step, never the whole lot.
-    const data = cleanDraft(row.data);
-    return { step: row.step, data, updatedAt: row.updatedAt };
+    return { step: row.step, data: cleanDraft(row.data), updatedAt: row.updatedAt };
   }
 
   /** Saves the answers so far and the step to come back to. Only checked answers are kept. */
-  async saveProgress(input: SetupProgressInput): Promise<{ step: number; data: SetupDraft; updatedAt: Date }> {
+  async saveProgress(user: AuthUser, input: SetupProgressInput): Promise<{ step: number; data: SetupDraft; updatedAt: Date }> {
+    this.assertOwner(user);
     await this.assertNotSetUp();
     const data = input.data as unknown as Prisma.InputJsonValue;
     const row = await this.prisma.setupProgress.upsert({
-      where: { id: PROGRESS_ID },
-      create: { id: PROGRESS_ID, step: input.step, data },
+      where: { companyId: user.companyId },
+      create: { step: input.step, data },
       update: { step: input.step, data },
     });
     return { step: row.step, data: input.data, updatedAt: row.updatedAt };
   }
 
-  /** "Finish": every step answered, the password typed now; creates everything at once. */
-  async finish(password: string, ipAddress: string | null): Promise<{ companyId: string; userId: string }> {
+  /** "Finish": every step answered; fills in the shop in one go. */
+  async finish(user: AuthUser, ipAddress: string | null): Promise<{ companyId: string }> {
+    this.assertOwner(user);
     await this.assertNotSetUp();
-    const row = await this.prisma.setupProgress.findUnique({ where: { id: PROGRESS_ID } });
+    const row = await this.prisma.setupProgress.findFirst();
     const parsed = setupAnswersSchema.safeParse(row?.data ?? {});
     if (!parsed.success) {
       const first = parsed.error.issues[0];
@@ -133,125 +173,140 @@ export class SetupService {
         step: step >= 0 ? step + 1 : 1,
       });
     }
-    await this.auth.assertPasswordAllowed(password);
-    return this.found(foundingFromAnswers(parsed.data, await hashPassword(password)), ipAddress, true);
-  }
-
-  // ---- One-page setup (kept for the API and the tests) ----
-
-  async run(input: SetupInput, ipAddress: string | null): Promise<{ companyId: string; userId: string }> {
-    await this.assertNotSetUp();
-    await this.auth.assertPasswordAllowed(input.admin.password);
-    const passwordHash = await hashPassword(input.admin.password);
-    return this.found(
-      {
-        admin: { firstName: input.admin.firstName, lastName: input.admin.lastName ?? null, email: input.admin.email, passwordHash },
-        company: {
-          code: input.company.code ?? codeFromName(input.company.legalName),
-          legalName: input.company.legalName,
-          tradeName: input.company.tradeName ?? null,
-          pan: input.company.pan ?? null,
-          stateCode: input.company.stateCode,
-          addressLine1: input.company.addressLine1 ?? null,
-          addressLine2: input.company.addressLine2 ?? null,
-          city: input.company.city ?? null,
-          pincode: input.company.pincode ?? null,
-          phone: input.company.phone ?? null,
-          email: input.company.email ?? null,
-        },
-        gst: input.gstRegistration ? { gstin: input.gstRegistration.gstin, legalNameOnCertificate: input.gstRegistration.legalNameOnCertificate ?? null, settings: null } : null,
-        financialYear: input.financialYear,
-        store: input.store,
-        tills: 0,
-        shop: null,
-      },
-      ipAddress,
-      false,
-    );
-  }
-
-  // ---- Creating everything, in one transaction ----
-
-  private async found(f: Founding, ipAddress: string | null, guided: boolean): Promise<{ companyId: string; userId: string }> {
-    return this.prisma.$transaction(
+    const actor: Actor = { userId: user.id, ipAddress };
+    await this.prisma.$transaction(
       async (tx) => {
-        // Two "Finish" clicks at once: the second waits here, then finds the company.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('first-time-setup'))`;
+        // Two "Finish" clicks at once: the second waits here, then finds the shop set up.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('setup-' || ${user.companyId}))`;
         await this.assertNotSetUp(tx);
-        await this.roles.ensureSystemRoles(tx);
-        const ownerRole = await tx.role.findUniqueOrThrow({ where: { code: SYSTEM_ROLES.OWNER_ADMIN } });
-
-        const admin = await tx.user.create({
-          data: {
-            email: f.admin.email,
-            firstName: f.admin.firstName,
-            lastName: f.admin.lastName,
-            passwordHash: f.admin.passwordHash,
-            mustChangePassword: false,
-            allStores: true,
-            roles: { create: [{ roleId: ownerRole.id }] },
-          },
-        });
-        await tx.user.update({ where: { id: admin.id }, data: { createdById: admin.id, updatedById: admin.id } });
-        const actor: Actor = { userId: admin.id, ipAddress };
-        await this.audit.record(tx, actor, {
-          action: 'create',
-          entityType: 'user',
-          entityId: admin.id,
-          changes: { email: admin.email, roles: [SYSTEM_ROLES.OWNER_ADMIN], allStores: true },
-        });
-
-        if (await tx.company.findUnique({ where: { code: f.company.code } })) {
-          throw new ConflictException(`Company code ${f.company.code} is already used`);
-        }
-        const company = await tx.company.create({
-          data: { ...f.company, shopType: f.shop?.type ?? null, createdById: admin.id, updatedById: admin.id },
-        });
-        await this.audit.record(tx, actor, {
-          action: 'create',
-          entityType: 'company',
-          entityId: company.id,
-          changes: { code: company.code, legalName: company.legalName, stateCode: company.stateCode, ...(f.shop ? { shopType: f.shop.type } : {}) },
-        });
-
-        let gstRegistrationId: string | null = null;
-        if (f.gst) {
-          const registration = await this.company.createGstRegistrationIn(tx, company.id, { gstin: f.gst.gstin, legalNameOnCertificate: f.gst.legalNameOnCertificate, isDefault: true }, actor);
-          gstRegistrationId = registration.id;
-        }
-        if (f.gst?.settings) await this.setGstSettings(tx, company.id, f.gst.settings, actor);
-
-        await this.years.createIn(
-          tx,
-          company.id,
-          { ...f.financialYear, isIrregular: true /* a short first year is allowed */ },
-          actor,
-          false,
-        );
-
-        const store = await this.stores.createIn(tx, company.id, { ...f.store, gstRegistrationId }, actor);
-        await this.catalogueSettings.ensureCompanyDefaults(tx, company.id);
-        await this.partySettings.ensureStandardMasters(tx);
-        await this.partySettings.ensureCompanyDefaults(tx, company.id);
-
-        if (f.tills > 0) await this.makeTills(tx, company.id, store, f.tills, !!f.shop?.modules.credit_sales, actor);
-        if (f.shop) await this.chooseModules(tx, company.id, f.shop, actor);
-
-        await this.audit.record(tx, actor, {
-          action: 'setup',
-          entityType: 'company',
-          entityId: company.id,
-          ...(guided ? { changes: { guided: true, tills: f.tills, shopType: f.shop?.type ?? null } } : {}),
-        });
-        // The saved answers held names and numbers only while setup was under way.
+        await this.fillIn(tx, user.companyId, detailsFromAnswers(parsed.data), actor, true);
         await tx.setupProgress.deleteMany({});
-        return { companyId: company.id, userId: admin.id };
       },
       { timeout: 60_000, maxWait: 15_000 },
     );
+    return { companyId: user.companyId };
   }
 
-  /** GST settings from step 3, with the usual HSN digits and e-invoicing for the turnover band (plan 08 §5). */
+  // ---- One-step setup: a complete shop in a single call (the API and the tests) ----
+
+  async run(input: SetupInput, ipAddress: string | null): Promise<{ companyId: string; userId: string }> {
+    if (await this.system.user.findUnique({ where: { email: input.admin.email }, select: { id: true } })) throw new ConflictException(ALREADY_SIGNED_UP);
+    const companyId = randomUUID();
+    const code = input.company.code ?? (await this.freeCompanyCode(input.company.legalName));
+    if (input.company.code && (await this.system.company.findUnique({ where: { code }, select: { id: true } }))) {
+      throw new ConflictException(`Company code ${code} is already used`);
+    }
+    enterCompany(companyId);
+    const details: ShopDetails = {
+      company: {
+        legalName: input.company.legalName,
+        tradeName: input.company.tradeName ?? null,
+        pan: input.company.pan ?? null,
+        stateCode: input.company.stateCode,
+        addressLine1: input.company.addressLine1 ?? null,
+        addressLine2: input.company.addressLine2 ?? null,
+        city: input.company.city ?? null,
+        pincode: input.company.pincode ?? null,
+        phone: input.company.phone ?? null,
+        email: input.company.email ?? null,
+      },
+      gst: input.gstRegistration ? { gstin: input.gstRegistration.gstin, legalNameOnCertificate: input.gstRegistration.legalNameOnCertificate ?? null, settings: null } : null,
+      financialYear: input.financialYear,
+      store: input.store,
+      tills: 0,
+      shop: null,
+    };
+    return this.prisma
+      .$transaction(
+        async (tx) => {
+          await tx.company.create({ data: { id: companyId, code, legalName: details.company.legalName, stateCode: details.company.stateCode } });
+          const userId = await this.createOwner(tx, companyId, { ...input.admin, lastName: input.admin.lastName ?? null }, ipAddress);
+          await this.audit.record(tx, { userId, ipAddress }, { action: 'create', entityType: 'company', entityId: companyId, changes: { code, legalName: details.company.legalName, stateCode: details.company.stateCode } });
+          await this.fillIn(tx, companyId, details, { userId, ipAddress }, false);
+          return { companyId, userId };
+        },
+        { timeout: 60_000, maxWait: 15_000 },
+      )
+      .catch(alreadySignedUp);
+  }
+
+  // ---- The parts ----
+
+  /** A company code no other shop uses: from the name, with a number added when taken. */
+  private async freeCompanyCode(name: string): Promise<string> {
+    const base = (codeFromName(name) || 'SHOP').slice(0, 8);
+    const taken = new Set((await this.system.company.findMany({ where: { code: { startsWith: base } }, select: { code: true } })).map((c) => c.code));
+    if (!taken.has(base)) return base;
+    for (let n = 2; ; n++) if (!taken.has(`${base}${n}`)) return `${base}${n}`;
+  }
+
+  /** The shop's defaults and its owner, who may do everything in all its shops. */
+  private async createOwner(tx: Db, companyId: string, owner: Owner, ipAddress: string | null): Promise<string> {
+    await this.defaults.ensureAll(tx, companyId);
+    await this.auth.assertPasswordAllowed(owner.password, tx);
+    const ownerRole = await tx.role.findFirstOrThrow({ where: { code: SYSTEM_ROLES.OWNER_ADMIN } });
+    const admin = await tx.user.create({
+      data: {
+        email: owner.email,
+        firstName: owner.firstName,
+        lastName: owner.lastName,
+        passwordHash: await hashPassword(owner.password),
+        mustChangePassword: false,
+        allStores: true,
+        roles: { create: [{ roleId: ownerRole.id }] },
+      },
+    });
+    await tx.user.update({ where: { id: admin.id }, data: { createdById: admin.id, updatedById: admin.id } });
+    await tx.company.update({ where: { id: companyId }, data: { createdById: admin.id, updatedById: admin.id } });
+    await this.audit.record(tx, { userId: admin.id, ipAddress }, {
+      action: 'create',
+      entityType: 'user',
+      entityId: admin.id,
+      changes: { email: admin.email, roles: [SYSTEM_ROLES.OWNER_ADMIN], allStores: true },
+    });
+    return admin.id;
+  }
+
+  /** The business details, GST, first financial year, first shop and its tills, and the modules. */
+  private async fillIn(tx: Db, companyId: string, d: ShopDetails, actor: Actor, guided: boolean): Promise<void> {
+    const company = await tx.company.update({
+      where: { id: companyId },
+      data: { ...d.company, shopType: d.shop?.type ?? null, setupCompletedAt: new Date(), updatedById: actor.userId },
+    });
+    // The guided setup fills in a shop made at sign-up; the one-step setup made it just now (already in the history).
+    if (guided) {
+      await this.audit.record(tx, actor, {
+        action: 'update',
+        entityType: 'company',
+        entityId: company.id,
+        changes: { legalName: company.legalName, stateCode: company.stateCode, ...(d.shop ? { shopType: d.shop.type } : {}) },
+      });
+    }
+
+    let gstRegistrationId: string | null = null;
+    if (d.gst) {
+      const registration = await this.company.createGstRegistrationIn(tx, companyId, { gstin: d.gst.gstin, legalNameOnCertificate: d.gst.legalNameOnCertificate, isDefault: true }, actor);
+      gstRegistrationId = registration.id;
+    }
+    if (d.gst?.settings) await this.setGstSettings(tx, companyId, d.gst.settings, actor);
+
+    await this.years.createIn(tx, companyId, { ...d.financialYear, isIrregular: true /* a short first year is allowed */ }, actor, false);
+
+    const store = await this.stores.createIn(tx, companyId, { ...d.store, gstRegistrationId }, actor);
+    await this.defaults.ensureAll(tx, companyId);
+
+    if (d.tills > 0) await this.makeTills(tx, companyId, store, d.tills, !!d.shop?.modules.credit_sales, actor);
+    if (d.shop) await this.chooseModules(tx, companyId, d.shop, actor);
+
+    await this.audit.record(tx, actor, {
+      action: 'setup',
+      entityType: 'company',
+      entityId: companyId,
+      ...(guided ? { changes: { guided: true, tills: d.tills, shopType: d.shop?.type ?? null } } : {}),
+    });
+  }
+
+  /** GST settings from the GST step, with the usual HSN digits and e-invoicing for the turnover band (plan 08 §5). */
   private async setGstSettings(tx: Db, companyId: string, s: { scheme: string; filingFrequency: string; turnoverBand: string }, actor: Actor) {
     await ensureGstSettings(tx, companyId);
     const data = {
@@ -283,12 +338,18 @@ export class SetupService {
   }
 
   /**
-   * The shop type's starting lists, and exactly the modules ticked on step 5 with what they need
+   * The shop type's starting lists, and exactly the modules ticked on the last step with what they need
    * (applyShopType of the modules service writes every switch and its history).
    */
   private async chooseModules(tx: Db, companyId: string, shop: { type: ShopTypeKey; modules: Record<ModuleKey, boolean> }, actor: Actor) {
     await applyShopType(tx, companyId, shop.type, actor, withAllNeeds(shop.modules));
   }
+}
+
+/** Two sign-ups with the same email at the same moment: the second gets the plain message. */
+function alreadySignedUp(err: unknown): never {
+  if ((err as { code?: string }).code === 'P2002' && JSON.stringify((err as { meta?: unknown }).meta ?? '').includes('email')) throw new ConflictException(ALREADY_SIGNED_UP);
+  throw err;
 }
 
 /** The saved answers, keeping each step that still passes the checks. */
@@ -301,12 +362,10 @@ function cleanDraft(raw: unknown): SetupDraft {
   return again.success ? again.data : {};
 }
 
-function foundingFromAnswers(a: SetupAnswers, passwordHash: string): Founding {
+function detailsFromAnswers(a: SetupAnswers): ShopDetails {
   const b = a.business;
   return {
-    admin: { firstName: a.you.firstName, lastName: a.you.lastName ?? null, email: a.you.email, passwordHash },
     company: {
-      code: codeFromName(b.legalName) || 'CO',
       legalName: b.legalName,
       tradeName: b.tradeName ?? null,
       pan: b.pan ?? (a.gst.registered ? a.gst.gstin.slice(2, 12) : null),

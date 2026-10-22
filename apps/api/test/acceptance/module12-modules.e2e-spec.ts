@@ -10,11 +10,11 @@ import type { App } from 'supertest/types.js';
 import { MODULE_KEYS, type ModuleKey, SHOP_TYPES, type ShopTypeKey } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
 import { invalidateModuleCache } from '../../src/modules/module-map.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let loc: Record<string, string>;
@@ -33,7 +33,7 @@ const OFF = (label: string) => `${label} is switched off in Settings → My modu
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -48,7 +48,7 @@ async function freshCompany(before?: () => Promise<void>, shopType?: ShopTypeKey
   n = 0;
   MAIN = await storeId(prisma, 'MAIN');
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'GOODS', name: 'Goods' }).expect(201)).body.id;
   listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
   await owner.post('/pos/gst-rates').send({ hsnCode: '6205', rate: '5', effectiveFrom: '2026-04-01' }).expect(201);
@@ -464,7 +464,7 @@ describe('12.5 shop types fill in settings', () => {
     expect(await prisma.variantAttributeValue.count()).toBe(values + 7);
     expect(await prisma.item.count()).toBe(items);
     expect(await prisma.item.findUnique({ where: { id: shirt.id } })).not.toBeNull();
-    const shoe = await prisma.variantAttribute.findUniqueOrThrow({ where: { code: 'SHOE-SIZE' }, include: { values: { orderBy: { sortOrder: 'asc' } } } });
+    const shoe = await prisma.variantAttribute.findFirstOrThrow({ where: { code: 'SHOE-SIZE' }, include: { values: { orderBy: { sortOrder: 'asc' } } } });
     expect(shoe.values.map((v) => v.value)).toEqual(['UK 5', 'UK 6', 'UK 7', 'UK 8', 'UK 9', 'UK 10', 'UK 11']);
     // Applying the same type again creates nothing twice.
     const again = (await owner.post('/modules/shop-type').send({ type: 'footwear', confirm: true }).expect(200)).body;

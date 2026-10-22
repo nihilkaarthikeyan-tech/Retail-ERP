@@ -4,11 +4,11 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { addDays, businessDate } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let loc: Record<string, string>;
 let MAIN: string;
@@ -21,7 +21,7 @@ const today = () => businessDate();
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -32,7 +32,7 @@ async function freshCompany() {
   owner = await setUpCompany(app, prisma);
   MAIN = await storeId(prisma, 'MAIN');
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'GROC', name: 'Grocery' }).expect(201)).body.id;
   terms = Object.fromEntries((await prisma.paymentTerms.findMany()).map((t) => [t.code, t.id]));
   supplierGroups = Object.fromEntries((await prisma.supplierGroup.findMany()).map((g) => [g.code, g.id]));

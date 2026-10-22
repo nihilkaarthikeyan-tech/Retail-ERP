@@ -105,7 +105,7 @@ export class CustomersService {
     const group = await this.masters.assertLeafCustomerGroup(this.prisma, groupId);
     const stateCode = this.checkGstin(input.gstin ?? null, input.stateCode ?? null);
     await this.checkRefs(input);
-    if (input.code && (await this.prisma.customer.findUnique({ where: { code: input.code } }))) throw new ConflictException(`Customer code ${input.code} already exists`);
+    if (input.code && (await this.prisma.customer.findFirst({ where: { code: input.code } }))) throw new ConflictException(`Customer code ${input.code} already exists`);
     if (input.mobile) await this.checkDuplicateMobile(company.id, input.mobile, null, input.confirmDuplicate ?? false);
 
     const created = await this.prisma.$transaction(async (tx) => {

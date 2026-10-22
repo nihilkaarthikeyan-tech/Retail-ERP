@@ -1,10 +1,11 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { type ChangePasswordInput, type CurrentUser, type LoginInput, type PermissionKey, SYSTEM_ROLES } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor, AuthUser } from '../common/request-context.js';
 import type { Prisma, SecuritySettings } from '../generated/prisma/client.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
+import { enterCompany } from '../prisma/tenancy.js';
 import { hashPassword, passwordProblem, verifyPassword } from './password.js';
 import { absoluteExpiry, hashSessionToken, isSessionLive, lockoutUntil, newSessionToken } from './session.js';
 
@@ -27,10 +28,12 @@ export interface LoginMeta {
 @Injectable()
 export class AuthService {
   private readonly allowedOrigins: string[];
+  private readonly log = new Logger(AuthService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly system: SystemPrisma,
   ) {
     this.allowedOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000').split(',').map((o) => o.trim());
   }
@@ -40,8 +43,8 @@ export class AuthService {
   }
 
   async securitySettings(db: Db = this.prisma): Promise<SecuritySettings> {
-    const row = await db.securitySettings.findUnique({ where: { id: 1 } });
-    if (!row) throw new Error('SecuritySettings row 1 is missing; run the migrations');
+    const row = await db.securitySettings.findFirst();
+    if (!row) throw new Error("The shop's security settings are missing");
     return row;
   }
 
@@ -50,16 +53,25 @@ export class AuthService {
   async login(input: LoginInput, meta: LoginMeta): Promise<{ token: string; user: CurrentUser }> {
     const now = new Date();
     const actor: Actor = { userId: null, ipAddress: meta.ipAddress };
-    const user = await this.prisma.user.findUnique({ where: { email: input.email }, include: userAccessInclude });
+    // Plan 14: which shop the email belongs to is looked up across all shops; the rest of
+    // the login then works for that shop only.
+    const found = await this.system.user.findUnique({ where: { email: input.email }, select: { id: true, companyId: true, company: { select: { active: true } } } });
+    if (!found) {
+      // No shop to keep the history in: written to the server log instead.
+      this.log.warn(`Login with an unknown email from ${meta.ipAddress ?? 'unknown address'}`);
+      throw new UnauthorizedException(WRONG_LOGIN);
+    }
+    enterCompany(found.companyId);
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: found.id }, include: userAccessInclude });
 
-    if (!user || !user.active) {
+    if (!user.active || !found.company.active) {
       await this.audit.recordNow(actor, {
         action: 'login_failed',
         entityType: 'user',
-        entityId: user?.id ?? null,
-        changes: { email: input.email, reason: user ? 'inactive' : 'unknown_email' },
+        entityId: user.id,
+        changes: { email: input.email, reason: user.active ? 'shop_switched_off' : 'inactive' },
       });
-      throw new UnauthorizedException(WRONG_LOGIN);
+      throw new UnauthorizedException(user.active ? 'This shop is switched off. Contact Retail ERP support.' : WRONG_LOGIN);
     }
     actor.userId = user.id;
 
@@ -85,6 +97,11 @@ export class AuthService {
       throw new UnauthorizedException(WRONG_LOGIN);
     }
 
+    return this.openSession(user, meta, actor, settings, now);
+  }
+
+  /** A new session for a person whose password is checked (login) or just chosen (sign-up). */
+  async openSession(user: UserWithAccess, meta: LoginMeta, actor: Actor, settings: SecuritySettings, now = new Date()): Promise<{ token: string; user: CurrentUser }> {
     const token = newSessionToken();
     await this.prisma.$transaction(async (tx) => {
       if (settings.singleSessionPerUser) {
@@ -107,16 +124,16 @@ export class AuthService {
       });
       await this.audit.record(tx, actor, { action: 'login', entityType: 'user', entityId: user.id });
     });
-
     return { token, user: this.toCurrentUser(user) };
   }
 
   async userForSessionToken(token: string): Promise<AuthUser | null> {
     const now = new Date();
-    const session = await this.prisma.session.findUnique({
-      where: { tokenHash: hashSessionToken(token) },
-      include: { user: { include: userAccessInclude } },
-    });
+    // Plan 14: the session says which shop the request works for (looked up across all shops).
+    const found = await this.system.session.findUnique({ where: { tokenHash: hashSessionToken(token) }, select: { id: true, companyId: true, company: { select: { active: true } } } });
+    if (!found || !found.company.active) return null;
+    enterCompany(found.companyId);
+    const session = await this.prisma.session.findUnique({ where: { id: found.id }, include: { user: { include: userAccessInclude } } });
     if (!session || !session.user.active) return null;
 
     const settings = await this.securitySettings();
@@ -126,7 +143,7 @@ export class AuthService {
     if (now.getTime() - session.lastActiveAt.getTime() > ACTIVITY_WRITE_INTERVAL_MS) {
       await this.prisma.session.update({ where: { id: session.id }, data: { lastActiveAt: now } });
     }
-    return { ...this.toCurrentUser(session.user), sessionId: session.id };
+    return { ...this.toCurrentUser(session.user), sessionId: session.id, companyId: session.companyId };
   }
 
   async logout(user: AuthUser, actor: Actor): Promise<void> {

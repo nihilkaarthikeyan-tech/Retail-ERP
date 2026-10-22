@@ -4,11 +4,11 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { addDays, businessDate, SYSTEM_ROLES } from 'shared';
 import { ItemsService } from '../../src/items/items.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let units: Record<string, string>;
 let riceGroupId: string;
@@ -17,7 +17,7 @@ let buyingListId: string;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
   owner = await setUpCompany(app, prisma);
   units = Object.fromEntries((await prisma.unit.findMany()).map((u) => [u.code, u.id]));
 
@@ -132,7 +132,7 @@ describe('2.3 A style with sizes and colours', () => {
   it('refuses prices and barcodes on the style, accepts them on a variant', async () => {
     await owner.post('/prices').send({ priceListId: sellingListId, itemId: shirt.id, price: '499' }).expect(400);
     await owner.post(`/items/${shirt.id}/barcodes`).send({ code: 'SHIRT-BC-1' }).expect(400);
-    const redM = (await prisma.item.findUniqueOrThrow({ where: { code: 'SHIRT-RED-M' } })).id;
+    const redM = (await prisma.item.findFirstOrThrow({ where: { code: 'SHIRT-RED-M' } })).id;
     await owner.post('/prices').send({ priceListId: sellingListId, itemId: redM, price: '499' }).expect(201);
     await owner.post(`/items/${redM}/barcodes`).send({ code: 'SHIRT-RED-M-BC' }).expect(201);
     expect((await owner.get('/catalogue/scan/SHIRT').expect(200)).body).toMatchObject({ usable: false, reason: expect.stringMatching(/style/) });
@@ -147,8 +147,8 @@ describe('2.3 A style with sizes and colours', () => {
 describe('2.4 Fractions only for weight, length and volume', () => {
   it('refuses 1.5 pieces, accepts 1.5 kg, and will not allow fractions on PCS', async () => {
     const unitsService = app.get(ItemsService)['units'] as { assertQuantityAllowed: (u: { code: string; allowsFractions: boolean }, q: string) => void };
-    const pcs = await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } });
-    const kg = await prisma.unit.findUniqueOrThrow({ where: { code: 'KG' } });
+    const pcs = await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } });
+    const kg = await prisma.unit.findFirstOrThrow({ where: { code: 'KG' } });
     expect(() => unitsService.assertQuantityAllowed(pcs, '1.5')).toThrow(/whole numbers/);
     expect(() => unitsService.assertQuantityAllowed(pcs, '2')).not.toThrow();
     expect(() => unitsService.assertQuantityAllowed(kg, '1.5')).not.toThrow();

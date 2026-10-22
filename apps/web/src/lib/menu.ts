@@ -40,7 +40,7 @@ export function areaOf(section: string | undefined): MenuArea {
 }
 
 export const MENU: MenuEntry[] = [
-  { href: "/", label: "Dashboard", icon: "dashboard" },
+  { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
   // Module 2
   { href: "/items", label: "Items", permissions: ["catalogue.view"], section: "Catalogue", icon: "box" },
   { href: "/catalogue/item-groups", label: "Item groups", permissions: ["catalogue.view"], section: "Catalogue", icon: "folder" },
@@ -154,7 +154,7 @@ export function visibleMenu(user: CurrentUser | null, modules?: Partial<Record<M
 
 /** Entry is active for its own path and for sub-paths (except the dashboard). */
 export function isActive(entry: MenuEntry, pathname: string): boolean {
-  if (entry.href === "/") return pathname === "/";
+  if (entry.href === "/dashboard") return pathname === "/dashboard";
   if (entry.href === "/history" || entry.exact) return pathname === entry.href;
   const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   if (!under(entry.href)) return false;

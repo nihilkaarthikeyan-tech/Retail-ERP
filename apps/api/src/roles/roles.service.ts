@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { BadRequestException, ConflictException, Injectable, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   type CreateRoleInput,
   PERMISSIONS,
@@ -19,15 +19,12 @@ const roleInclude = { permissions: { select: { permissionKey: true } } } satisfi
 type RoleRow = Prisma.RoleGetPayload<{ include: typeof roleInclude }>;
 
 @Injectable()
-export class RolesService implements OnModuleInit {
+export class RolesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    await this.ensureSystemRoles(this.prisma);
-  }
 
   /**
    * Creates any of the six system roles that are missing (decision 71).
@@ -65,7 +62,7 @@ export class RolesService implements OnModuleInit {
   }
 
   async create(input: CreateRoleInput, actor: Actor) {
-    if (await this.prisma.role.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.role.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`A role with code "${input.code}" already exists`);
     }
     const role = await this.prisma.$transaction(async (tx) => {

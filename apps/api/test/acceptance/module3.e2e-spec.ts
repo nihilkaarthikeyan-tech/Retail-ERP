@@ -5,11 +5,11 @@ import type { App } from 'supertest/types.js';
 import { businessDate, SYSTEM_ROLES } from 'shared';
 import { CustomersService } from '../../src/parties/customers.service.js';
 import { SuppliersService } from '../../src/parties/suppliers.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let groups: Record<string, string>;
 let supplierGroups: Record<string, string>;
@@ -17,7 +17,7 @@ let terms: Record<string, string>;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
   owner = await setUpCompany(app, prisma);
   groups = Object.fromEntries((await prisma.customerGroup.findMany()).map((g) => [g.code, g.id]));
   supplierGroups = Object.fromEntries((await prisma.supplierGroup.findMany()).map((g) => [g.code, g.id]));
@@ -90,7 +90,7 @@ describe('3.2 A business customer with a GSTIN in another state', () => {
     const row = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.id } });
     expect(await customers.gstTreatmentFor(prisma, row)).toBe('other_state');
 
-    const local = await prisma.customer.findUniqueOrThrow({ where: { code: 'CUS-000001' } });
+    const local = await prisma.customer.findFirstOrThrow({ where: { code: 'CUS-000001' } });
     expect(await customers.gstTreatmentFor(prisma, local)).toBe('unregistered');
 
     const mismatch = await owner.post('/customers').send({ name: 'Wrong state', gstin: '29AAACR1234A1ZD', stateCode: '33' }).expect(400);
@@ -233,7 +233,7 @@ describe('3.8 Group defaults are copied', () => {
 describe('customer prices now need a real customer', () => {
   it('a supplier price links to the supplier record', async () => {
     const group = (await owner.post('/catalogue/item-groups').send({ code: 'MISC', name: 'Misc' }).expect(201)).body;
-    const pcs = await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } });
+    const pcs = await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } });
     const item = (await owner.post('/items').send({ name: 'Linked item', itemGroupId: group.id, baseUnitId: pcs.id }).expect(201)).body;
     const buying = (await prisma.priceList.findFirstOrThrow({ where: { code: 'STD-BUY' } })).id;
     const supplier = (await prisma.supplier.findFirstOrThrow({ where: { code: 'SUP-000001' } })).id;

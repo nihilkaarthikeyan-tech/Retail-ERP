@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Plan 12, scenario 12.6 on screen: the guided setup checks and saves each
-// step, comes back where it was left with the answers kept, and sends the
-// password only with "Finish setup".
+// step and comes back where it was left with the answers kept. Plan 14: the owner
+// signed up first and is logged in, so the wizard asks neither for the owner nor a password.
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { suggestedModules } from "shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -31,7 +31,6 @@ function mockApi(routes: Record<string, Route>) {
 const writes = (fn: ReturnType<typeof vi.fn>) =>
   fn.mock.calls.filter((c) => ((c[1] as RequestInit | undefined)?.method ?? "GET") !== "GET").map((c) => ({ path: new URL(String(c[0])).pathname, body: JSON.parse(String((c[1] as RequestInit).body)) }));
 
-const YOU = { firstName: "Lakshmi", lastName: null, email: "lakshmi@fancy.test" };
 const BUSINESS = { legalName: "Lakshmi Fancy Stores", tradeName: null, pan: "AAACR1234A", stateCode: "33", addressLine1: null, addressLine2: null, city: "Chennai", pincode: null, phone: null, email: null, financialYear: { startDate: "2026-04-01", endDate: "2027-03-31" } };
 const GST = { registered: true, gstin: "33AAACR1234A1ZA", legalNameOnCertificate: null, scheme: "regular", filingFrequency: "quarterly", turnoverBand: "up_to_5cr" };
 const SHOP = { name: "Anna Nagar", code: "ANNA", tills: 2 };
@@ -41,6 +40,7 @@ function server(start: { step: number; data: Record<string, unknown> }) {
   const state = { ...start };
   const fn = mockApi({
     "GET /setup/status": () => ({ status: 200, body: { needed: true } }),
+    "GET /company": () => ({ status: 200, body: { legalName: "Lakshmi Fancy" } }),
     "GET /setup/progress": () => ({ status: 200, body: state }),
     "PUT /setup/progress": (b) => {
       Object.assign(state, b);
@@ -60,43 +60,49 @@ afterEach(() => {
 const type = (label: string | RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 describe("guided setup (12.6)", () => {
-  it("checks step 1 before saving, then saves it and moves on; no password is asked or sent", async () => {
+  it("checks step 1 before saving, then saves it and moves on; no owner or password is asked", async () => {
     const { fn } = server({ step: 1, data: {} });
     render(<SetupWizard />);
-    expect(await screen.findByText("Step 1 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 1 of 5")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Your business" })).toBeTruthy();
     expect(screen.queryByLabelText(/password/i)).toBeNull();
+    // The shop name typed at sign-up starts the legal name.
+    expect((screen.getByLabelText(/^Legal name/) as HTMLInputElement).value).toBe("Lakshmi Fancy");
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Please correct the highlighted fields.")).toBeTruthy();
     expect(writes(fn)).toEqual([]);
 
-    type(/First name/, "Lakshmi");
-    type(/Email/, "lakshmi@fancy.test");
+    type(/^Legal name/, "Lakshmi Fancy Stores");
+    type(/^State/, "33");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Step 2 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 2 of 5")).toBeTruthy();
     expect(screen.getByText(/Saved\. You can close the browser/)).toBeTruthy();
-    expect(writes(fn)).toEqual([{ path: "/setup/progress", body: { step: 2, data: { you: YOU } } }]);
+    const [saved] = writes(fn);
+    expect(saved.path).toBe("/setup/progress");
+    expect(saved.body.step).toBe(2);
+    expect(saved.body.data.business).toMatchObject({ legalName: "Lakshmi Fancy Stores", stateCode: "33" });
     expect(JSON.stringify(writes(fn))).not.toMatch(/password/i);
   });
 
-  it("comes back at step 4 with the earlier answers kept after the browser was closed", async () => {
-    server({ step: 4, data: { you: YOU, business: BUSINESS, gst: GST } });
+  it("comes back at step 3 with the earlier answers kept after the browser was closed", async () => {
+    server({ step: 3, data: { business: BUSINESS, gst: GST } });
     render(<SetupWizard />);
-    expect(await screen.findByText("Step 4 of 6")).toBeTruthy();
-    expect(screen.getByText(/Welcome back\. Your earlier answers were kept, so you carry on from step 4/)).toBeTruthy();
+    expect(await screen.findByText("Step 3 of 5")).toBeTruthy();
+    expect(screen.getByText(/Welcome back\. Your earlier answers were kept, so you carry on from step 3/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Your first shop" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(await screen.findByText("Step 3 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 2 of 5")).toBeTruthy();
     expect((screen.getByLabelText(/^GSTIN/) as HTMLInputElement).value).toBe("33AAACR1234A1ZA");
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect((screen.getByLabelText(/Legal name/) as HTMLInputElement).value).toBe("Lakshmi Fancy Stores");
   });
 
   it("checks the GSTIN's last character, and allows 'not registered yet'", async () => {
-    const { fn } = server({ step: 3, data: { you: YOU, business: BUSINESS } });
+    const { fn } = server({ step: 2, data: { business: BUSINESS } });
     render(<SetupWizard />);
-    expect(await screen.findByText("Step 3 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 2 of 5")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Choose whether the business has a GSTIN.")).toBeTruthy();
 
@@ -109,14 +115,14 @@ describe("guided setup (12.6)", () => {
 
     fireEvent.click(screen.getByLabelText(/Not registered yet/));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Step 4 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 3 of 5")).toBeTruthy();
     expect(writes(fn)[0].body.data.gst).toEqual({ registered: false });
   });
 
-  it("step 5: a shop type ticks its modules; a module that needs another brings it, and says so", async () => {
-    const { fn } = server({ step: 5, data: { you: YOU, business: BUSINESS, gst: GST, shop: SHOP } });
+  it("step 4: a shop type ticks its modules; a module that needs another brings it, and says so", async () => {
+    const { fn } = server({ step: 4, data: { business: BUSINESS, gst: GST, shop: SHOP } });
     render(<SetupWizard />);
-    expect(await screen.findByText("Step 5 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 4 of 5")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Fancy and gift/ }));
     expect((screen.getByLabelText(/^Offers and coupons/) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText(/^Sizes and colours/) as HTMLInputElement).checked).toBe(false);
@@ -130,36 +136,30 @@ describe("guided setup (12.6)", () => {
     expect((screen.getByLabelText(/^Sizes and colours/) as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByLabelText(/^Home delivery/));
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    expect(await screen.findByText("Step 6 of 6")).toBeTruthy();
+    expect(await screen.findByText("Step 5 of 5")).toBeTruthy();
     expect(writes(fn)[0].body.data.sell).toEqual({ shopType: "clothing", modules: { ...suggestedModules("clothing"), delivery: false } });
   });
 
-  it("the last step shows a summary, asks for the password twice and sends only the password", async () => {
+  it("the last step shows a summary and finishes with nothing more to type", async () => {
     const sell = { shopType: "fancy", modules: suggestedModules("fancy") };
-    const { fn } = server({ step: 6, data: { you: YOU, business: BUSINESS, gst: GST, shop: SHOP, sell } });
+    const { fn } = server({ step: 5, data: { business: BUSINESS, gst: GST, shop: SHOP, sell } });
     render(<SetupWizard />);
-    expect(await screen.findByText("Step 6 of 6")).toBeTruthy();
-    expect(screen.getByText("lakshmi@fancy.test")).toBeTruthy();
+    expect(await screen.findByText("Step 5 of 5")).toBeTruthy();
+    expect(screen.getByText("Lakshmi Fancy Stores")).toBeTruthy();
     expect(screen.getByText("Anna Nagar (ANNA)")).toBeTruthy();
     expect(screen.getByText("Till 1, Till 2, each taking cash, card and UPI")).toBeTruthy();
     expect(screen.getByText("Fancy and gift")).toBeTruthy();
     expect(screen.getByText("Set your go-live date")).toBeTruthy();
+    expect(screen.queryByLabelText(/password/i)).toBeNull();
 
-    type(/^Password/, "Lakshmi-pass-2026");
-    type(/^Type it again/, "Lakshmi-pass-2025");
     fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
-    expect(await screen.findByText("The two passwords are not the same.")).toBeTruthy();
-    expect(writes(fn)).toEqual([]);
-
-    type(/^Type it again/, "Lakshmi-pass-2026");
-    fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login?setup=done"));
-    expect(writes(fn)).toEqual([{ path: "/setup/finish", body: { password: "Lakshmi-pass-2026" } }]);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
+    expect(writes(fn)).toEqual([{ path: "/setup/finish", body: {} }]);
   });
 
-  it("sends a visitor to the login page once setup is done", async () => {
+  it("sends the owner to the dashboard once setup is done", async () => {
     mockApi({ "GET /setup/status": () => ({ status: 200, body: { needed: false } }) });
     render(<SetupWizard />);
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/login"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
   });
 });

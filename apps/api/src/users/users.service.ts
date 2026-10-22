@@ -93,7 +93,7 @@ export class UsersService {
     // The business must always keep at least one active Owner/Admin.
     const wasOwner = before.active && before.roles.some((r) => r.role.code === SYSTEM_ROLES.OWNER_ADMIN && r.role.active);
     if (wasOwner) {
-      const ownerRole = await this.prisma.role.findUniqueOrThrow({ where: { code: SYSTEM_ROLES.OWNER_ADMIN } });
+      const ownerRole = await this.prisma.role.findFirstOrThrow({ where: { code: SYSTEM_ROLES.OWNER_ADMIN } });
       const staysOwner = input.active !== false && (!access || access.roleIds.includes(ownerRole.id));
       if (!staysOwner) {
         const otherOwners = await this.prisma.user.count({

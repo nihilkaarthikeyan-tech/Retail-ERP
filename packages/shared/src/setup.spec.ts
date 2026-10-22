@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { describe, expect, it } from 'vitest';
-import { setupAnswersSchema, setupDraftSchema, setupGstSchema, setupProgressSchema, setupSellSchema, setupYouSchema } from './schemas/setup.js';
+import { setupAnswersSchema, setupDraftSchema, setupGstSchema, setupProgressSchema, setupSellSchema, signupSchema } from './schemas/setup.js';
 import { changeableHere, matchesSearch, SETTINGS, SETTINGS_SECTIONS, SETTINGS_SOURCES } from './settings-centre.js';
 import { GETTING_STARTED_STEPS, indianFinancialYear, SETUP_STEPS, setupTills, suggestedModules, withAllNeeds } from './setup.js';
 
@@ -8,7 +8,7 @@ const GST = { registered: true, gstin: '33AAACR1234A1ZA', scheme: 'regular', fil
 
 describe('guided setup rules (plan 12 §3)', () => {
   it('has six steps, the last one only a summary', () => {
-    expect(SETUP_STEPS.map((s) => s.key)).toEqual(['you', 'business', 'gst', 'shop', 'sell', 'done']);
+    expect(SETUP_STEPS.map((s) => s.key)).toEqual(['business', 'gst', 'shop', 'sell', 'done']);
   });
 
   it('the current Indian financial year follows the Indian date, not UTC', () => {
@@ -17,9 +17,11 @@ describe('guided setup rules (plan 12 §3)', () => {
     expect(indianFinancialYear(new Date('2027-03-31T18:00:00Z'))).toEqual({ startDate: '2026-04-01', endDate: '2027-03-31' });
   });
 
-  it('never keeps a password in the saved answers', () => {
-    const you = setupYouSchema.parse({ firstName: 'Lakshmi', email: 'L@Fancy.test', password: 'secret-123456' });
-    expect(you).toEqual({ firstName: 'Lakshmi', email: 'l@fancy.test' });
+  it('plan 14: sign-up takes the owner and the shop name; the email is kept in small letters', () => {
+    const s = signupSchema.parse({ firstName: 'Lakshmi', email: 'L@Fancy.test', mobile: '9840012345', password: 'secret-123456', shopName: ' Sri Lakshmi Fancy ' });
+    expect(s).toEqual({ firstName: 'Lakshmi', email: 'l@fancy.test', mobile: '9840012345', password: 'secret-123456', shopName: 'Sri Lakshmi Fancy' });
+    expect(signupSchema.safeParse({ ...s, mobile: '12345' }).success).toBe(false);
+    expect(signupSchema.safeParse({ ...s, shopName: '' }).success).toBe(false);
   });
 
   it('checks the GSTIN with its check character and the return rules for the turnover', () => {
@@ -59,10 +61,10 @@ describe('guided setup rules (plan 12 §3)', () => {
     expect(setupTills(0)).toEqual([]);
   });
 
-  it('progress is a step from 1 to 6 with checked answers; finishing needs every step', () => {
-    expect(setupProgressSchema.safeParse({ step: 7, data: {} }).success).toBe(false);
-    expect(setupProgressSchema.safeParse({ step: 2, data: { you: { firstName: 'A', email: 'a@b.test' } } }).success).toBe(true);
-    expect(setupAnswersSchema.safeParse({ you: { firstName: 'A', email: 'a@b.test' } }).success).toBe(false);
+  it('progress is a step from 1 to 5 with checked answers; finishing needs every step', () => {
+    expect(setupProgressSchema.safeParse({ step: 6, data: {} }).success).toBe(false);
+    expect(setupProgressSchema.safeParse({ step: 2, data: { gst: { registered: false } } }).success).toBe(true);
+    expect(setupAnswersSchema.safeParse({ gst: { registered: false } }).success).toBe(false);
   });
 
   it('the checklist has the eight steps of plan 12 §4, each with its screen', () => {

@@ -29,4 +29,6 @@ export function useTestDatabase(): void {
   process.env.SUMMARY_EMAIL_SCHEDULE = 'off';
   // Plan 13: the nightly points and gift card expiry runs only when a test calls it.
   process.env.EXPIRY_SCHEDULE = 'off';
+  // Plan 14: code a test calls directly (outside a request) works for the first shop.
+  process.env.TEST_DEFAULT_SHOP = 'first';
 }

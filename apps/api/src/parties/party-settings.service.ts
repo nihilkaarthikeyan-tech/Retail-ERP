@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Decimal, type UpdatePartySettingsInput } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
@@ -30,25 +30,13 @@ const SUPPLIER_GROUPS = [
 ];
 
 @Injectable()
-export class PartySettingsService implements OnModuleInit {
-  private readonly log = new Logger(PartySettingsService.name);
-
+export class PartySettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly company: CompanyService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.ensureStandardMasters(this.prisma);
-      for (const c of await this.prisma.company.findMany({ select: { id: true } })) {
-        await this.ensureCompanyDefaults(this.prisma, c.id);
-      }
-    } catch (err) {
-      this.log.error('Could not ensure party defaults', err instanceof Error ? err.stack : String(err));
-    }
-  }
 
   /**
    * Idempotent: standard payment terms and starting groups (also in the migration).
@@ -90,9 +78,9 @@ export class PartySettingsService implements OnModuleInit {
    * Safe when several requests ask at the same moment: rows that already exist are skipped, never an error.
    */
   async ensureCompanyDefaults(db: Db, companyId: string): Promise<PartySettings> {
-    const retail = await db.customerGroup.findUnique({ where: { code: 'RETAIL' } });
-    const local = await db.supplierGroup.findUnique({ where: { code: 'LOCAL' } });
-    const cash = await db.paymentTerms.findUnique({ where: { code: 'CASH' } });
+    const retail = await db.customerGroup.findFirst({ where: { code: 'RETAIL' } });
+    const local = await db.supplierGroup.findFirst({ where: { code: 'LOCAL' } });
+    const cash = await db.paymentTerms.findFirst({ where: { code: 'CASH' } });
     await db.partySettings.createMany({
       data: [
         {
@@ -112,7 +100,7 @@ export class PartySettingsService implements OnModuleInit {
         data: [{ companyId, code, name: 'Walk-in customer', customerGroupId: retail.id, isWalkIn: true, paymentTermsId: cash?.id ?? null }],
         skipDuplicates: true,
       });
-      const walkIn = await db.customer.findUniqueOrThrow({ where: { code } });
+      const walkIn = await db.customer.findFirstOrThrow({ where: { code } });
       // Every caller links the same customer, so a second update at the same moment changes nothing.
       settings = await db.partySettings.update({ where: { companyId }, data: { walkInCustomerId: walkIn.id } });
     }

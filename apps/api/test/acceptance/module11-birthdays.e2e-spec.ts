@@ -7,17 +7,17 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { excelSerialToIso } from 'shared';
 import { readXlsx, type Sheet, writeXlsx } from '../../src/imports/spreadsheet.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, OWNER, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let customerGroups: Record<string, string>;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
   owner = await setUpCompany(app, prisma);
   customerGroups = Object.fromEntries((await prisma.customerGroup.findMany()).map((g) => [g.code, g.id]));
 });
@@ -136,7 +136,7 @@ describe('11.19 birthdays and anniversaries of a customer added at the till', ()
   beforeAll(async () => {
     const MAIN = await storeId(prisma, 'MAIN');
     const loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-    const pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+    const pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
     const listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
     await owner.post('/pos/gst-rates').send({ hsnCode: '3401', rate: '18', effectiveFrom: '2026-04-01' }).expect(201);
     const groupId = (await owner.post('/catalogue/item-groups').send({ code: 'SOAP', name: 'Soap' }).expect(201)).body.id;

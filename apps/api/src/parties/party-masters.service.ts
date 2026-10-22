@@ -65,7 +65,7 @@ export class PartyMastersService {
   }
 
   async createTerms(input: CreatePaymentTermsInput, actor: Actor) {
-    if (await this.prisma.paymentTerms.findUnique({ where: { code: input.code } })) throw new ConflictException(`Payment terms ${input.code} already exist`);
+    if (await this.prisma.paymentTerms.findFirst({ where: { code: input.code } })) throw new ConflictException(`Payment terms ${input.code} already exist`);
     const problem = sharesProblem(input.parts);
     if (problem) throw new BadRequestException(problem);
     const created = await this.prisma.$transaction(async (tx) => {
@@ -118,7 +118,7 @@ export class PartyMastersService {
   }
 
   async createCustomerGroup(input: CreateCustomerGroupInput, actor: Actor) {
-    if (await this.prisma.customerGroup.findUnique({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
+    if (await this.prisma.customerGroup.findFirst({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
     const parent = input.parentId ? await this.prisma.customerGroup.findUnique({ where: { id: input.parentId } }) : null;
     if (input.parentId && !parent) throw new NotFoundException('Parent group not found');
     if (parent && (await this.prisma.customer.count({ where: { customerGroupId: parent.id } })) > 0) {
@@ -181,7 +181,7 @@ export class PartyMastersService {
   }
 
   async createSupplierGroup(input: CreateSupplierGroupInput, actor: Actor) {
-    if (await this.prisma.supplierGroup.findUnique({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
+    if (await this.prisma.supplierGroup.findFirst({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
     const parent = input.parentId ? await this.prisma.supplierGroup.findUnique({ where: { id: input.parentId } }) : null;
     if (input.parentId && !parent) throw new NotFoundException('Parent group not found');
     if (parent && (await this.prisma.supplier.count({ where: { supplierGroupId: parent.id } })) > 0) {

@@ -33,7 +33,8 @@ import { postingInstant } from '../inventory/stock-documents.service.js';
 import { StockEngine } from '../inventory/stock-engine.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { GoodsReceiptsService, type ReceiptHeader, type ResolvedReceiptLine } from './goods-receipts.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { PurchasePostings } from './purchase-postings.service.js';
@@ -91,6 +92,7 @@ export class SupplierBillsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly numbering: NumberingService,
     private readonly common: PurchaseCommon,
@@ -841,12 +843,15 @@ export class SupplierBillsService {
 
   @Cron('10 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
-    try {
-      const n = await this.releaseEndedHolds(businessDate());
-      if (n) this.log.log(`Released ${n} supplier bill hold(s)`);
-    } catch (err) {
-      this.log.error('Nightly bill-hold release failed', err instanceof Error ? err.stack : String(err));
-    }
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Nightly bill-hold release', async () => {
+      try {
+        const n = await this.releaseEndedHolds(businessDate());
+        if (n) this.log.log(`Released ${n} supplier bill hold(s)`);
+      } catch (err) {
+        this.log.error('Nightly bill-hold release failed', err instanceof Error ? err.stack : String(err));
+      }
+    });
   }
 
   // ---- Debit notes (returns against a bill) ----

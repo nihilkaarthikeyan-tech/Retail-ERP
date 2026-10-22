@@ -8,9 +8,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import type { SetupInput } from 'shared';
 import { AppModule } from '../src/app.module.js';
-import { AuditService } from '../src/audit/audit.service.js';
-import { UnitsService } from '../src/catalogue/units.service.js';
-import { PrismaService } from '../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../src/prisma/prisma.service.js';
 
 export async function createTestApp(): Promise<INestApplication<App>> {
   const moduleFixture = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -21,8 +19,8 @@ export async function createTestApp(): Promise<INestApplication<App>> {
   return app;
 }
 
-/** Empties every table (TRUNCATE is allowed on the history table; row deletes are not). */
-export async function resetDatabase(prisma: PrismaService): Promise<void> {
+/** Empties every table, for every shop (TRUNCATE is allowed on the history table; row deletes are not). */
+export async function resetDatabase(prisma: SystemPrisma): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "AuditLog", "Session", "UserStore", "UserRole", "RolePermission", "Role", "User",
@@ -48,8 +46,7 @@ export async function resetDatabase(prisma: PrismaService): Promise<void> {
       "LoyaltyEntry", "LoyaltyTier", "LoyaltySettings", "GiftCardEntry", "GiftCard",
       "Company", "SecuritySettings"
     RESTART IDENTITY CASCADE`);
-  await prisma.securitySettings.create({ data: { id: 1 } });
-  await new UnitsService(prisma, new AuditService(prisma)).ensureStandardUnits(prisma);
+  // Plan 14: every default (units, roles, settings) is made per shop when the shop is set up.
 }
 
 export const OWNER = {
@@ -86,16 +83,16 @@ export async function login(app: INestApplication<App>, email: string, password:
 }
 
 /** Fresh database with setup completed and the owner logged in. */
-export async function setUpCompany(app: INestApplication<App>, prisma: PrismaService): Promise<Agent> {
+export async function setUpCompany(app: INestApplication<App>, prisma: SystemPrisma): Promise<Agent> {
   await resetDatabase(prisma);
   await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(201);
   return login(app, OWNER.email, OWNER.password);
 }
 
-export async function roleId(prisma: PrismaService, code: string): Promise<string> {
-  return (await prisma.role.findUniqueOrThrow({ where: { code } })).id;
+export async function roleId(prisma: SystemPrisma, code: string): Promise<string> {
+  return (await prisma.role.findFirstOrThrow({ where: { code } })).id;
 }
 
-export async function storeId(prisma: PrismaService, code: string): Promise<string> {
+export async function storeId(prisma: SystemPrisma, code: string): Promise<string> {
   return (await prisma.store.findFirstOrThrow({ where: { code } })).id;
 }

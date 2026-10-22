@@ -74,7 +74,7 @@ export class MastersService {
   }
 
   async createGroup(input: CreateItemGroupInput, actor: Actor) {
-    if (await this.prisma.itemGroup.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.itemGroup.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`Item group ${input.code} already exists`);
     }
     const parent = input.parentId ? await this.getGroup(this.prisma, input.parentId) : null;
@@ -123,7 +123,7 @@ export class MastersService {
   }
 
   async createBrand(input: CreateBrandInput, actor: Actor) {
-    if (await this.prisma.brand.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.brand.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`Brand ${input.code} already exists`);
     }
     return this.prisma.$transaction(async (tx) => {
@@ -154,7 +154,7 @@ export class MastersService {
   }
 
   async createHsnCode(input: CreateHsnCodeInput, actor: Actor) {
-    if (await this.prisma.hsnCode.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.hsnCode.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`HSN code ${input.code} already exists`);
     }
     return this.prisma.$transaction(async (tx) => {
@@ -189,7 +189,7 @@ export class MastersService {
   }
 
   async createAttribute(input: CreateAttributeInput, actor: Actor) {
-    if (await this.prisma.variantAttribute.findUnique({ where: { code: input.code } })) {
+    if (await this.prisma.variantAttribute.findFirst({ where: { code: input.code } })) {
       throw new ConflictException(`Attribute ${input.code} already exists`);
     }
     if (input.kind === 'numeric') {

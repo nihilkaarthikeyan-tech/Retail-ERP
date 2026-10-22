@@ -3,7 +3,7 @@
 
 import { SetupWizard } from "@/components/setup/setup-wizard";
 
-/** First-time setup, step by step (plan 12 §3). Available only while no company exists. */
+/** Setting up a new shop, step by step (plan 12 §3), for its owner after signing up (plan 14). */
 export default function SetupPage() {
   return <SetupWizard />;
 }

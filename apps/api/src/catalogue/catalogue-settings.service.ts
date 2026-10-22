@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { UpdateCatalogueSettingsInput } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
@@ -11,9 +11,7 @@ import { UnitsService } from './units.service.js';
 export const ITEM_NUMBER_SERIES = { documentKind: 'item', pattern: 'ITM-', counterLength: 6 };
 
 @Injectable()
-export class CatalogueSettingsService implements OnModuleInit {
-  private readonly log = new Logger(CatalogueSettingsService.name);
-
+export class CatalogueSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -22,15 +20,6 @@ export class CatalogueSettingsService implements OnModuleInit {
   ) {}
 
   /** Databases set up before module 2 get their defaults on the first start. */
-  async onModuleInit(): Promise<void> {
-    try {
-      await this.units.ensureStandardUnits(this.prisma);
-      const companies = await this.prisma.company.findMany({ select: { id: true } });
-      for (const c of companies) await this.ensureCompanyDefaults(this.prisma, c.id);
-    } catch (err) {
-      this.log.error('Could not ensure catalogue defaults', err instanceof Error ? err.stack : String(err));
-    }
-  }
 
   /**
    * Idempotent per-company defaults: Standard Selling and Standard Buying
@@ -47,7 +36,7 @@ export class CatalogueSettingsService implements OnModuleInit {
     });
     const selling = await db.priceList.findUniqueOrThrow({ where: { companyId_code: { companyId, code: 'STD-SELL' } } });
     const buying = await db.priceList.findUniqueOrThrow({ where: { companyId_code: { companyId, code: 'STD-BUY' } } });
-    const pcs = await db.unit.findUnique({ where: { code: 'PCS' } });
+    const pcs = await db.unit.findFirst({ where: { code: 'PCS' } });
     await db.catalogueSettings.createMany({
       data: [{ companyId, defaultSellingPriceListId: selling.id, defaultBuyingPriceListId: buying.id, defaultUnitId: pcs?.id ?? null }],
       skipDuplicates: true,

@@ -6,6 +6,8 @@ import type { CurrentUser } from 'shared';
 /** The logged-in user as attached to the request by the session guard. */
 export interface AuthUser extends CurrentUser {
   sessionId: string;
+  /** Plan 14: the shop the person belongs to (from their session, never from the browser). */
+  companyId: string;
 }
 
 /** Who is doing something and from where, passed to services for audit rows. */

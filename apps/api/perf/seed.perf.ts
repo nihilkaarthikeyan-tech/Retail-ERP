@@ -245,7 +245,7 @@ describe('a year of trading for three shops', () => {
     for (const b of BRANDS) brandIds.push((await api('post', '/catalogue/brands', { code: b, name: `Brand ${b}` })).id);
     const size = await api('post', '/catalogue/attributes', { code: 'SIZE', name: 'Size', kind: 'list', values: SIZES.map((v) => ({ value: v, shortCode: v })) });
     const colour = await api('post', '/catalogue/attributes', { code: 'COLOUR', name: 'Colour', kind: 'list', values: COLOURS.map((v, i) => ({ value: v, shortCode: COLOUR_CODES[i] })) });
-    const pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+    const pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
     const sellList = (await prisma.catalogueSettings.findFirstOrThrow()).defaultSellingPriceListId!;
     const groups = await prisma.supplierGroup.findMany();
     const terms = await prisma.paymentTerms.findMany();

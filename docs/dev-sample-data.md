@@ -51,3 +51,11 @@ pnpm --filter api prisma migrate reset
 - Owner's till PIN (test only): `2468` — unlocks the till and approves manager actions.
 - Till T1 is registered to the browser at http://localhost:3001 ("Demo counter").
 - Fancy and T-shirt items with barcodes 8903000000006 to 8903000000099 (20 in stock each at MAIN floor), customers Priya Raman (9840011001), Arjun Kumar (9840011002), Meena Stores (9840011003), and the offer FANCY10 (10% off fancy and gifts).
+
+## A second shop (plan 14, signed up through /signup on 22 October 2026)
+
+Shows that two shops on the same system never see each other's data.
+
+- Shop: Meena Fashions (clothing, not registered for GST), first shop MAIN with till T1
+- Owner login: `meena@demo-shop.test`, password `Meena-demo-2026` (development only)
+- It starts empty: no items, customers or bills. The first shop's 26 items are not visible to it.

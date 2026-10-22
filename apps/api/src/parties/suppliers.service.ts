@@ -73,7 +73,7 @@ export class SuppliersService {
     const group = await this.masters.assertLeafSupplierGroup(this.prisma, groupId);
     const { stateCode, pan } = this.checkTax(input.gstin ?? null, input.pan ?? null, input.stateCode ?? null);
     await this.checkRefs(input);
-    if (input.code && (await this.prisma.supplier.findUnique({ where: { code: input.code } }))) throw new ConflictException(`Supplier code ${input.code} already exists`);
+    if (input.code && (await this.prisma.supplier.findFirst({ where: { code: input.code } }))) throw new ConflictException(`Supplier code ${input.code} already exists`);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const code = input.code ?? (await this.numbering.allocate(tx, { companyId: company.id, documentKind: SUPPLIER_NUMBER_SERIES.documentKind }));

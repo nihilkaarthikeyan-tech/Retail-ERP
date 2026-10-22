@@ -5,11 +5,11 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { addDays, businessDate, Decimal } from 'shared';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let ANNA: string;
@@ -20,7 +20,7 @@ const FY_START = '2026-04-01';
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -265,7 +265,7 @@ describe('11.19 customer purchases and birthdays (C9, C10)', () => {
   beforeAll(async () => {
     await freshCompany();
     const loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-    const pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+    const pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
     const groupId = (await owner.post('/catalogue/item-groups').send({ code: 'MENS', name: 'Menswear' }).expect(201)).body.id;
     const listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
     await owner.post('/pos/gst-rates').send({ hsnCode: '6205', rate: '5', effectiveFrom: '2026-04-01' }).expect(201);

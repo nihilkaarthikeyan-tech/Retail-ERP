@@ -17,7 +17,8 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { FinancialYear } from '../generated/prisma/client.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 
 const SYSTEM_ACTOR: Actor = { userId: null, ipAddress: null };
 /** The nightly job creates the next year this many days before the current one ends. */
@@ -37,6 +38,7 @@ export class FinancialYearsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly company: CompanyService,
   ) {}
@@ -127,12 +129,15 @@ export class FinancialYearsService {
   /** Runs at 02:00 Indian time; "today" is the Indian calendar date. */
   @Cron('0 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
-    try {
-      const created = await this.createNextYearsIfDue(businessDate());
-      if (created.length) this.log.log(`Created financial year(s): ${created.map((y) => y.name).join(', ')}`);
-    } catch (err) {
-      this.log.error('Nightly financial-year check failed', err instanceof Error ? err.stack : String(err));
-    }
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Nightly financial-year check', async () => {
+      try {
+        const created = await this.createNextYearsIfDue(businessDate());
+        if (created.length) this.log.log(`Created financial year(s): ${created.map((y) => y.name).join(', ')}`);
+      } catch (err) {
+        this.log.error('Nightly financial-year check failed', err instanceof Error ? err.stack : String(err));
+      }
+    });
   }
 
   /**

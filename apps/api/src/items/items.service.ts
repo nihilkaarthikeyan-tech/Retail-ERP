@@ -179,11 +179,11 @@ export class ItemsService {
   /** Scan box: exact barcode, else exact item code. */
   async scan(code: string, user: CurrentUser) {
     const trimmed = code.trim();
-    const barcode = await this.prisma.barcode.findUnique({ where: { code: trimmed }, include: { item: { include: itemInclude } } });
+    const barcode = await this.prisma.barcode.findFirst({ where: { code: trimmed }, include: { item: { include: itemInclude } } });
     let item: ItemRow | null = barcode?.item ?? null;
     let unitId = barcode?.unitId ?? null;
     if (!item) {
-      item = await this.prisma.item.findUnique({ where: { code: trimmed.toUpperCase() }, include: itemInclude });
+      item = await this.prisma.item.findFirst({ where: { code: trimmed.toUpperCase() }, include: itemInclude });
     }
     if (!item) throw new NotFoundException(`Nothing found for "${trimmed}"`);
     if (barcode && !barcode.active) throw new NotFoundException(`Barcode ${trimmed} is switched off`);
@@ -222,7 +222,7 @@ export class ItemsService {
       const attrs = await this.prisma.variantAttribute.findMany({ where: { id: { in: input.variantAttributeIds }, active: true } });
       if (attrs.length !== new Set(input.variantAttributeIds).size) throw new BadRequestException('One or more attributes do not exist');
     }
-    if (input.code && (await this.prisma.item.findUnique({ where: { code: input.code } }))) {
+    if (input.code && (await this.prisma.item.findFirst({ where: { code: input.code } }))) {
       throw new ConflictException(`Item code ${input.code} already exists`);
     }
     if (!input.code && !settings.autoItemCodes) throw new BadRequestException('Item code is required');
@@ -428,7 +428,7 @@ export class ItemsService {
     const type = input.type ?? guessBarcodeType(input.code);
     const problem = barcodeProblem(input.code, type);
     if (problem) throw new BadRequestException(problem);
-    const existing = await this.prisma.barcode.findUnique({ where: { code: input.code }, include: { item: { select: { code: true, name: true } } } });
+    const existing = await this.prisma.barcode.findFirst({ where: { code: input.code }, include: { item: { select: { code: true, name: true } } } });
     if (existing) throw new ConflictException(`Barcode ${input.code} already belongs to ${existing.item.code} (${existing.item.name})`);
     if (input.unitId && !item.units.some((u) => u.unitId === input.unitId)) {
       throw new BadRequestException('The barcode unit must be one of the item’s units');
@@ -507,7 +507,7 @@ export class ItemsService {
       for (const combo of combos) {
         const variantKey = variantValuesKey(combo.values);
         if (existingKeys.has(variantKey)) continue;
-        if (await tx.item.findUnique({ where: { code: combo.code } })) {
+        if (await tx.item.findFirst({ where: { code: combo.code } })) {
           throw new ConflictException(`Item code ${combo.code} already exists`);
         }
         const variant = await tx.item.create({

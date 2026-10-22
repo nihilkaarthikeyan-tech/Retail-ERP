@@ -9,12 +9,14 @@ import { RolesModule } from '../roles/roles.module.js';
 import { StoresModule } from '../stores/stores.module.js';
 import { GettingStartedController } from './getting-started.controller.js';
 import { GettingStartedService } from './getting-started.service.js';
-import { SetupController } from './setup.controller.js';
+import { CompanyDefaults } from './company-defaults.service.js';
+import { SetupController, SignupController } from './setup.controller.js';
 import { SetupService } from './setup.service.js';
 
 @Module({
   imports: [RolesModule, CompanyModule, FinancialYearsModule, StoresModule, CatalogueModule, PartiesModule, PosModule],
-  controllers: [SetupController, GettingStartedController],
-  providers: [SetupService, GettingStartedService],
+  controllers: [SetupController, SignupController, GettingStartedController],
+  providers: [SetupService, GettingStartedService, CompanyDefaults],
+  exports: [CompanyDefaults],
 })
 export class SetupModule {}

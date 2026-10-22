@@ -8,11 +8,11 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { businessDate, Decimal, gstinCheckCharacter } from 'shared';
 import { readXlsx } from '../../src/imports/spreadsheet.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let loc: Record<string, string>;
@@ -40,7 +40,7 @@ const sum = (list: string[]) => list.reduce((t, x) => t.add(x), new Decimal(0)).
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -52,7 +52,7 @@ async function freshCompany() {
   n = 0;
   MAIN = await storeId(prisma, 'MAIN');
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'GEN', name: 'General' }).expect(201)).body.id;
   listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
   for (const [hsnCode, rate] of [

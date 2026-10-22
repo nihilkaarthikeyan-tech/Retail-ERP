@@ -59,7 +59,7 @@ export class CompanyService {
 
   /** Shared with setup; runs inside the caller's transaction. */
   async createGstRegistrationIn(db: Db, companyId: string, input: CreateGstRegistrationInput, actor: Actor) {
-    if (await db.gstRegistration.findUnique({ where: { gstin: input.gstin } })) {
+    if (await db.gstRegistration.findFirst({ where: { gstin: input.gstin } })) {
       throw new ConflictException(`GSTIN ${input.gstin} is already recorded`);
     }
     const stateCode = gstinStateCode(input.gstin);

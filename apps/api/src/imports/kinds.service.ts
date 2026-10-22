@@ -61,12 +61,12 @@ export class ImportKindsService {
     return row.id;
   }
 
-  private group = (code?: string) => this.id('Item group', code, (c) => this.prisma.itemGroup.findUnique({ where: { code: c } }));
-  private brand = (code?: string) => this.id('Brand', code, (c) => this.prisma.brand.findUnique({ where: { code: c } }));
+  private group = (code?: string) => this.id('Item group', code, (c) => this.prisma.itemGroup.findFirst({ where: { code: c } }));
+  private brand = (code?: string) => this.id('Brand', code, (c) => this.prisma.brand.findFirst({ where: { code: c } }));
   private unit = (code?: string) => this.id('Unit', code, (c) => this.prisma.unit.findFirst({ where: { code: { equals: c, mode: 'insensitive' } } }));
-  private item = (code?: string) => this.id('Item', code, (c) => this.prisma.item.findUnique({ where: { code: c } }));
+  private item = (code?: string) => this.id('Item', code, (c) => this.prisma.item.findFirst({ where: { code: c } }));
   private store = (companyId: string, code?: string) => this.id('Store', code, (c) => this.prisma.store.findFirst({ where: { companyId, code: c } }));
-  private terms = (code?: string) => this.id('Payment terms', code, (c) => this.prisma.paymentTerms.findUnique({ where: { code: c } }));
+  private terms = (code?: string) => this.id('Payment terms', code, (c) => this.prisma.paymentTerms.findFirst({ where: { code: c } }));
   private season = (companyId: string, code?: string) => this.id('Season', code, (c) => this.prisma.season.findFirst({ where: { companyId, code: c.toUpperCase() } }));
   private priceList = (companyId: string, code?: string) => this.id('Price list', code, (c) => this.prisma.priceList.findFirst({ where: { companyId, code: c } }));
 
@@ -86,7 +86,7 @@ export class ImportKindsService {
       example: ['RICE', 'Rice', 'GROC', '1006'],
       keyOf: (v) => str(v.code) ?? null,
       apply: async (v, mode, ctx) => {
-        const existing = await this.prisma.itemGroup.findUnique({ where: { code: str(v.code)! } });
+        const existing = await this.prisma.itemGroup.findFirst({ where: { code: str(v.code)! } });
         if (existing) {
           if (mode === 'add') return { outcome: 'unchanged', recordId: existing.id, message: 'Already there' };
           const change: { name?: string; hsnCode?: string | null } = {};
@@ -115,7 +115,7 @@ export class ImportKindsService {
       example: ['AASHIRVAAD', 'Aashirvaad'],
       keyOf: (v) => str(v.code) ?? null,
       apply: async (v, mode, ctx) => {
-        const existing = await this.prisma.brand.findUnique({ where: { code: str(v.code)! } });
+        const existing = await this.prisma.brand.findFirst({ where: { code: str(v.code)! } });
         if (existing) {
           if (mode === 'add' || existing.name === str(v.name)) return { outcome: 'unchanged', recordId: existing.id, message: mode === 'add' ? 'Already there' : undefined };
           await this.masters.updateBrand(existing.id, { name: str(v.name)! }, ctx.actor);
@@ -205,7 +205,7 @@ export class ImportKindsService {
 
   private async applyItem(v: V, mode: ImportMode, ctx: ImportContext): Promise<RowOutcome> {
     const code = str(v.code);
-    let existing = code ? await this.prisma.item.findUnique({ where: { code } }) : null;
+    let existing = code ? await this.prisma.item.findFirst({ where: { code } }) : null;
     // Without a code, an item of the same name in the same group counts as already there (a rerun adds nothing twice).
     if (!existing && !code) {
       const groupId = await this.group(str(v.group));
@@ -287,7 +287,7 @@ export class ImportKindsService {
     for (const [key, unitId] of [['barcode', null], ['barcode2', null], ['packBarcode', packUnitId ?? null]] as const) {
       const code = str(v[key]);
       if (!code) continue;
-      const found = await this.prisma.barcode.findUnique({ where: { code } });
+      const found = await this.prisma.barcode.findFirst({ where: { code } });
       if (found) {
         if (found.itemId !== itemId) throw new BadRequestException(`Barcode ${code} already belongs to another item`);
         continue;
@@ -402,7 +402,7 @@ export class ImportKindsService {
     // The style: by its code, else by its name within the group.
     const withAttrs = { variantAttributes: { orderBy: { sortOrder: 'asc' as const } } };
     let style = styleCode
-      ? await this.prisma.item.findUnique({ where: { code: styleCode }, include: withAttrs })
+      ? await this.prisma.item.findFirst({ where: { code: styleCode }, include: withAttrs })
       : await this.prisma.item.findFirst({ where: { isParentStyle: true, itemGroupId: groupId, name: { equals: name, mode: 'insensitive' } }, include: withAttrs, orderBy: { createdAt: 'asc' } });
     if (style && !style.isParentStyle) throw new BadRequestException(`${style.code} is an item, not a style with sizes and colours`);
     if (style) {
@@ -423,7 +423,7 @@ export class ImportKindsService {
     // Barcode and price list are checked now, so a refused row saves nothing.
     const barcode = str(v.barcode);
     if (barcode) {
-      const found = await this.prisma.barcode.findUnique({ where: { code: barcode } });
+      const found = await this.prisma.barcode.findFirst({ where: { code: barcode } });
       if (found && found.itemId !== variant?.id) throw new BadRequestException(`Barcode ${barcode} already belongs to another item`);
       const problem = found ? null : barcodeProblem(barcode, guessBarcodeType(barcode));
       if (problem) throw new BadRequestException(problem);
@@ -454,7 +454,7 @@ export class ImportKindsService {
       await this.items.update(variant.id, change, ctx.actor, ctx.user);
       changed = true;
     }
-    if (barcode && !(await this.prisma.barcode.findUnique({ where: { code: barcode } }))) {
+    if (barcode && !(await this.prisma.barcode.findFirst({ where: { code: barcode } }))) {
       await this.items.addBarcode(variant.id, { code: barcode, unitId: null }, ctx.actor);
       changed = true;
     }
@@ -485,7 +485,7 @@ export class ImportKindsService {
         const itemId = (await this.item(str(v.item)))!;
         const item = await this.prisma.item.findUniqueOrThrow({ where: { id: itemId } });
         const unitId = (await this.unit(str(v.unit))) ?? item.baseUnitId;
-        const customerId = (await this.id('Customer', str(v.customer), (c) => this.prisma.customer.findUnique({ where: { code: c } }))) ?? null;
+        const customerId = (await this.id('Customer', str(v.customer), (c) => this.prisma.customer.findFirst({ where: { code: c } }))) ?? null;
         const startDate = str(v.start) ?? businessDate();
         const existing = await this.prisma.price.findFirst({ where: { priceListId, itemId, unitId, customerId, supplierId: null, batchId: null, startDate: new Date(`${startDate}T00:00:00Z`) } });
         if (existing) {
@@ -556,11 +556,11 @@ export class ImportKindsService {
       keyOf: (v) => str(v.code) ?? str(v.mobile) ?? null,
       apply: async (v, mode, ctx) => {
         const existing = str(v.code)
-          ? await this.prisma.customer.findUnique({ where: { code: str(v.code)! } })
+          ? await this.prisma.customer.findFirst({ where: { code: str(v.code)! } })
           : str(v.mobile)
             ? await this.prisma.customer.findFirst({ where: { companyId: ctx.companyId, mobile: str(v.mobile)! } })
             : null;
-        const groupId = await this.id('Customer group', str(v.group), (c) => this.prisma.customerGroup.findUnique({ where: { code: c } }));
+        const groupId = await this.id('Customer group', str(v.group), (c) => this.prisma.customerGroup.findFirst({ where: { code: c } }));
         const termsId = await this.terms(str(v.terms));
         if (existing) {
           if (mode === 'add') return { outcome: 'unchanged', recordId: existing.id, message: 'Already there' };
@@ -640,11 +640,11 @@ export class ImportKindsService {
       keyOf: (v) => str(v.code) ?? str(v.gstin) ?? (str(v.name) ? str(v.name)!.toLowerCase() : null),
       apply: async (v, mode, ctx) => {
         const existing = str(v.code)
-          ? await this.prisma.supplier.findUnique({ where: { code: str(v.code)! } })
+          ? await this.prisma.supplier.findFirst({ where: { code: str(v.code)! } })
           : str(v.gstin)
             ? await this.prisma.supplier.findFirst({ where: { companyId: ctx.companyId, gstin: str(v.gstin)! } })
             : await this.prisma.supplier.findFirst({ where: { companyId: ctx.companyId, name: { equals: str(v.name)!, mode: 'insensitive' } } });
-        const groupId = await this.id('Supplier group', str(v.group), (c) => this.prisma.supplierGroup.findUnique({ where: { code: c } }));
+        const groupId = await this.id('Supplier group', str(v.group), (c) => this.prisma.supplierGroup.findFirst({ where: { code: c } }));
         const termsId = await this.terms(str(v.terms));
         if (existing) {
           if (mode === 'add') return { outcome: 'unchanged', recordId: existing.id, message: 'Already there' };
@@ -791,7 +791,7 @@ export class ImportKindsService {
       apply: async (v, mode, ctx) => {
         const type = str(v.party)!.toLowerCase();
         if (type !== 'customer' && type !== 'supplier') throw new BadRequestException('Customer or supplier must say "customer" or "supplier"');
-        const partyId = (await this.id(type === 'customer' ? 'Customer' : 'Supplier', str(v.code), (c): Promise<{ id: string } | null> => (type === 'customer' ? this.prisma.customer.findUnique({ where: { code: c } }) : this.prisma.supplier.findUnique({ where: { code: c } }))))!;
+        const partyId = (await this.id(type === 'customer' ? 'Customer' : 'Supplier', str(v.code), (c): Promise<{ id: string } | null> => (type === 'customer' ? this.prisma.customer.findFirst({ where: { code: c } }) : this.prisma.supplier.findFirst({ where: { code: c } }))))!;
         const existing = await this.prisma.openingBill.findFirst({ where: { companyId: ctx.companyId, partyType: type, partyId, billNumber: str(v.number)!, status: 'posted' } });
         if (existing) return { outcome: 'unchanged', recordId: existing.id, message: 'Already there' };
         if (mode === 'change') throw new BadRequestException('Opening bills can only be added; cancel a wrong one on the Opening balances page');

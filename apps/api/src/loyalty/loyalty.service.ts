@@ -52,7 +52,8 @@ import { CompanyService } from '../company/company.service.js';
 import type { Customer, LoyaltyEntry, LoyaltySettings, LoyaltyTier, Prisma } from '../generated/prisma/client.js';
 import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js';
 import { moduleOffError, moduleOn } from '../modules/module-map.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 
 type Amount = { toString(): string } | string | number;
 export const D = (v: Amount) => new Decimal(v.toString());
@@ -102,6 +103,7 @@ export class LoyaltyService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly ledger: LedgerService,
     private readonly company: CompanyService,
@@ -585,14 +587,17 @@ export class LoyaltyService {
   @Cron('20 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
     if (process.env.EXPIRY_SCHEDULE === 'off') return;
-    try {
-      for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
-        const r = await this.expire(c.id, businessDate(), { userId: null, ipAddress: null });
-        if (r.points) this.log.log(`${r.points} loyalty point(s) expired for ${r.customers} customer(s)`);
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Nightly points expiry', async () => {
+      try {
+        for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
+          const r = await this.expire(c.id, businessDate(), { userId: null, ipAddress: null });
+          if (r.points) this.log.log(`${r.points} loyalty point(s) expired for ${r.customers} customer(s)`);
+        }
+      } catch (err) {
+        this.log.error('Nightly points expiry failed', err instanceof Error ? err.stack : String(err));
       }
-    } catch (err) {
-      this.log.error('Nightly points expiry failed', err instanceof Error ? err.stack : String(err));
-    }
+    });
   }
 
   /**

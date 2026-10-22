@@ -4,20 +4,22 @@
 import { businessDate } from './business-date.js';
 import { type ModuleKey, modulesForShopType, type ShopTypeKey, withNeeds } from './modules.js';
 
-/** The steps of the guided setup, in order. Step numbers start at 1. */
+/**
+ * The steps of the guided setup, in order. Step numbers start at 1. Plan 14: the
+ * owner's name, email and password come from sign-up, so setup starts at the business.
+ */
 export const SETUP_STEPS = [
-  { key: 'you', title: 'You', lead: 'You are the owner. You will log in with this email address.' },
   { key: 'business', title: 'Your business', lead: 'The business as it appears on bills and in the accounts.' },
   { key: 'gst', title: 'GST', lead: 'Your GST registration, if you have one. You can add it later too.' },
   { key: 'shop', title: 'Your first shop', lead: 'The shop you start with. More shops can be added later.' },
   { key: 'sell', title: 'What do you sell?', lead: 'Pick the kind of shop. It switches on what you need; change anything you like.' },
-  { key: 'done', title: 'Done', lead: 'Check what will be set up, then choose your password.' },
+  { key: 'done', title: 'Done', lead: 'Check what will be set up, then finish.' },
 ] as const;
 
 export type SetupStepKey = (typeof SETUP_STEPS)[number]['key'];
 /** The steps whose answers are saved as you go ("done" only shows a summary). */
 export type SetupAnswerKey = Exclude<SetupStepKey, 'done'>;
-export const SETUP_ANSWER_KEYS: SetupAnswerKey[] = ['you', 'business', 'gst', 'shop', 'sell'];
+export const SETUP_ANSWER_KEYS: SetupAnswerKey[] = ['business', 'gst', 'shop', 'sell'];
 export const SETUP_LAST_STEP = SETUP_STEPS.length;
 
 /** Step number (1-based) of a step key. */

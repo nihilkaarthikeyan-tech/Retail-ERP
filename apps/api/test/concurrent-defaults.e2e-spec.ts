@@ -10,19 +10,19 @@ import { CatalogueSettingsService } from '../src/catalogue/catalogue-settings.se
 import { UnitsService } from '../src/catalogue/units.service.js';
 import { ensureStoreLocations, STOCK_NUMBER_SERIES, seriesKind } from '../src/inventory/location-defaults.js';
 import { PartySettingsService } from '../src/parties/party-settings.service.js';
-import { PrismaService } from '../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../src/prisma/prisma.service.js';
 import { ensurePurchaseDefaults, PURCHASE_NUMBER_SERIES } from '../src/purchasing/purchase-common.service.js';
 import { RolesService } from '../src/roles/roles.service.js';
-import { createTestApp, resetDatabase, setUpCompany } from './helpers.js';
+import { createTestApp, setUpCompany } from './helpers.js';
 
 const AT_ONCE = 8;
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -48,9 +48,10 @@ async function companyWideSeries(companyId: string, kinds: string[]): Promise<Re
 
 const once = (kinds: string[]) => Object.fromEntries(kinds.map((k) => [k, 1]));
 
-describe('installation-wide defaults, called at the same moment', () => {
+describe("a shop's standard defaults, called at the same moment", () => {
   beforeAll(async () => {
-    await resetDatabase(prisma);
+    // Plan 14: the defaults belong to a shop; the tests' direct calls work for this first shop.
+    await setUpCompany(app, prisma);
   });
 
   it('standard units and conversions', async () => {

@@ -146,7 +146,7 @@ export function TillApp({ device, engine: given }: { device: TillDeviceInfo; eng
           <Button onClick={() => lock(true)} disabled={!state.online || !state.shift}>
             Lock / switch cashier
           </Button>
-          <Link className="btn btn-link" href="/">
+          <Link className="btn btn-link" href="/dashboard">
             Back office
           </Link>
         </div>

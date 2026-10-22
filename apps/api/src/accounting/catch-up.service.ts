@@ -7,7 +7,8 @@ import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import { businessDate } from 'shared';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PosPostings } from '../pos/pos-postings.service.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { PurchasePostings } from '../purchasing/purchase-postings.service.js';
 
 @Injectable()
@@ -16,18 +17,18 @@ export class CatchUpService implements OnApplicationBootstrap {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly ledger: LedgerService,
     private readonly purchase: PurchasePostings,
     private readonly pos: PosPostings,
   ) {}
 
   async onApplicationBootstrap() {
-    try {
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Posting earlier documents', async () => {
       const done = await this.run();
       if (done) this.log.log(`Posted ${done} earlier documents to the ledger`);
-    } catch (err) {
-      this.log.error(`Posting earlier documents failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    });
   }
 
   /** Returns how many documents were posted. */

@@ -9,11 +9,11 @@ import type { App } from 'supertest/types.js';
 import { addDays, businessDate, gtinCheckDigit } from 'shared';
 import { type Sheet, writeXlsx } from '../../src/imports/spreadsheet.js';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let ANNA: string;
@@ -35,7 +35,7 @@ const ean = (data: string) => `${data}${gtinCheckDigit(data)}`;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
   owner = await setUpCompany(app, prisma);
   await owner.post('/stores').send({ code: 'ANNA', name: 'Anna Nagar' }).expect(201);
   MAIN = await storeId(prisma, 'MAIN');
@@ -89,11 +89,11 @@ async function importSheet(kind: string, rows: Sheet, mode = 'add') {
 }
 
 async function variantsOf(code: string) {
-  const style = await prisma.item.findUniqueOrThrow({ where: { code } });
+  const style = await prisma.item.findFirstOrThrow({ where: { code } });
   return prisma.item.findMany({ where: { parentItemId: style.id }, include: { barcodes: true, prices: true }, orderBy: { code: 'asc' } });
 }
 
-const byCode = async (code: string) => prisma.item.findUniqueOrThrow({ where: { code } });
+const byCode = async (code: string) => prisma.item.findFirstOrThrow({ where: { code } });
 
 async function opening(storeCode: string, lines: { itemId: string; qty: string }[]) {
   const c = (
@@ -138,7 +138,7 @@ describe('11.10 sizes and colours from Excel (B1)', () => {
     const r = await importSheet('styles_variants', SHEET);
     expect(r.preview).toMatchObject({ rows: 8, ready: 8, unmatched: [], missingRequired: [] });
     expect(r.status).toMatchObject({ status: 'done', added: 8, failed: 0 });
-    const style = await prisma.item.findUniqueOrThrow({ where: { code: 'SHIRT' }, include: { variantAttributes: { orderBy: { sortOrder: 'asc' } } } });
+    const style = await prisma.item.findFirstOrThrow({ where: { code: 'SHIRT' }, include: { variantAttributes: { orderBy: { sortOrder: 'asc' } } } });
     expect(style).toMatchObject({ isParentStyle: true, name: 'Oxford shirt', hsnCode: '6205', seasonId });
     expect(style.variantAttributes.map((a) => a.attributeId)).toEqual([colourId, sizeId]);
     const variants = await variantsOf('SHIRT');
@@ -178,7 +178,7 @@ describe('11.10 sizes and colours from Excel (B1)', () => {
   });
 
   it('makes a new style without a code from the style name, and refuses an item code used as a style', async () => {
-    await owner.post('/items').send({ code: 'PLAIN', name: 'Plain tee', itemGroupId: (await prisma.itemGroup.findFirstOrThrow({ where: { code: 'MENS' } })).id, baseUnitId: (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id }).expect(201);
+    await owner.post('/items').send({ code: 'PLAIN', name: 'Plain tee', itemGroupId: (await prisma.itemGroup.findFirstOrThrow({ where: { code: 'MENS' } })).id, baseUnitId: (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id }).expect(201);
     const r = await importSheet('styles_variants', [
       ['Style name', 'Style code', 'Item group code', 'Unit', 'Size', 'Selling price'],
       ['Polo tee', '', 'MENS', 'PCS', 'M', '499'],

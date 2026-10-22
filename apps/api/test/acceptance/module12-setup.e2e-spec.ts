@@ -1,21 +1,21 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Automated versions of docs/acceptance-tests.md, section "Module 12":
-// 12.6 guided setup, 12.7 getting-started checklist, 12.8 settings centre.
+// 12.6 sign-up and guided setup (plan 14), 12.7 getting-started checklist, 12.8 settings centre.
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { Decimal, financialYearName, indianFinancialYear, MODULE_KEYS, SETTINGS, SETTINGS_SOURCES, type SettingDef, suggestedModules } from 'shared';
 import { type Sheet, writeXlsx } from '../../src/imports/spreadsheet.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
-import { type Agent, createTestApp, login, resetDatabase, roleId, setUpCompany, storeId } from '../helpers.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
+import { type Agent, agent, createTestApp, login, resetDatabase, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -32,76 +32,80 @@ const BUSINESS = { legalName: 'Lakshmi Fancy Stores', tradeName: 'Lakshmi Fancy'
 const GST = { registered: true, gstin: '33AAACR1234A1ZA', scheme: 'regular', filingFrequency: 'monthly', turnoverBand: '5cr_to_10cr' };
 const SHOP = { name: 'Anna Nagar', code: 'ANNA', tills: 2 };
 
-describe('12.6 Guided setup', () => {
+describe('12.6 Sign-up and guided setup (plan 14)', () => {
+  let owner: Agent;
+  const signup = (extra: Record<string, unknown> = {}) => browser().post('/auth/signup').send({ ...YOU, mobile: '9840012345', password: PASSWORD, shopName: 'Lakshmi Fancy', ...extra });
+
   beforeAll(async () => {
     await resetDatabase(prisma);
   });
 
-  it('saves each step; after closing the browser it comes back at step 4 with the answers kept, and never stores the password', async () => {
-    expect((await browser().get('/setup/progress').expect(200)).body).toMatchObject({ step: 1, data: {} });
-    // A password sent with the answers is dropped, never stored.
-    await browser().put('/setup/progress').send({ step: 2, data: { you: { ...YOU, password: PASSWORD } } }).expect(200);
-    await browser().put('/setup/progress').send({ step: 3, data: { you: YOU, business: BUSINESS } }).expect(200);
-    await browser().put('/setup/progress').send({ step: 4, data: { you: YOU, business: BUSINESS, gst: GST } }).expect(200);
+  it('sign-up refuses a weak password and makes nothing; a good one makes the shop and logs the owner in', async () => {
+    expect((await signup({ password: 'short' }).expect(400)).body.message).toMatch(/at least 10/);
+    expect(await prisma.company.count()).toBe(0);
+    expect(await prisma.user.count()).toBe(0);
 
-    // The browser is closed; a new one opens the setup again.
-    const back = (await browser().get('/setup/progress').expect(200)).body;
-    expect(back.step).toBe(4);
-    expect(back.data.you).toEqual({ ...YOU });
+    owner = agent(app);
+    const me = (await owner.post('/auth/signup').send({ ...YOU, mobile: '9840012345', password: PASSWORD, shopName: 'Lakshmi Fancy' }).expect(201)).body;
+    expect(me).toMatchObject({ firstName: 'Lakshmi', isOwnerAdmin: true, mustChangePassword: false, allStores: true });
+    expect((await owner.get('/setup/status').expect(200)).body).toEqual({ needed: true });
+    expect((await signup().expect(409)).body.message).toMatch(/already exists/);
+    expect(await prisma.company.count()).toBe(1);
+  });
+
+  it('saves each step for the owner only; after logging in again it comes back at step 3 with the answers kept', async () => {
+    await browser().get('/setup/progress').expect(401);
+    expect((await owner.get('/setup/progress').expect(200)).body).toMatchObject({ step: 1, data: {} });
+    await owner.put('/setup/progress').send({ step: 2, data: { business: BUSINESS } }).expect(200);
+    await owner.put('/setup/progress').send({ step: 3, data: { business: BUSINESS, gst: GST } }).expect(200);
+
+    // The browser is closed; the owner logs in again.
+    owner = await login(app, YOU.email, PASSWORD);
+    const back = (await owner.get('/setup/progress').expect(200)).body;
+    expect(back.step).toBe(3);
     expect(back.data.business).toMatchObject(BUSINESS);
     expect(back.data.gst).toEqual(GST);
-    const row = await prisma.setupProgress.findUniqueOrThrow({ where: { id: 1 } });
-    expect(JSON.stringify(row.data)).not.toContain(PASSWORD);
-    expect(JSON.stringify(row.data)).not.toContain('password');
-    expect(await prisma.company.count()).toBe(0);
+    expect(JSON.stringify((await prisma.setupProgress.findFirstOrThrow()).data)).not.toContain('password');
   });
 
   it('checks each step as it is saved: GSTIN typing mistakes, quarterly returns above ₹5 crore, a GSTIN of another PAN', async () => {
-    const bad = (gst: Record<string, unknown>) => browser().put('/setup/progress').send({ step: 4, data: { you: YOU, business: BUSINESS, gst: { ...GST, ...gst } } });
+    const bad = (gst: Record<string, unknown>) => owner.put('/setup/progress').send({ step: 3, data: { business: BUSINESS, gst: { ...GST, ...gst } } });
     const typo = (await bad({ gstin: '33AAACR1234A1ZV' }).expect(400)).body;
     expect(typo.errors).toContainEqual({ path: 'data.gst.gstin', message: 'The GSTIN has a typing mistake: its last character does not match' });
     const quarterly = (await bad({ filingFrequency: 'quarterly' }).expect(400)).body;
     expect(quarterly.errors[0]).toMatchObject({ path: 'data.gst.filingFrequency', message: expect.stringMatching(/only for a turnover up to ₹5 crore/) });
     const otherPan = (await bad({ gstin: '33ABCDE1234F1Z7' }).expect(400)).body;
     expect(otherPan.errors[0]).toMatchObject({ path: 'data.gst.gstin', message: 'This GSTIN belongs to PAN ABCDE1234F, not to your PAN AAACR1234A' });
-    await browser().put('/setup/progress').send({ step: 9, data: {} }).expect(400);
+    await owner.put('/setup/progress').send({ step: 9, data: {} }).expect(400);
     // Nothing bad was kept: the answers are still the good ones.
-    expect((await browser().get('/setup/progress').expect(200)).body.data.gst).toEqual(GST);
+    expect((await owner.get('/setup/progress').expect(200)).body.data.gst).toEqual(GST);
   });
 
   it('will not finish before every step is answered, and says which step is missing', async () => {
-    const res = (await browser().post('/setup/finish').send({ password: PASSWORD }).expect(400)).body;
-    expect(res.message).toMatch(/^Step 4, “Your first shop”, is not finished/);
-    expect(res.step).toBe(4);
-    expect(await prisma.company.count()).toBe(0);
+    const res = (await owner.post('/setup/finish').send({}).expect(400)).body;
+    expect(res.message).toMatch(/^Step 3, “Your first shop”, is not finished/);
+    expect(res.step).toBe(3);
+    expect((await owner.get('/setup/status').expect(200)).body).toEqual({ needed: true });
   });
 
-  it('finishing creates the owner, company, GST registration and settings, the year, the first shop and its tills, and switches on the chosen modules', async () => {
-    // Step 5: fancy and gift, without home delivery, with alterations (which brings salesperson).
+  it('finishing fills in the company, GST registration and settings, the year, the first shop and its tills, and switches on the chosen modules', async () => {
+    // Step 4: fancy and gift, without home delivery, with alterations (which brings salesperson).
     const modules = { ...suggestedModules('fancy', GST.turnoverBand), delivery: false, alterations: true };
     expect(modules.einvoice).toBe(true);
-    await browser().put('/setup/progress').send({ step: 5, data: { you: YOU, business: BUSINESS, gst: GST, shop: SHOP } }).expect(200);
-    await browser().put('/setup/progress').send({ step: 6, data: { you: YOU, business: BUSINESS, gst: GST, shop: SHOP, sell: { shopType: 'fancy', modules } } }).expect(200);
-    expect((await browser().get('/setup/progress').expect(200)).body.step).toBe(6);
+    await owner.put('/setup/progress').send({ step: 4, data: { business: BUSINESS, gst: GST, shop: SHOP } }).expect(200);
+    await owner.put('/setup/progress').send({ step: 5, data: { business: BUSINESS, gst: GST, shop: SHOP, sell: { shopType: 'fancy', modules } } }).expect(200);
+    expect((await owner.get('/setup/progress').expect(200)).body.step).toBe(5);
 
-    // A weak password is refused and nothing is made; the answers stay.
-    expect((await browser().post('/setup/finish').send({ password: 'short' }).expect(400)).body.message).toMatch(/at least 10/);
-    expect(await prisma.company.count()).toBe(0);
-
-    await browser().post('/setup/finish').send({ password: PASSWORD }).expect(201);
-    expect((await browser().get('/setup/status').expect(200)).body).toEqual({ needed: false });
-    await browser().get('/setup/progress').expect(409);
-    await browser().put('/setup/progress').send({ step: 2, data: {} }).expect(409);
-    await browser().post('/setup/finish').send({ password: PASSWORD }).expect(409);
+    await owner.post('/setup/finish').send({}).expect(201);
+    expect((await owner.get('/setup/status').expect(200)).body).toEqual({ needed: false });
+    await owner.get('/setup/progress').expect(409);
+    await owner.put('/setup/progress').send({ step: 2, data: {} }).expect(409);
+    await owner.post('/setup/finish').send({}).expect(409);
     // The saved answers are gone once setup is done.
     expect(await prisma.setupProgress.count()).toBe(0);
 
-    const owner = await login(app, YOU.email, PASSWORD);
-    const me = (await owner.get('/auth/me').expect(200)).body;
-    expect(me).toMatchObject({ firstName: 'Lakshmi', isOwnerAdmin: true, mustChangePassword: false, allStores: true });
-
     const company = (await owner.get('/company').expect(200)).body;
-    expect(company).toMatchObject({ legalName: 'Lakshmi Fancy Stores', tradeName: 'Lakshmi Fancy', pan: 'AAACR1234A', stateCode: '33', code: 'LFS', shopType: 'fancy', checklistHidden: false });
+    expect(company).toMatchObject({ legalName: 'Lakshmi Fancy Stores', tradeName: 'Lakshmi Fancy', pan: 'AAACR1234A', stateCode: '33', code: 'LF', shopType: 'fancy', checklistHidden: false });
 
     const registrations = (await owner.get('/company/gst-registrations').expect(200)).body;
     expect(registrations).toEqual([expect.objectContaining({ gstin: '33AAACR1234A1ZA', stateCode: '33', isDefault: true })]);
@@ -138,14 +142,15 @@ describe('12.6 Guided setup', () => {
 
   it('"Not registered yet" makes no GST registration; the shop and its tills are made the same way', async () => {
     await resetDatabase(prisma);
-    const data = { you: YOU, business: { ...BUSINESS, pan: null }, gst: { registered: false }, shop: { name: 'Main Shop', code: 'MAIN', tills: 0 }, sell: { shopType: 'general', modules: suggestedModules('general') } };
-    await browser().put('/setup/progress').send({ step: 6, data }).expect(200);
-    await browser().post('/setup/finish').send({ password: PASSWORD }).expect(201);
-    const owner = await login(app, YOU.email, PASSWORD);
-    expect((await owner.get('/company/gst-registrations').expect(200)).body).toEqual([]);
-    expect((await owner.get('/stores').expect(200)).body).toEqual([expect.objectContaining({ code: 'MAIN', gstRegistration: null })]);
-    expect((await owner.get('/pos/tills').expect(200)).body).toEqual([]);
-    expect((await owner.get('/company').expect(200)).body.shopType).toBe('general');
+    const fresh = agent(app);
+    await fresh.post('/auth/signup').send({ ...YOU, password: PASSWORD, shopName: 'Lakshmi Fancy' }).expect(201);
+    const data = { business: { ...BUSINESS, pan: null }, gst: { registered: false }, shop: { name: 'Main Shop', code: 'MAIN', tills: 0 }, sell: { shopType: 'general', modules: suggestedModules('general') } };
+    await fresh.put('/setup/progress').send({ step: 5, data }).expect(200);
+    await fresh.post('/setup/finish').send({}).expect(201);
+    expect((await fresh.get('/company/gst-registrations').expect(200)).body).toEqual([]);
+    expect((await fresh.get('/stores').expect(200)).body).toEqual([expect.objectContaining({ code: 'MAIN', gstRegistration: null })]);
+    expect((await fresh.get('/pos/tills').expect(200)).body).toEqual([]);
+    expect((await fresh.get('/company').expect(200)).body.shopType).toBe('general');
   });
 });
 

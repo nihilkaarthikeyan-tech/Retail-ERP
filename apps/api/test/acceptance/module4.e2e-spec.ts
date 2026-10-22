@@ -4,11 +4,11 @@ import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { addDays, businessDate, SYSTEM_ROLES } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let loc: Record<string, string>;
 let stores: Record<string, string>;
@@ -17,7 +17,7 @@ let groupId: string;
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -30,7 +30,7 @@ async function freshCompany() {
   await owner.post('/stores').send({ code: 'ANNA', name: 'Anna Nagar' }).expect(201);
   stores = { MAIN: await storeId(prisma, 'MAIN'), ANNA: await storeId(prisma, 'ANNA') };
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'RICE', name: 'Rice' }).expect(201)).body.id;
 }
 

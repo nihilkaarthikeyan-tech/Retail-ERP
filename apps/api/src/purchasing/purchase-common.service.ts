@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Helpers shared by every purchasing document (plan 05 §4): supplier and item
 // checks, units, buying prices, GST as stated, dates, locations and defaults.
-import { BadRequestException, ForbiddenException, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import {
   businessDate,
   type CurrentUser,
@@ -86,9 +86,7 @@ export interface ItemUnitInfo {
 }
 
 @Injectable()
-export class PurchaseCommon implements OnModuleInit {
-  private readonly log = new Logger(PurchaseCommon.name);
-
+export class PurchaseCommon {
   constructor(
     readonly prisma: PrismaService,
     private readonly company: CompanyService,
@@ -101,13 +99,6 @@ export class PurchaseCommon implements OnModuleInit {
   ) {}
 
   /** Companies set up before module 5 get their settings and number series. */
-  async onModuleInit(): Promise<void> {
-    try {
-      for (const c of await this.prisma.company.findMany({ select: { id: true } })) await ensurePurchaseDefaults(this.prisma, c.id);
-    } catch (err) {
-      this.log.warn(`Purchase defaults not checked: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
 
   /** Next document number; purchase series are created on first use for companies set up later. */
   async allocate(tx: Db, req: { companyId: string; documentKind: string; storeId?: string | null; date?: string }): Promise<string> {

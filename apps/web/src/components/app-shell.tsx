@@ -73,7 +73,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <header className="shell-head">
-        <Link href="/" className="shell-brand">
+        <Link href="/dashboard" className="shell-brand">
           <span className="shell-brand-mark" aria-hidden="true" />
           Retail ERP
         </Link>

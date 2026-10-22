@@ -7,11 +7,11 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
 import { gstinCheckCharacter } from 'shared';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let BLR: string;
@@ -38,7 +38,7 @@ const jwt = (claims: object) => `eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.${Buffer.f
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -57,7 +57,7 @@ async function fresh() {
   await owner.post('/stores').send({ code: 'BLR', name: 'Bengaluru', addressLine1: '12 MG Road', city: 'Bengaluru', pincode: '560001', stateCode: '29', gstRegistrationId: ka.id }).expect(201);
   BLR = await storeId(prisma, 'BLR');
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   groupId = (await owner.post('/catalogue/item-groups').send({ code: 'APP', name: 'Apparel' }).expect(201)).body.id;
   listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
   await owner.post('/pos/gst-rates').send({ hsnCode: '6205', rate: '5', effectiveFrom: '2024-04-01' }).expect(201);

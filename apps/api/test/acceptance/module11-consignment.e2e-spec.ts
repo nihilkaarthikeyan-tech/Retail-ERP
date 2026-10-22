@@ -8,11 +8,11 @@ import { businessDate } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
 import { AccountingSetup } from '../../src/ledger/accounting-setup.service.js';
 import { LedgerService } from '../../src/ledger/ledger.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, OWNER, setUpCompany, storeId } from '../helpers.js';
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 let MAIN: string;
 let loc: Record<string, string>;
@@ -32,7 +32,7 @@ const cash = (amount: string) => [{ paymentMethodId: pm.CASH, amount }];
 
 beforeAll(async () => {
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -45,7 +45,7 @@ async function freshCompany() {
   MAIN = await storeId(prisma, 'MAIN');
   companyId = (await prisma.company.findFirstOrThrow()).id;
   loc = Object.fromEntries((await owner.get('/stock/locations').expect(200)).body.map((l: { code: string; id: string }) => [l.code, l.id]));
-  pcs = (await prisma.unit.findUniqueOrThrow({ where: { code: 'PCS' } })).id;
+  pcs = (await prisma.unit.findFirstOrThrow({ where: { code: 'PCS' } })).id;
   listId = (await owner.post('/price-lists').send({ code: 'RETAIL', name: 'Retail', forSelling: true, forBuying: false }).expect(201)).body.id;
   await owner.post('/pos/gst-rates').send({ hsnCode: '4202', rate: '12', effectiveFrom: '2026-04-01' }).expect(201);
   pm = Object.fromEntries((await owner.get('/pos/payment-methods').expect(200)).body.map((m: { code: string; id: string }) => [m.code, m.id]));

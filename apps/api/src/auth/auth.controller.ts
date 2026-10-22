@@ -10,6 +10,17 @@ import { SESSION_COOKIE } from './session.js';
 
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 
+/** The session cookie set at login and at sign-up. */
+export function setSessionCookie(res: Response, token: string, sessionMaxHours: number): void {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: COOKIE_SECURE,
+    path: '/',
+    maxAge: sessionMaxHours * 3_600_000,
+  });
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
@@ -26,14 +37,7 @@ export class AuthController {
       ipAddress: clientIp(req),
       userAgent: req.headers['user-agent'] ?? null,
     });
-    const settings = await this.auth.securitySettings();
-    res.cookie(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: COOKIE_SECURE,
-      path: '/',
-      maxAge: settings.sessionMaxHours * 3_600_000,
-    });
+    setSessionCookie(res, token, (await this.auth.securitySettings()).sessionMaxHours);
     return user;
   }
 

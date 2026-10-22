@@ -1,8 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Plan 12 §3: input of the step-by-step first-time setup. Each step is checked
 // on its own when it is saved, and all of them together when setup finishes.
-// The owner's password is never part of the saved answers; it is typed on the
-// last step and sent only with "Finish".
+// Plan 14: the owner signs up first (name, email, password, shop name) and is
+// logged in while setting up the shop.
 import { z } from 'zod';
 import { panFromGstin } from '../company.js';
 import { endsAfterStart } from '../financial-year.js';
@@ -10,20 +10,36 @@ import { FILING_FREQUENCIES, GST_SCHEMES, TURNOVER_BANDS } from '../gst-core.js'
 import { isModuleKey, MODULE_KEYS, type ModuleKey, SHOP_TYPE_KEYS, type ShopTypeKey } from '../modules.js';
 import { SETUP_LAST_STEP } from '../setup.js';
 import { checkedGstin } from './gst-core.js';
-import { addressFields, email, isoDate, pan, shortCode, stateCode } from './index.js';
+import { addressFields, email, isoDate, mobile, pan, shortCode, stateCode } from './index.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
 
-/** Step 1, "You". */
-export const setupYouSchema = z.object({
+/** Plan 14, POST /auth/signup: a new shop and its owner's login. */
+export const signupSchema = z.object({
   firstName: trimmed(60),
   lastName: optionalText(60),
   email,
+  mobile,
+  password: z.string().min(1, 'Choose a password').max(200),
+  shopName: trimmed(160),
 });
-export type SetupYou = z.infer<typeof setupYouSchema>;
+export type SignupInput = z.infer<typeof signupSchema>;
 
-/** Step 2, "Your business". The first financial year defaults to the current Indian one. */
+/** Plan 14, POST /leads: the landing page's "Contact us / book a demo" form. */
+export const leadSchema = z.object({
+  name: trimmed(80),
+  phone: z.string().trim().regex(/^[0-9+\- ]{8,16}$/, 'Enter a phone number'),
+  email: email.optional().nullable(),
+  shopName: optionalText(160),
+  shopType: z.enum(SHOP_TYPE_KEYS as [ShopTypeKey, ...ShopTypeKey[]]).optional().nullable(),
+  message: optionalText(1000),
+  /** Left empty by people; filled in by form-filling robots, whose message is then dropped. */
+  website: z.string().max(200).optional(),
+});
+export type LeadInput = z.infer<typeof leadSchema>;
+
+/** Step 1, "Your business". The first financial year defaults to the current Indian one. */
 export const setupBusinessSchema = z.object({
   legalName: trimmed(160),
   tradeName: optionalText(160),
@@ -40,7 +56,7 @@ export const setupBusinessSchema = z.object({
 export type SetupBusiness = z.infer<typeof setupBusinessSchema>;
 
 /**
- * Step 3, "GST": registered (GSTIN checked with its check character) or "not registered yet".
+ * Step 2, "GST": registered (GSTIN checked with its check character) or "not registered yet".
  * Rules from the law, not settings:
  * - quarterly returns (QRMP scheme) only up to ₹5 crore turnover (CBIC notification 84/2020-Central Tax; https://www.gst.gov.in, "QRMP scheme");
  * - the composition scheme only for small turnovers (section 10 of the CGST Act, limit ₹1.5 crore) and its returns are quarterly (CMP-08).
@@ -70,7 +86,7 @@ export const setupGstSchema = z.discriminatedUnion('registered', [
 ]);
 export type SetupGst = z.infer<typeof setupGstSchema>;
 
-/** Step 4, "Your first shop": its name, short code and how many tills to make. */
+/** Step 3, "Your first shop": its name, short code and how many tills to make. */
 export const setupShopSchema = z.object({
   name: trimmed(120),
   code: shortCode,
@@ -86,7 +102,7 @@ const moduleTicks = z
   })
   .transform((m) => Object.fromEntries(MODULE_KEYS.map((k) => [k, m[k] === true])) as Record<ModuleKey, boolean>);
 
-/** Step 5, "What do you sell?": the shop type and the modules to switch on. */
+/** Step 4, "What do you sell?": the shop type and the modules to switch on. */
 export const setupSellSchema = z.object({
   shopType: z.enum(SHOP_TYPE_KEYS as [ShopTypeKey, ...ShopTypeKey[]]),
   modules: moduleTicks,
@@ -106,7 +122,6 @@ function panMatchesGstin(s: Sections, ctx: z.RefinementCtx) {
 /** The answers saved so far: each step that is there must be complete and correct. */
 export const setupDraftSchema = z
   .object({
-    you: setupYouSchema.optional(),
     business: setupBusinessSchema.optional(),
     gst: setupGstSchema.optional(),
     shop: setupShopSchema.optional(),
@@ -118,7 +133,6 @@ export type SetupDraft = z.infer<typeof setupDraftSchema>;
 /** Every step answered: what "Finish" needs. */
 export const setupAnswersSchema = z
   .object({
-    you: setupYouSchema,
     business: setupBusinessSchema,
     gst: setupGstSchema,
     shop: setupShopSchema,
@@ -134,10 +148,8 @@ export const setupProgressSchema = z.object({
 });
 export type SetupProgressInput = z.infer<typeof setupProgressSchema>;
 
-/** POST /setup/finish: only the password; the answers are the ones saved step by step. */
-export const setupFinishSchema = z.object({
-  password: z.string().min(1, 'Choose a password').max(200),
-});
+/** POST /setup/finish: nothing to send; the answers are the ones saved step by step. */
+export const setupFinishSchema = z.object({}).strict();
 export type SetupFinishInput = z.infer<typeof setupFinishSchema>;
 
 /** PUT /getting-started: the owner hides or shows the checklist. */

@@ -754,8 +754,9 @@ Amounts use test rates entered for these scenarios; the CA approves the real rat
 
 ### 12.6 Guided setup
 - **Then:**
-  - the wizard saves each step; closing the browser after step 3 and coming back resumes at step 4 with the earlier answers kept;
-  - finishing it creates the company, owner, GST registration, first shop and tills, and switches on the chosen modules.
+  - the wizard saves each step; closing the browser after step 2 and logging in again resumes at step 3 with the earlier answers kept;
+  - finishing it fills in the company, GST registration, first shop and tills, and switches on the chosen modules.
+- Since plan 14 the owner signs up first (name, email, password, shop name) and goes through the wizard logged in; the wizard no longer asks for the owner or the password.
 
 ### 12.7 Getting-started checklist
 - **Then** the checklist shows the open steps; adding a till, importing items and making a test bill tick their steps automatically; the owner can hide it.
@@ -818,3 +819,30 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
   - returning goods paid with a gift card puts the money back on the card;
   - when a card expires, its balance is written back as set, after appearing in the expiring-cards report;
   - the gift card liability always equals the sum of card balances.
+
+## Module 14 — One system for many shops (plan 14)
+
+### 14.1 Two shops with the same codes
+- **Given** two shops, each with item code ITM-000001, barcode 8903000000006, shop code MAIN and a customer "Priya Raman"
+- **Then:**
+  - both are saved without clashing, and scanning the barcode in each shop finds that shop's own item;
+  - document numbers, item codes and customer codes run separately in each shop.
+
+### 14.2 A shop never sees another shop's data
+- **Then:**
+  - every list (items, customers, suppliers, shops, users, roles, history) shows only the shop's own rows;
+  - opening, changing or deactivating another shop's record by its id is refused, and nothing of the other shop changes;
+  - another shop's id slipped into a new record (for example an item group) is refused, and nothing is saved;
+  - the database itself (row-level security) shows a shop only its own rows, and no rows at all when the shop is not known.
+
+### 14.3 Sign-up
+- **Then:**
+  - signing up with name, email, password and shop name makes the shop with its six roles, standard units, groups and settings, and logs the owner in;
+  - the owner is taken to the setup wizard until it is finished;
+  - an email that already belongs to any shop cannot sign up again; a weak password is refused and nothing is made.
+
+### 14.4 A switched-off shop
+- **Then** when Rademics switches a shop off, its people cannot log in and their open sessions stop working; switching it on again lets them back in.
+
+### 14.5 Clearing trial data clears only the shop's own data
+- **Then** a shop clearing its trial data (decision 72) removes only its own bills, stock movements and ledger entries; every other shop's data is untouched.

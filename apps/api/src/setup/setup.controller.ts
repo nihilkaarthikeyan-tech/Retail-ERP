@@ -1,24 +1,26 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { Body, Controller, Get, Post, Put, Req } from '@nestjs/common';
-import type { Request } from 'express';
-import { type SetupFinishInput, setupFinishSchema, type SetupInput, type SetupProgressInput, setupProgressSchema, setupSchema } from 'shared';
-import { Public } from '../auth/decorators.js';
-import { clientIp } from '../common/request-context.js';
+import { Body, Controller, Get, HttpCode, Post, Put, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { type CurrentUser, type SetupInput, type SetupProgressInput, setupFinishSchema, setupProgressSchema, setupSchema, type SignupInput, signupSchema } from 'shared';
+import { setSessionCookie } from '../auth/auth.controller.js';
+import { AllowPasswordChangePending, Public } from '../auth/decorators.js';
+import { type AuthUser, clientIp, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { SetupService } from './setup.service.js';
 
-/** Every route here is public only while no company exists; the service refuses them afterwards. */
+/** Plan 14: a new shop signs up (anyone may), then its owner sets it up (logged in). */
 @Controller('setup')
 export class SetupController {
   constructor(private readonly setup: SetupService) {}
 
-  @Public()
+  /** Does the logged-in person's shop still need the guided setup? */
+  @AllowPasswordChangePending()
   @Get('status')
   status() {
     return this.setup.status();
   }
 
-  /** One-page setup in a single call (kept for the API and the tests). */
+  /** One-step setup: a complete shop in a single call (kept for the API and the tests). */
   @Public()
   @Post()
   run(@Body(new ZodValidationPipe(setupSchema)) input: SetupInput, @Req() req: Request) {
@@ -26,22 +28,34 @@ export class SetupController {
   }
 
   /** Plan 12 §3: the guided setup's saved answers and the step to come back to. */
-  @Public()
   @Get('progress')
-  progress() {
-    return this.setup.progress();
+  progress(@ReqUser() user: AuthUser) {
+    return this.setup.progress(user);
   }
 
-  @Public()
   @Put('progress')
-  saveProgress(@Body(new ZodValidationPipe(setupProgressSchema)) input: SetupProgressInput) {
-    return this.setup.saveProgress(input);
+  saveProgress(@ReqUser() user: AuthUser, @Body(new ZodValidationPipe(setupProgressSchema)) input: SetupProgressInput) {
+    return this.setup.saveProgress(user, input);
   }
 
-  /** The last step: the password, then everything is created in one go. */
-  @Public()
+  /** The last step: fills in the shop from the saved answers. */
   @Post('finish')
-  finish(@Body(new ZodValidationPipe(setupFinishSchema)) input: SetupFinishInput, @Req() req: Request) {
-    return this.setup.finish(input.password, clientIp(req));
+  finish(@ReqUser() user: AuthUser, @Body(new ZodValidationPipe(setupFinishSchema)) _input: object, @Req() req: Request) {
+    return this.setup.finish(user, clientIp(req));
+  }
+}
+
+/** Plan 14: sign-up makes the shop and logs its owner in. */
+@Controller('auth')
+export class SignupController {
+  constructor(private readonly setup: SetupService) {}
+
+  @Public()
+  @Post('signup')
+  @HttpCode(201)
+  async signup(@Body(new ZodValidationPipe(signupSchema)) input: SignupInput, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<CurrentUser> {
+    const { token, user, sessionMaxHours } = await this.setup.signup(input, { ipAddress: clientIp(req), userAgent: req.headers['user-agent'] ?? null });
+    setSessionCookie(res, token, sessionMaxHours);
+    return user;
   }
 }

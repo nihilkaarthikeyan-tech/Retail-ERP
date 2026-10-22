@@ -7,7 +7,8 @@ import { Cron } from '@nestjs/schedule';
 import { businessDate, type CreateOrdersFromSuggestionsInput, type CurrentUser, Decimal, INDIA_TIME_ZONE, reorderSuggestion } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
-import { PrismaService } from '../prisma/prisma.service.js';
+import { forEachShop } from '../prisma/each-shop.js';
+import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { defaultNeededBy, PurchaseOrdersService } from './purchase-orders.service.js';
 
@@ -20,6 +21,7 @@ export class ReorderService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly system: SystemPrisma,
     private readonly audit: AuditService,
     private readonly common: PurchaseCommon,
     private readonly orders: PurchaseOrdersService,
@@ -55,14 +57,17 @@ export class ReorderService {
 
   @Cron('30 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
-    try {
-      for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
-        const n = await this.run(c.id, businessDate(), { userId: null, ipAddress: null });
-        if (n) this.log.log(`${n} reorder suggestion(s) for ${businessDate()}`);
+    // Plan 14: shop by shop.
+    await forEachShop(this.system, this.log, 'Nightly reorder run', async () => {
+      try {
+        for (const c of await this.prisma.company.findMany({ where: { active: true }, select: { id: true } })) {
+          const n = await this.run(c.id, businessDate(), { userId: null, ipAddress: null });
+          if (n) this.log.log(`${n} reorder suggestion(s) for ${businessDate()}`);
+        }
+      } catch (err) {
+        this.log.error('Nightly reorder run failed', err instanceof Error ? err.stack : String(err));
       }
-    } catch (err) {
-      this.log.error('Nightly reorder run failed', err instanceof Error ? err.stack : String(err));
-    }
+    });
   }
 
   async runNow(actor: Actor, user: CurrentUser) {

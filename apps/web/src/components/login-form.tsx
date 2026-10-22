@@ -30,7 +30,7 @@ export function LoginForm() {
     try {
       const user = await api.post<CurrentUser>("/auth/login", parsed.data, { redirectOnUnauthorized: false });
       await refresh();
-      router.replace(user.mustChangePassword ? "/change-password" : "/");
+      router.replace(user.mustChangePassword ? "/change-password" : "/dashboard");
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);
