@@ -4,17 +4,28 @@
 //   node dist/platform/create-admin.js <email> "<name>"
 // On the company server the output goes straight into a root-only file
 // (see deploy/README.md); the password is never typed into a chat or a ticket.
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { hashPassword, passwordProblem } from '../auth/password.js';
 import { loadRootEnv, requireEnv } from '../env.js';
 import { PrismaClient } from '../generated/prisma/client.js';
 
-/** 20 letters and digits, always with both, so it passes the password rules. */
+/** Plain words that are easy to read out and type; three of them with a number make the password. */
+const WORDS = [
+  'mango', 'temple', 'river', 'silver', 'lotus', 'cotton', 'copper', 'garden', 'monsoon', 'saffron',
+  'jasmine', 'coral', 'marble', 'bamboo', 'ginger', 'pepper', 'tiger', 'falcon', 'parrot', 'peacock',
+  'harbour', 'lantern', 'meadow', 'orchid', 'pebble', 'planet', 'rocket', 'sunset', 'thunder', 'velvet',
+  'walnut', 'window', 'yellow', 'zebra', 'anchor', 'basket', 'candle', 'dragon', 'engine', 'forest',
+  'guitar', 'hammer', 'island', 'jungle', 'kettle', 'ladder', 'magnet', 'needle', 'orange', 'pencil',
+  'quartz', 'rabbit', 'saddle', 'teapot', 'umbrella', 'violet', 'whistle', 'cobalt', 'sparrow', 'summit',
+];
+
+/** Easy to read and type, e.g. "Mango-Temple-River-4821"; letters and digits, so it passes the password rules. */
 function newPassword(): string {
   for (;;) {
-    const p = randomBytes(24).toString('base64url').replace(/[-_]/g, '').slice(0, 20);
-    if (p.length === 20 && !passwordProblem(p, 12)) return p;
+    const words = Array.from({ length: 3 }, () => WORDS[randomInt(WORDS.length)]).map((w) => w[0].toUpperCase() + w.slice(1));
+    const p = `${words.join('-')}-${randomInt(1000, 10_000)}`;
+    if (!passwordProblem(p, 12)) return p;
   }
 }
 
