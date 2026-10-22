@@ -68,6 +68,8 @@ interface ShopDetails {
 }
 
 const ALREADY_SIGNED_UP = 'An account with this email already exists. Log in instead.';
+/** Plan 14: the free trial of a shop that signs up (owner decision of 22 October 2026). */
+const TRIAL_DAYS = 14;
 
 /**
  * Plan 14: a new shop on the shared system.
@@ -110,7 +112,8 @@ export class SetupService {
     const owner = { firstName: input.firstName, lastName: input.lastName ?? null, email: input.email, password: input.password };
     const userId = await this.prisma.$transaction(
       async (tx) => {
-        const company = await tx.company.create({ data: { id: companyId, code, legalName: input.shopName, stateCode: '', phone: input.mobile ?? null, email: input.email } });
+        const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 86_400_000);
+        const company = await tx.company.create({ data: { id: companyId, code, legalName: input.shopName, stateCode: '', phone: input.mobile ?? null, email: input.email, trialEndsAt } });
         const admin = await this.createOwner(tx, company.id, owner, meta.ipAddress);
         await this.audit.record(tx, { userId: admin, ipAddress: meta.ipAddress }, { action: 'create', entityType: 'company', entityId: company.id, changes: { code, legalName: company.legalName, signup: true } });
         return admin;

@@ -59,3 +59,11 @@ Shows that two shops on the same system never see each other's data.
 - Shop: Meena Fashions (clothing, not registered for GST), first shop MAIN with till T1
 - Owner login: `meena@demo-shop.test`, password `Meena-demo-2026` (development only)
 - It starts empty: no items, customers or bills. The first shop's 26 items are not visible to it.
+
+## Retail ERP admin (plan 14, made with the create-admin command on 22 October 2026)
+
+The people who run the Retail ERP service: every shop, switching a shop off or on, the landing page messages.
+Not part of any shop. Log in at http://localhost:3001/admin/login.
+
+- Email `admin@retailerp.test`, password `646cpnPnDBZAOnTXTKbx` (development only; made by `node dist/platform/create-admin.js`)
+- On the company server the admin is made with the same command and the password goes into a root-only file (deploy/README.md).

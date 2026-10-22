@@ -44,7 +44,7 @@ export async function resetDatabase(prisma: SystemPrisma): Promise<void> {
       "GstSettings", "EInvoice", "EWayBill", "GstReturnUpload",
       "CompanyModule", "SetupProgress",
       "LoyaltyEntry", "LoyaltyTier", "LoyaltySettings", "GiftCardEntry", "GiftCard",
-      "Company", "SecuritySettings"
+      "Lead", "Company", "SecuritySettings"
     RESTART IDENTITY CASCADE`);
   // Plan 14: every default (units, roles, settings) is made per shop when the shop is set up.
 }

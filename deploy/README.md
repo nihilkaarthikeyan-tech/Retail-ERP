@@ -24,8 +24,14 @@ Address: **https://retailerp.52digit.com** — the web app at `/`, the API at `/
 3. Nginx: copy `nginx-retailerp.conf` to `/etc/nginx/sites-available/retailerp.52digit.com`, link it into `sites-enabled`,
    `nginx -t`, then `systemctl reload nginx` (never restart). Then `certbot --nginx -d retailerp.52digit.com`.
 4. Backups: `cp deploy/retail-erp.cron /etc/cron.d/retail-erp`, then run `deploy/backup.sh` once by hand to check it.
-5. Open the address and finish the setup wizard straight away (until it is finished, anyone who opens the address
-   could do it).
+5. Make the Retail ERP admin (the people who run the service; see every shop at `/admin`). The password is
+   generated and kept in a root-only file; read it on the server, never paste it into a chat or a ticket:
+   ```sh
+   umask 077; docker exec retail-erp-prod-api-1 node dist/platform/create-admin.js you@example.com "Your name" > /root/retailerp-admin.txt
+   cat /root/retailerp-admin.txt
+   ```
+   Running it again for the same email gives a new password and ends that admin's open sessions.
+   Shops sign up themselves at `/signup`.
 
 ## Updating to a new version
 

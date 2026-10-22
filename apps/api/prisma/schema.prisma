@@ -47,6 +47,8 @@ model Company {
   active               Boolean   @default(true)
   /// Plan 14: when the owner finished the setup wizard; until then the shop shows the wizard.
   setupCompletedAt     DateTime?
+  /// Plan 14: the end of the free trial of a shop that signed up; empty for shops on a plan.
+  trialEndsAt          DateTime?
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -3428,4 +3430,36 @@ model Lead {
   handledAt DateTime?
 
   @@index([createdAt])
+}
+
+/// Plan 14: a person who runs the Retail ERP service (the Retail ERP admin). Not part of any shop.
+model PlatformAdmin {
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  name             String
+  passwordHash     String
+  active           Boolean   @default(true)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sessions PlatformSession[]
+}
+
+/// Plan 14: a logged-in Retail ERP admin (its own cookie, separate from the shops' sessions).
+model PlatformSession {
+  id           String    @id @default(uuid()) @db.Uuid
+  adminId      String    @db.Uuid
+  tokenHash    String    @unique
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  admin PlatformAdmin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
 }

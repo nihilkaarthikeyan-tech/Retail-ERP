@@ -39,6 +39,50 @@ export const leadSchema = z.object({
 });
 export type LeadInput = z.infer<typeof leadSchema>;
 
+/** Plan 14: the Retail ERP admin's login (people who run the service, not a shop). */
+export const platformLoginSchema = z.object({
+  email,
+  password: z.string().min(1, 'Enter the password').max(200),
+});
+export type PlatformLoginInput = z.infer<typeof platformLoginSchema>;
+
+/** Plan 14: the Retail ERP admin switches a shop off or on, with a reason kept in the shop's history. */
+export const platformShopSwitchSchema = z.object({
+  active: z.boolean(),
+  reason: trimmed(300),
+});
+export type PlatformShopSwitchInput = z.infer<typeof platformShopSwitchSchema>;
+
+/** Plan 14: one shop on the Retail ERP admin screen. */
+export interface PlatformShopDto {
+  id: string;
+  code: string;
+  name: string;
+  shopType: string | null;
+  city: string | null;
+  active: boolean;
+  createdAt: string;
+  setupCompletedAt: string | null;
+  trialEndsAt: string | null;
+  owner: { name: string; email: string } | null;
+  users: number;
+  bills: number;
+  lastActiveAt: string | null;
+}
+
+/** Plan 14: a landing page message on the Retail ERP admin screen. */
+export interface PlatformLeadDto {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  shopName: string | null;
+  shopType: string | null;
+  message: string | null;
+  createdAt: string;
+  handledAt: string | null;
+}
+
 /** Step 1, "Your business". The first financial year defaults to the current Indian one. */
 export const setupBusinessSchema = z.object({
   legalName: trimmed(160),

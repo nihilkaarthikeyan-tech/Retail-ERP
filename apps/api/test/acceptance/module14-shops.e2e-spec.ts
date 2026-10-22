@@ -5,6 +5,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
+import { hashPassword } from '../../src/auth/password.js';
 import { PrismaService, SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { runForCompany, runRequest } from '../../src/prisma/tenancy.js';
 import { type Agent, agent, createTestApp, login, OWNER, resetDatabase, SETUP_INPUT } from '../helpers.js';
@@ -198,5 +199,80 @@ describe('14.2 Sign-up, login and a switched-off shop', () => {
     expect(res.body.message).toMatch(/switched off/);
     await prisma.company.updateMany({ where: { code: 'RRPL' }, data: { active: true } });
     await login(app, OWNER.email, OWNER.password);
+  });
+});
+
+describe('14.3 The Retail ERP admin', () => {
+  const ADMIN = { email: 'admin@retailerp.test', password: 'Admin-pass-2026x' };
+  let admin: Agent;
+
+  beforeAll(async () => {
+    await resetDatabase(prisma);
+    await prisma.platformSession.deleteMany();
+    await prisma.platformAdmin.deleteMany();
+    await prisma.platformAdmin.create({ data: { email: ADMIN.email, name: 'Service admin', passwordHash: await hashPassword(ADMIN.password) } });
+    await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(201);
+    await agent(app).post('/auth/signup').send({ firstName: 'Meena', email: 'meena@new-shop.test', password: 'Meena-pass-2026', shopName: 'Meena Stores' }).expect(201);
+  });
+
+  it('logs in with its own account; a shop owner cannot use the admin screen, and the admin cannot open a shop', async () => {
+    await request(app.getHttpServer()).post('/platform/login').send({ email: ADMIN.email, password: 'wrong-pass-123' }).expect(401);
+    // A shop owner's email and password do not work here, and a shop session does not open the admin screen.
+    await request(app.getHttpServer()).post('/platform/login').send({ email: OWNER.email, password: OWNER.password }).expect(401);
+    const owner = await login(app, OWNER.email, OWNER.password);
+    await owner.get('/platform/shops').expect(401);
+
+    admin = agent(app);
+    await admin.post('/platform/login').send(ADMIN).expect(200);
+    expect((await admin.get('/platform/me').expect(200)).body.email).toBe(ADMIN.email);
+    // The admin's cookie is not a shop's session.
+    await admin.get('/items').expect(401);
+  });
+
+  it('lists every shop with its owner, trial and use; never a shop\'s own records', async () => {
+    const shops = (await admin.get('/platform/shops').expect(200)).body as { name: string; owner: { email: string } | null; trialEndsAt: string | null; setupCompletedAt: string | null; users: number }[];
+    expect(shops.map((s) => s.owner?.email).sort()).toEqual(['meena@new-shop.test', OWNER.email].sort());
+    const meena = shops.find((s) => s.owner?.email === 'meena@new-shop.test')!;
+    // Sign-up starts a 14-day trial; the set-up wizard is still to do.
+    expect(Math.round((new Date(meena.trialEndsAt!).getTime() - Date.now()) / 86_400_000)).toBe(14);
+    expect(meena.setupCompletedAt).toBeNull();
+    expect(Object.keys(shops[0]).sort()).toEqual(['active', 'bills', 'city', 'code', 'createdAt', 'id', 'lastActiveAt', 'name', 'owner', 'setupCompletedAt', 'shopType', 'trialEndsAt', 'users']);
+  });
+
+  it('switching a shop off stops its logins; the reason is in that shop\'s history; switching on lets them back', async () => {
+    const shops = (await admin.get('/platform/shops').expect(200)).body as { id: string; owner: { email: string } | null }[];
+    const rrpl = shops.find((s) => s.owner?.email === OWNER.email)!;
+    const owner = await login(app, OWNER.email, OWNER.password);
+    await admin.patch(`/platform/shops/${rrpl.id}`).send({ active: false }).expect(400);
+    expect((await admin.patch(`/platform/shops/${rrpl.id}`).send({ active: false, reason: 'Trial ended' }).expect(200)).body.active).toBe(false);
+    await owner.get('/auth/me').expect(401);
+    await request(app.getHttpServer()).post('/auth/login').send({ email: OWNER.email, password: OWNER.password }).expect(401);
+    const history = await prisma.auditLog.findMany({ where: { companyId: rrpl.id, entityType: 'company', reason: 'Trial ended' } });
+    expect(history).toHaveLength(1);
+    expect(history[0].changes).toMatchObject({ active: { old: true, new: false }, byRetailErpAdmin: ADMIN.email });
+
+    await admin.patch(`/platform/shops/${rrpl.id}`).send({ active: true, reason: 'Plan paid' }).expect(200);
+    await login(app, OWNER.email, OWNER.password);
+  });
+
+  it('reads the landing page messages and marks them handled; robots filling the hidden field are dropped', async () => {
+    await request(app.getHttpServer()).post('/leads').send({ name: 'Ravi', phone: '9840012345', shopName: 'Ravi Footwear', shopType: 'footwear', message: 'Two counters' }).expect(201);
+    await request(app.getHttpServer()).post('/leads').send({ name: 'Bot', phone: '9999999999', website: 'http://spam.example' }).expect(201);
+    const leads = (await admin.get('/platform/leads').expect(200)).body as { id: string; name: string; handledAt: string | null }[];
+    expect(leads.map((l) => l.name)).toEqual(['Ravi']);
+    const handled = (await admin.patch(`/platform/leads/${leads[0].id}`).send({ handled: true }).expect(200)).body;
+    expect(handled.handledAt).not.toBeNull();
+    // A shop never sees the messages.
+    const owner = await login(app, OWNER.email, OWNER.password);
+    await owner.get('/platform/leads').expect(401);
+  });
+
+  it('five wrong passwords lock the admin account for 15 minutes; logging out ends the session', async () => {
+    for (let i = 0; i < 5; i++) await request(app.getHttpServer()).post('/platform/login').send({ email: ADMIN.email, password: `wrong-pass-${i}a` }).expect(401);
+    const locked = await request(app.getHttpServer()).post('/platform/login').send(ADMIN).expect(401);
+    expect(locked.body.message).toMatch(/15 minutes/);
+    await admin.post('/platform/logout').expect(204);
+    await admin.get('/platform/shops').expect(401);
+    await prisma.platformAdmin.update({ where: { email: ADMIN.email }, data: { lockedUntil: null } });
   });
 });
