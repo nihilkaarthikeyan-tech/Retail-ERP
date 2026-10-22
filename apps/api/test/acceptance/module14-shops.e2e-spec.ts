@@ -231,7 +231,8 @@ describe('14.3 The Retail ERP admin', () => {
 
   it('lists every shop with its owner, trial and use; never a shop\'s own records', async () => {
     const shops = (await admin.get('/platform/shops').expect(200)).body as { name: string; owner: { email: string } | null; trialEndsAt: string | null; setupCompletedAt: string | null; users: number }[];
-    expect(shops.map((s) => s.owner?.email).sort()).toEqual(['meena@new-shop.test', OWNER.email].sort());
+    const byEmail = (a?: string, b?: string) => String(a).localeCompare(String(b));
+    expect(shops.map((s) => s.owner?.email).sort(byEmail)).toEqual(['meena@new-shop.test', OWNER.email].sort(byEmail));
     const meena = shops.find((s) => s.owner?.email === 'meena@new-shop.test')!;
     // Sign-up starts a 14-day trial; the set-up wizard is still to do.
     expect(Math.round((new Date(meena.trialEndsAt!).getTime() - Date.now()) / 86_400_000)).toBe(14);
