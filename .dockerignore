@@ -1,0 +1,23 @@
+# Copyright (c) 2026, Rademics. All rights reserved.
+.git
+.gitignore
+.claude
+.env
+.env.*
+**/node_modules
+**/dist
+**/.next
+**/coverage
+**/*.tsbuildinfo
+uploads
+*.sqlite
+*.db
+*.sql
+!apps/api/prisma/migrations/**/*.sql
+*.log
+Dockerfile
+docker-compose*.yml
+deploy
+docs
+*.md
+apps/api/perf

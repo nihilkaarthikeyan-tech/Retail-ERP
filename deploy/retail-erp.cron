@@ -1,0 +1,4 @@
+# Copyright (c) 2026, Rademics. All rights reserved.
+# Copied to /etc/cron.d/retail-erp: database backup every night at 02:30 Indian time
+# (21:00 UTC; the server clock runs on UTC).
+0 21 * * * root /opt/retail-erp/app/deploy/backup.sh >> /var/log/retail-erp-backup.log 2>&1

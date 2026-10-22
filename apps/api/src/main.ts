@@ -15,6 +15,9 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
   app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
   app.useBodyParser('urlencoded', { limit: JSON_BODY_LIMIT, extended: true });
+  // On the server the API sits behind Nginx: trust it for the visitor's address
+  // (login history, audit log). Unset in development.
+  if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
   app.use(cookieParser());
   app.enableCors({
     origin: (process.env.WEB_ORIGIN ?? 'http://localhost:3000').split(',').map((o) => o.trim()),
