@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { SignupForm } from "@/components/signup-form";
 import { useAuth } from "@/lib/auth-context";
+import { BrandMark } from "@/components/brand-mark";
 
 /** Plan 14: a new shop signs up, then sets up its shop. */
 export default function SignupPage() {
@@ -19,7 +20,7 @@ export default function SignupPage() {
   return (
     <main className="public-page narrow">
       <Link href="/" className="public-brand">
-        <span className="shell-brand-mark" aria-hidden="true" />
+        <BrandMark />
         Retail ERP
       </Link>
       <h1>Start your free trial</h1>

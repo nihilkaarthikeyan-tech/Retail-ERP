@@ -12,6 +12,7 @@ import { Button } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, fullName } from "@/lib/format";
+import { BrandMark } from "@/components/brand-mark";
 
 function initials(user: CurrentUser): string {
   const letters = [user.firstName, user.lastName].map((p) => p?.trim()?.[0] ?? "").join("");
@@ -74,7 +75,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="shell">
       <header className="shell-head">
         <Link href="/dashboard" className="shell-brand">
-          <span className="shell-brand-mark" aria-hidden="true" />
+          <BrandMark />
           Retail ERP
         </Link>
         {ready ? (

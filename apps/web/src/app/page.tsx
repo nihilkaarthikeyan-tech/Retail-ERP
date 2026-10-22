@@ -4,6 +4,7 @@ import Link from "next/link";
 import { SHOP_TYPE_KEYS, SHOP_TYPES, type ShopTypeKey } from "shared";
 import { Icon, type IconName } from "@/components/icons";
 import { ContactForm } from "@/components/landing/contact-form";
+import { BrandMark } from "@/components/brand-mark";
 
 export const metadata: Metadata = {
   title: "Retail ERP — billing, stock, GST and accounts for your shop",
@@ -33,7 +34,7 @@ export default function LandingPage() {
     <div className="landing">
       <header className="landing-bar">
         <Link href="/" className="public-brand landing-brand">
-          <span className="shell-brand-mark" aria-hidden="true" />
+          <BrandMark />
           Retail ERP
         </Link>
         <nav className="landing-nav" aria-label="Page">

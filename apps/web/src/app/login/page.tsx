@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { LoginForm } from "@/components/login-form";
 import { useAuth } from "@/lib/auth-context";
+import { BrandMark } from "@/components/brand-mark";
 
 export default function LoginPage() {
   const { user, loading } = useAuth();
@@ -18,7 +19,7 @@ export default function LoginPage() {
   return (
     <main className="public-page narrow">
       <Link href="/" className="public-brand">
-        <span className="shell-brand-mark" aria-hidden="true" />
+        <BrandMark />
         Retail ERP
       </Link>
       <h1>Log in</h1>

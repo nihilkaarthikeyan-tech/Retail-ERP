@@ -42,6 +42,7 @@ import { Alert, Button, CheckInput, RadioInput, SelectInput, TextInput } from "@
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { blankToNull, formatDate } from "@/lib/format";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { BrandMark } from "@/components/brand-mark";
 
 // ---- The form, as typed (strings), and to and from the saved answers ----
 
@@ -240,7 +241,7 @@ export function SetupWizard() {
   return (
     <main className="public-page setup-page">
       <div className="public-brand">
-        <span className="shell-brand-mark" aria-hidden="true" />
+        <BrandMark />
         Retail ERP
       </div>
       <h1>Set up your shop</h1>

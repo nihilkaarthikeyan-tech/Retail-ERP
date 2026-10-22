@@ -7,6 +7,7 @@ import { type PlatformLeadDto, type PlatformShopDto, SHOP_TYPES, type ShopTypeKe
 import { Alert, Badge, Button, type Column, DataTable, Dialog, TextareaInput } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { BrandMark } from "@/components/brand-mark";
 
 interface Admin {
   id: string;
@@ -147,7 +148,7 @@ export default function AdminPage() {
     <main className="admin-page">
       <header className="toolbar">
         <div className="public-brand" style={{ margin: 0 }}>
-          <span className="shell-brand-mark" aria-hidden="true" />
+          <BrandMark />
           Retail ERP admin
         </div>
         <span className="spacer" />

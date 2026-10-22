@@ -7,6 +7,7 @@ import { platformLoginSchema } from "shared";
 import { Alert, Button, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { BrandMark } from "@/components/brand-mark";
 
 /** Plan 14: login of the people who run the Retail ERP service (not a shop's login). */
 export default function AdminLoginPage() {
@@ -36,7 +37,7 @@ export default function AdminLoginPage() {
   return (
     <main className="public-page narrow">
       <div className="public-brand">
-        <span className="shell-brand-mark" aria-hidden="true" />
+        <BrandMark />
         Retail ERP admin
       </div>
       <h1>Log in</h1>
