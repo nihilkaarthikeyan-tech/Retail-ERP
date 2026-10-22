@@ -2,8 +2,8 @@
 // Point-of-sale calculations (plan 06 §5; blueprint 09 "Calculations",
 // blueprint 04 offers). Pure functions on decimal strings, shared by the till
 // (preview and offline billing) and the API (authoritative check).
-// The GST split from prices that include GST is provisional until the CA
-// approves it with the rate list (plan 06 answer 1).
+// The GST split from prices that include GST uses the rate list, which applies
+// as soon as a rate is saved (owner decision of 22 Oct 2026).
 import { Decimal, type DecimalInput, roundMoney, roundTo } from './rounding.js';
 
 const D = (v: DecimalInput) => new Decimal(v);

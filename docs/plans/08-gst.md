@@ -5,6 +5,10 @@
 gst.gov.in, cbic-gst.gov.in, einvoice1.gst.gov.in, docs.ewaybillgst.gov.in, PIB).
 **Rule (CLAUDE.md, changed 18 October 2026):** built now; every bill stays marked provisional and no real shop uses GST in
 production until the Chartered Accountant approves the GST settings (questions 43 and 55–64).
+**Changed 22 October 2026 (owner):** the approval step was removed. GST settings and rates apply as soon as they are saved,
+new bills are never provisional, rates can be edited (each change in the history), and switching the tills live needs only
+the Owner. The approve and withdraw-approval endpoints and the "Approve GST rates" right are gone; bills saved as provisional
+before this date keep the mark as history. Where this plan still mentions the approval below, this note wins.
 
 **Design principle (CLAUDE.md §1a):** the GST law is built once into the core for every business. Everything that differs
 between businesses is a setting with a sensible default.

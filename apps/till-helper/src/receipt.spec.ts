@@ -144,7 +144,7 @@ describe('receipt on 58 mm paper (32 characters)', () => {
 });
 
 describe('receipt variants', () => {
-  it('prints ₹ as "Rs." and marks duplicates and test bills', () => {
+  it('prints ₹ as "Rs." and marks duplicates and older provisional bills', () => {
     const r = sampleSale();
     r.duplicate = true;
     r.provisional = true;
@@ -152,7 +152,7 @@ describe('receipt variants', () => {
     const lines = asText(buildReceipt(r, 80));
     expect(lines).toContain('TAX INVOICE');
     expect(lines).toContain('DUPLICATE');
-    expect(lines).toContain('GST rates not yet approved - test bill');
+    expect(lines).toContain('GST provisional (an older bill)');
     expect(lines).toContain('Prices in Rs. include GST');
   });
 

@@ -699,8 +699,13 @@ Amounts use test rates entered for these scenarios; the CA approves the real rat
   - importing the portal's response attaches the reference number and signed QR code, which then print.
 - **Then** a ₹60,000 transfer to another state produces the e-way bill JSON; with 450 km entered, validity is 3 days.
 
-### 8.11 Provisional until approved
-- **Then** until "GST settings approved by the CA" is ticked, every bill stays marked provisional and live billing cannot be switched on.
+### 8.11 GST applies as soon as it is saved (owner decision, 22 October 2026)
+- **Given** the GST settings at their defaults and a GST rate just added for a new HSN code (there is no approval step)
+- **Then:**
+  - a till bill using that rate is real GST at once: it is not marked provisional and carries no "GST provisional" flag;
+  - the Owner can switch the tills live without any GST approval; nobody else can;
+  - a GST rate can be edited; the change is in the history, new bills use the new rate and bills already saved keep the rate they were made with;
+  - a bill saved as provisional before 22 October 2026 keeps that mark, and its return copies it.
 
 ### 8.12 Transfers between stores (G10)
 - **Given** MAIN under the Tamil Nadu GSTIN, ANNA under the same GSTIN, BLR under a Karnataka GSTIN, and 50 shirts at MAIN at ₹500 (HSN 6205, 5%)

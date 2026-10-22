@@ -92,9 +92,6 @@ export class PosController {
   @Patch('gst-rates/:id') @RequirePermission('gst_rates.manage') updateGstRate(@Param('id', id()) rateId: string, @Body(zod(gstRateSchema.partial())) input: Partial<GstRateInput>, @ReqActor() actor: Actor) {
     return this.setup.updateGstRate(rateId, input, actor);
   }
-  @Post('gst-rates/:id/approve') @HttpCode(200) @RequirePermission('gst_rates.approve') approveGstRate(@Param('id', id()) rateId: string, @ReqActor() actor: Actor) {
-    return this.setup.approveGstRate(rateId, actor);
-  }
 
   // ---- Payment methods, tills, settings ----
   @Get('payment-methods') @RequireAnyPermission('pos.setup', 'pos.sell', 'pos.reports') paymentMethods() {

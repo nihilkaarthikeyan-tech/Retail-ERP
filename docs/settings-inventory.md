@@ -231,7 +231,6 @@ The goods-in-transit place is made automatically and has no setting.
 | GST table on till receipts | GST settings | Tax by rate at the foot of the receipt | On |
 | Combine sales under ₹200 in reports | GST settings | One daily line in the GST reports; bills are all kept | On |
 | Free samples | GST settings | How samples are taxed; the CA decides | Not set |
-| Approved by the Chartered Accountant *(own screen)* | GST settings | Until approved every bill is provisional | Not approved |
 | GST rates by HSN code (list) | GST rates | Rate by HSN, date and price band | None |
 
 **Proposed additions**

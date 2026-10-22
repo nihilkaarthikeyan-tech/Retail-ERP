@@ -1,7 +1,7 @@
 # Plan: Module 6, Point of sale (the billing counter)
 
 Status: **approved by the project owner on 15 October 2026** with these answers to section 11:
-1. GST: option A. The HSN GST rate list is built now; bills are marked provisional; tills go live only after the CA approves the rates and the Owner switches go-live on.
+1. GST: option A. The HSN GST rate list is built now; bills are marked provisional; tills go live only after the CA approves the rates and the Owner switches go-live on. *(Changed 22 October 2026 by the owner: no approval step; rates apply as soon as they are saved, bills are never provisional, and only the Owner's go-live switch remains. See `docs/plans/08-gst.md`.)*
 2. Offers: simple offers and coupons. The best one is applied automatically. Cumulative, slab and stacking offers come later.
 3. Cashier discount: up to 5% without a manager PIN, never above the item's maximum.
 4. One shift per till, with PIN switching between cashiers.

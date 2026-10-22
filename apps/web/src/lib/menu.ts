@@ -96,7 +96,7 @@ export const MENU: MenuEntry[] = [
   { href: "/gift-cards", label: "Gift cards", permissions: ["giftcards.view", "giftcards.manage"], section: "Billing counter", icon: "tag", module: "gift_cards" },
   { href: "/pos/tills", label: "Tills", permissions: ["pos.setup"], section: "Billing counter", icon: "devices" },
   { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
-  { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage", "gst_rates.approve"], section: "Billing counter", icon: "percent" },
+  { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage"], section: "Billing counter", icon: "percent" },
   { href: "/pos/my-pin", label: "My till PIN", permissions: ["pos.sell", "pos.approve"], section: "Billing counter", icon: "key" },
   // Module 7
   { href: "/accounts", label: "Chart of accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", exact: true, icon: "book" },
@@ -133,7 +133,7 @@ export const MENU: MenuEntry[] = [
   { href: "/go-live", label: "Going live", ownerAdminOnly: true, section: "Administration", icon: "flag" },
   // Plan 12 §5: one Settings page; the older settings screens (catalogue, parties, inventory,
   // purchases, till, GST, printing) are reached from it.
-  { href: "/settings", label: "Settings", permissions: ["stock.lock", "purchase.settings", "pos.setup", "gst_rates.manage", "gst_rates.approve", "print.settings", "reports.summary_email"], section: "Administration", exact: true, icon: "settings" },
+  { href: "/settings", label: "Settings", permissions: ["stock.lock", "purchase.settings", "pos.setup", "gst_rates.manage", "print.settings", "reports.summary_email"], section: "Administration", exact: true, icon: "settings" },
   // Plan 12: optional modules on and off, and the shop type
   { href: "/settings/modules", label: "My modules", ownerAdminOnly: true, section: "Administration", icon: "sliders" },
   { href: "/sessions", label: "My sessions", section: "Administration", icon: "devices" },

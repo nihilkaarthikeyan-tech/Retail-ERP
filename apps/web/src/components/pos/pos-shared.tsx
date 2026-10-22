@@ -50,9 +50,6 @@ export interface GstRateDto {
   priceFrom?: string | null;
   priceUpTo?: string | null;
   effectiveFrom: string;
-  approved: boolean;
-  approvedAt: string | null;
-  approvedById: string | null;
   note: string | null;
 }
 
@@ -239,7 +236,7 @@ export const FLAG_LABELS: Record<string, string> = {
   gst_changed: "GST rate changed while the till was offline",
   price_missing: "Item had no price on the server; the till's price was kept",
   stock_negative: "Stock went below zero",
-  gst_provisional: "GST rate not approved yet",
+  gst_provisional: "GST provisional (an older bill, saved before GST rates applied as soon as saved)",
   credit_note_late: "Credit note after the GST time limit (30 November): tax not reduced in the return",
   buyer_details_missing: "Buyer details a GST invoice needs were missing (made offline)",
   expired_batch: "An expired batch was sold while offline",
@@ -280,7 +277,6 @@ export function posRights(user: CurrentUser | null) {
     shiftManage: hasPermission(user, "pos.shift.manage"),
     offers: hasPermission(user, "offers.manage"),
     gstManage: hasPermission(user, "gst_rates.manage"),
-    gstApprove: hasPermission(user, "gst_rates.approve"),
     owner: !!user?.isOwnerAdmin,
   };
 }

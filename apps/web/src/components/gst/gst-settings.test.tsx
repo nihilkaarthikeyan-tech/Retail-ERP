@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// Plan 08 §5 and scenario 8.11: the GST settings screen and the CA's approval;
+// Plan 08 §5 and scenario 8.11: the GST settings screen (in force once saved, no approval step);
 // the GST rate list with exempt/nil and price bands (G2).
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -27,10 +27,6 @@ const settings = (over: Partial<GstSettingsDto> = {}): GstSettingsDto => ({
   eWayStateLimits: {},
   defaultTransporterId: null,
   defaultTransporterName: null,
-  approved: false,
-  approvedAt: null,
-  approvedById: null,
-  approvalNote: null,
   ...over,
 });
 
@@ -68,18 +64,20 @@ afterEach(() => {
 });
 
 describe("GST settings (plan 08 §5, 8.11)", () => {
-  it("shows the defaults and that bills stay provisional until the accountant approves", async () => {
+  it("shows the defaults, says changes apply once saved, and has no approval step", async () => {
     mockApi({ "/auth/me": () => ({ status: 200, body: user(["gst_rates.manage"]) }), "/gst/settings": () => ({ status: 200, body: settings() }) });
     render(
       <AuthProvider>
         <GstSettingsView />
       </AuthProvider>,
     );
-    expect(await screen.findByText(/every bill is marked provisional/)).toBeTruthy();
+    expect(await screen.findByText(/applies to new bills as soon as it is saved/)).toBeTruthy();
     expect((screen.getByLabelText("GST scheme") as HTMLSelectElement).value).toBe("regular");
     expect((screen.getByLabelText("HSN digits on invoices") as HTMLSelectElement).value).toBe("4");
-    // Without the approval right there is no approve button.
-    expect(screen.queryByRole("button", { name: /Record the accountant/ })).toBeNull();
+    // Owner decision of 22 Oct 2026: no approval box, no provisional wording.
+    expect(screen.queryByText(/Chartered Accountant/)).toBeNull();
+    expect(screen.queryByText(/provisional/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /approv/i })).toBeNull();
   });
 
   it("a turnover above ₹5 crore switches HSN digits to 6, and saving sends the settings", async () => {
@@ -102,27 +100,6 @@ describe("GST settings (plan 08 §5, 8.11)", () => {
     expect(writes(fetchMock)[0]).toMatchObject({ path: "/gst/settings", body: { scheme: "composition", turnoverBand: "above_10cr", hsnDigits: 6, eWayLimit: "50000.00" } });
     expect(await screen.findByText("GST settings saved.")).toBeTruthy();
   });
-
-  it("records the accountant's approval only with a note", async () => {
-    const fetchMock = mockApi({
-      "/auth/me": () => ({ status: 200, body: user(["gst_rates.approve"]) }),
-      "GET /gst/settings": () => ({ status: 200, body: settings() }),
-      "POST /gst/settings/approve": () => ({ status: 200, body: settings({ approved: true, approvedAt: "2026-10-18T06:00:00.000Z", approvalNote: "CA letter 18 Oct" }) }),
-    });
-    render(
-      <AuthProvider>
-        <GstSettingsView />
-      </AuthProvider>,
-    );
-    fireEvent.click(await screen.findByRole("button", { name: /Record the accountant/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Yes, the accountant has signed off/ }));
-    expect(await screen.findByText("Write what the accountant approved")).toBeTruthy();
-    expect(writes(fetchMock)).toHaveLength(0);
-    fireEvent.change(screen.getByLabelText(/Note/), { target: { value: "CA letter 18 Oct" } });
-    fireEvent.click(screen.getByRole("button", { name: /Yes, the accountant has signed off/ }));
-    await waitFor(() => expect(writes(fetchMock)).toEqual([{ path: "/gst/settings/approve", body: { note: "CA letter 18 Oct" } }]));
-    expect(await screen.findByText(/CA letter 18 Oct/)).toBeTruthy();
-  });
 });
 
 describe("GST rate list with price bands (G2)", () => {
@@ -137,7 +114,7 @@ describe("GST rate list with price bands (G2)", () => {
       "/auth/me": () => ({ status: 200, body: user(["gst_rates.manage"]) }),
       "GET /pos/gst-rates": () => ({
         status: 200,
-        body: [{ id: "r1", hsnCode: "0401", rate: "0", cessRate: "0", kind: "nil", priceFrom: null, priceUpTo: null, effectiveFrom: "2026-10-01", approved: false, approvedAt: null, approvedById: null, note: null }],
+        body: [{ id: "r1", hsnCode: "0401", rate: "0", cessRate: "0", kind: "nil", priceFrom: null, priceUpTo: null, effectiveFrom: "2026-10-01", note: null }],
       }),
       "POST /pos/gst-rates": () => ({ status: 201, body: {} }),
     });

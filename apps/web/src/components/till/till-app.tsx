@@ -151,11 +151,6 @@ export function TillApp({ device, engine: given }: { device: TillDeviceInfo; eng
           </Link>
         </div>
       </header>
-      {snapshot && !snapshot.till.liveAllowed ? (
-        <div className="till-test-banner" role="status">
-          GST rates not approved yet — test bills
-        </div>
-      ) : null}
       {state.signedOut ? (
         <div className="till-test-banner till-warn-banner" role="status">
           The session has ended. Billing goes on; <Link href="/login">sign in again</Link> to send the waiting bills.

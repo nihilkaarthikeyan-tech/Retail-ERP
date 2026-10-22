@@ -155,7 +155,7 @@ Confirm the API can connect to the database and the web app can call the API bef
    - Where `docs/decisions.md` and the blueprint differ, **`docs/decisions.md` wins**.
    - Do not build anything marked **OPEN** in `docs/decisions.md` until the project owner records a decision.
    - Build only the **launch scope** in `docs/decisions.md`. Do not build deferred features.
-   - The GST module is built from the blueprint and official government sources (gst.gov.in, the e-invoice and e-way bill portals), citing the source of every rule. Until the Chartered Accountant approves the GST settings (questions 43 and 55–64), every bill stays marked provisional and no real shop may use GST in production.
+   - The GST module is built from the blueprint and official government sources (gst.gov.in, the e-invoice and e-way bill portals), citing the source of every rule. The owner decided on 22 October 2026 that there is no separate accountant approval step: GST settings and rates apply as soon as they are saved.
 2. Build in this order, finishing and testing each before the next:
    1. Users, roles and permissions; company and stores
    2. Items, units, barcodes, price lists

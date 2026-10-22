@@ -69,7 +69,7 @@ export const GETTING_STARTED_STEPS = [
   { key: 'opening_stock', label: 'Load your opening stock', hint: 'Count what is on the shelves today, or import the quantities from Excel.', href: '/stock/counts/new' },
   { key: 'staff', label: 'Add your staff and their rights', hint: 'A login for each person, with only the rights they need.', href: '/users/new' },
   { key: 'letterhead', label: 'Set your letterhead and logo', hint: 'Your logo and address at the top of printed documents.', href: '/printing' },
-  { key: 'gst_rates', label: 'Set GST rates for your HSN codes', hint: 'Then your Chartered Accountant approves them; until then every bill is marked provisional.', href: '/pos/gst-rates' },
+  { key: 'gst_rates', label: 'Set GST rates for your HSN codes', hint: 'The GST rate for each HSN code you sell. A rate applies to bills as soon as it is saved.', href: '/pos/gst-rates' },
   { key: 'test_bill', label: 'Make a test bill', hint: 'Sell something at the till to see the bill, the stock and the accounts move.', href: '/till' },
   { key: 'go_live', label: 'Set your go-live date', hint: 'The day real trading starts. Test bills before it can be cleared away.', href: '/go-live' },
 ] as const;
@@ -82,7 +82,7 @@ export interface GettingStartedStep {
   hint: string;
   href: string;
   done: boolean;
-  /** A short word on where it stands, e.g. "Rates added; waiting for the accountant's approval". */
+  /** A short word on where it stands, e.g. "2 tills". */
   note: string | null;
 }
 

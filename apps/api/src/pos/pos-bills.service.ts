@@ -373,12 +373,9 @@ export class PosBillsService {
     if (!input.offline && input.expectedTotal !== undefined && !D(input.expectedTotal).eq(net)) {
       throw new ConflictException(`PRICE_CHANGED: the server total is ₹${net.toFixed(2)}, the till showed ₹${D(input.expectedTotal).toFixed(2)}; check the bill again`);
     }
-    // Plan 06 answer 1: once live, only approved GST rates may be used.
-    // Plan 08 §5, 8.11: until the CA approves the GST settings every bill stays provisional.
-    const gstApproved = !!gstSettings.approvedAt;
+    // Owner decision of 22 Oct 2026: GST settings and rates apply as soon as they are saved, so new
+    // lines are never provisional; only a return of an old bill saved as provisional keeps that flag.
     const provisional = [...(ret?.lines ?? []), ...(sale?.lines ?? [])].some((l) => l.provisional);
-    // Only new sales are refused once live; a return of a bill from the test period must still be possible.
-    if (settings.liveAllowed && (sale?.lines ?? []).some((l) => l.provisional) && !input.offline) throw new BadRequestException('A GST rate on this bill is not approved yet; the accountant must approve it');
     if (provisional) flags.add('gst_provisional');
     // Plan 11 part 2: a warning (never a refusal, decision 32) when the sale takes goods set aside for someone's order.
     const warnings = sale ? await this.reservedWarnings(sale, till, order) : [];
@@ -424,7 +421,7 @@ export class PosBillsService {
               billDiscount: b.billDiscount.toFixed(2),
               offline: input.offline,
               checkFlags: flagsFor(b),
-              gstProvisional: !gstApproved || b.lines.some((l) => l.provisional),
+              gstProvisional: b.lines.some((l) => l.provisional),
               invoiceKind: b.supply.invoiceKind,
               buyerGstin: b.buyer.gstin,
               buyerName: b.buyer.name,
@@ -1048,7 +1045,7 @@ export class PosBillsService {
         offerId: chosen?.offer.id ?? null,
         isFree: false,
         gstRate: D(gst.rate),
-        provisional: !gst.approvedAt,
+        provisional: false,
         amount,
         returnOfLineId: null,
         approvedById,
@@ -1060,7 +1057,6 @@ export class PosBillsService {
         // Plan 08 G2: the server's rate for what the till charged, so a different rate is flagged.
         const own = await this.common.gstRateFor(this.prisma, b.item, date, bandUnitPrice(l.charged.lineTotal, b.basicQuantity));
         line.gstRate = ctx.supply.noTax ? new Decimal(0) : D(own.rate);
-        line.provisional = !own.approvedAt;
         this.applyCharged(line, l, flags);
         line.keepRate = true;
       }
@@ -1143,7 +1139,7 @@ export class PosBillsService {
           offerId: f.offerId ?? parent?.offerId ?? null,
           isFree: true,
           gstRate: own ? own.gstRate : (parent?.gstRate ?? new Decimal(0)),
-          provisional: own ? own.provisional : (parent?.provisional ?? true),
+          provisional: false,
           amount: new Decimal(0),
           returnOfLineId: null,
           approvedById: null,
@@ -1220,7 +1216,7 @@ export class PosBillsService {
           offerId: null,
           isFree: false,
           gstRate: D(gst.rate),
-          provisional: !gst.approvedAt,
+          provisional: false,
           amount: charge,
           returnOfLineId: null,
           approvedById: null,
@@ -1257,7 +1253,7 @@ export class PosBillsService {
         offerId: null,
         isFree: false,
         gstRate: D(gst.rate),
-        provisional: !gst.approvedAt,
+        provisional: false,
         amount: charge,
         returnOfLineId: null,
         approvedById: null,
@@ -1280,7 +1276,6 @@ export class PosBillsService {
       if (!l.isFree && l.item.hsnCode) {
         const r = await this.common.gstRateFor(this.prisma, l.item, ctx.date, bandUnitPrice(l.amount, l.basicQuantity));
         l.gstRate = D(r.rate);
-        l.provisional = !r.approvedAt;
       }
       if (ctx.supply.noTax) l.gstRate = new Decimal(0);
     }
@@ -1349,7 +1344,7 @@ export class PosBillsService {
     value = value ?? (item.mrp ? D(item.mrp) : null);
     if (!value || value.lte(0)) return null;
     const rate = await this.common.gstRateFor(this.prisma, item, date).catch(() => null);
-    return { item, unitId: item.baseUnitId, factor: new Decimal(1), mrp: item.mrp ? D(item.mrp) : null, value, gstRate: D(rate?.rate ?? 0), provisional: !rate?.approvedAt };
+    return { item, unitId: item.baseUnitId, factor: new Decimal(1), mrp: item.mrp ? D(item.mrp) : null, value, gstRate: D(rate?.rate ?? 0), provisional: false };
   }
 
   /** Offline: keep what the till charged; flag where the server would differ (pos-offline §5). */
@@ -1514,7 +1509,7 @@ export class PosBillsService {
           offerId: null,
           isFree: false,
           gstRate: supply.noTax ? new Decimal(0) : D(gst.rate),
-          provisional: !gst.approvedAt,
+          provisional: false,
           amount: roundMoney(price.mul(b.quantity)).neg(),
           returnOfLineId: null,
           approvedById,

@@ -54,10 +54,10 @@ function snapshot(over: Partial<StoredSnapshot> = {}): StoredSnapshot {
     ],
     prices: [...TEE.map((t) => price(t, "399")), price(TOP_A, "599"), price(TOP_B, "499"), price(SHIRT, "1299"), price(BELT, "299")],
     gstRates: [
-      { hsnCode: "6109", rate: "5", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "6205", rate: "5", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "4203", rate: "12", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "9965", rate: "18", effectiveFrom: "2026-04-01", approved: false },
+      { hsnCode: "6109", rate: "5", effectiveFrom: "2026-04-01" },
+      { hsnCode: "6205", rate: "5", effectiveFrom: "2026-04-01" },
+      { hsnCode: "4203", rate: "12", effectiveFrom: "2026-04-01" },
+      { hsnCode: "9965", rate: "18", effectiveFrom: "2026-04-01" },
     ],
     offers: [ANY3, CHEAPEST, BELT_FREE],
     salesStaff: [

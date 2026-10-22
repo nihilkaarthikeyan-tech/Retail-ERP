@@ -120,17 +120,17 @@ export class SummaryEmailService {
         ON CONFLICT DO NOTHING`;
       if (!claimed) continue;
       const run = await this.prisma.summaryEmailRun.findFirstOrThrow({ where: { companyId: s.companyId, businessDate: fromIso(today), kind: 'scheduled' } });
-      await this.deliver(run.id, s.companyId, s.recipientIds, s.figures as SummaryFigure[]);
+      await this.deliver(run.id, s.companyId, s.recipientIds, s.figures as SummaryFigure[], now);
       sent++;
     }
     return sent;
   }
 
-  private async deliver(runId: string, companyId: string, recipientIds: string[], figures: SummaryFigure[]) {
+  private async deliver(runId: string, companyId: string, recipientIds: string[], figures: SummaryFigure[], now = new Date()) {
     try {
       const people = await this.prisma.user.findMany({ where: { id: { in: recipientIds }, active: true }, select: { email: true } });
       const to = people.map((p) => p.email);
-      const content = await this.compose(companyId, figures, new Date());
+      const content = await this.compose(companyId, figures, now);
       await this.mailer.send({ to, ...content });
       await this.prisma.summaryEmailRun.update({ where: { id: runId }, data: { sentAt: new Date(), recipients: to } });
     } catch (err) {

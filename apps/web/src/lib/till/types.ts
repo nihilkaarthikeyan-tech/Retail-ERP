@@ -59,7 +59,6 @@ export interface SnapLoyalty {
 /** Plan 08 §5: what the till needs of the company's GST settings. */
 export interface SnapGstSettings {
   scheme: "regular" | "composition" | string;
-  approved: boolean;
   hsnDigits: number;
   receiptTaxTable: boolean;
   sellerState: string;
@@ -113,7 +112,6 @@ export interface SnapGstRate {
   priceFrom?: string | null;
   priceUpTo?: string | null;
   effectiveFrom: string;
-  approved: boolean;
 }
 
 export interface SnapOffer {

@@ -184,7 +184,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         </div>
       ) : null}
       {gst?.creditNoteLate ? <p className="till-receipt-small">Issued after the GST time limit: the tax of the original bill is not reduced in the return.</p> : null}
-      {r.provisional ? <p className="till-receipt-small">GST rates not yet approved (provisional)</p> : null}
+      {r.provisional ? <p className="till-receipt-small">GST provisional (an older bill)</p> : null}
       {gst ? <p className="till-receipt-small">Authorised signatory</p> : null}
       {r.footer ? <p className="till-receipt-foot">{r.footer}</p> : null}
     </article>

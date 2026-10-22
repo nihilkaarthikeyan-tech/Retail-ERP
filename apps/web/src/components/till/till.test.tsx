@@ -98,7 +98,8 @@ describe("the till offline", () => {
   it("bills from the saved copy: scan, pay with the keyboard, change shown, bill waits to be sent", async () => {
     const engine = await offlineTill();
     expect(screen.getByRole("button", { name: /Sync status: Offline, 0 waiting/ })).toBeTruthy();
-    expect(screen.getByText("GST rates not approved yet — test bills")).toBeTruthy();
+    // Owner decision of 22 Oct 2026: no "rates not approved" banner on the till.
+    expect(screen.queryByText(/not approved/)).toBeNull();
 
     scan("8900001");
     scan("8900001");
@@ -186,7 +187,7 @@ describe("on account at the till (plan 07 §1a)", () => {
       number: "MAT1/2627/000042",
       kind: "sale",
       duplicate: false,
-      provisional: true,
+      provisional: false,
       soldAt: at.toISOString(),
       till: "T1",
       footer: null,
@@ -243,7 +244,7 @@ function receiptFor(kind: "sale" | "return", total: string, method: string): Rec
     number: "MAT1/2627/000042",
     kind,
     duplicate: false,
-    provisional: true,
+    provisional: false,
     soldAt: at.toISOString(),
     till: "T1",
     footer: null,

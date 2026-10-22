@@ -307,39 +307,70 @@ describe('8.6 composition scheme', () => {
   });
 });
 
-describe('8.11 provisional until the CA approves the GST settings', () => {
+describe('8.11 GST settings and rates apply as soon as they are saved (owner decision, 22 Oct 2026)', () => {
   let shirt: { id: string };
   beforeAll(async () => {
     await freshTill();
     shirt = await item('Cotton Shirt', '62052000', '1050');
-    for (const r of (await owner.get('/pos/gst-rates').expect(200)).body) await owner.post(`/pos/gst-rates/${r.id}/approve`).expect(200);
   });
 
-  it('with every rate approved, bills stay provisional and live billing stays off until the settings are approved', async () => {
+  it('the settings have their defaults and no approval step; a bill is never provisional', async () => {
     const settings = (await owner.get('/gst/settings').expect(200)).body;
-    expect(settings).toMatchObject({ scheme: 'regular', filingFrequency: 'quarterly', turnoverBand: 'up_to_5cr', hsnDigits: 4, eInvoiceApplies: false, combineSmallSales: true, receiptTaxTable: true, eWayLimit: '50000.00', approved: false });
-    const b1 = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body.sale;
-    expect(b1.gstProvisional).toBe(true);
-    expect((await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(400)).body.message).toMatch(/GST settings are not approved/);
+    expect(settings).toMatchObject({ scheme: 'regular', filingFrequency: 'quarterly', turnoverBand: 'up_to_5cr', hsnDigits: 4, eInvoiceApplies: false, combineSmallSales: true, receiptTaxTable: true, eWayLimit: '50000.00' });
+    expect(settings).not.toHaveProperty('approved');
+    // The approval endpoints are gone.
+    await owner.post('/gst/settings/approve').send({ note: 'ok' }).expect(404);
+    await owner.post('/gst/settings/withdraw-approval').send({ reason: 'x' }).expect(404);
+    const b1 = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body;
+    expect(b1.sale.gstProvisional).toBe(false);
+    expect(b1.sale.checkFlags).not.toContain('gst_provisional');
+    expect(b1.receipts[0].provisional).toBe(false);
+  });
 
-    // Only someone with the approval right approves, with a note; who and when are kept.
-    await owner.post('/users').send({ firstName: 'Meena', email: 'meena@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [await roleId(prisma, 'store_manager')], storeIds: [MAIN] }).expect(201);
-    const manager = await login(app, 'meena@rademics.test', 'Temp-pass-1234');
-    await manager.post('/gst/settings/approve').send({ note: 'ok' }).expect(403);
-    await owner.post('/gst/settings/approve').send({ note: '' }).expect(400);
-    const approved = (await owner.post('/gst/settings/approve').send({ note: 'Checked by CA R. Iyer, letter of 18 Oct 2026' }).expect(200)).body;
-    expect(approved).toMatchObject({ approved: true, approvalNote: 'Checked by CA R. Iyer, letter of 18 Oct 2026' });
-    expect(approved.approvedById).toBeTruthy();
-    const audit = await prisma.auditLog.findFirst({ where: { entityType: 'gst_settings', action: 'update' }, orderBy: { at: 'desc' } });
-    expect(audit?.changes).toMatchObject({ approved: { old: false, new: true } });
+  it('a till bill using a newly added rate is real GST at once: not provisional, no flag', async () => {
+    const rate = (await owner.post('/pos/gst-rates').send({ hsnCode: '4202', rate: '18', effectiveFrom: '2026-04-01' }).expect(201)).body;
+    expect(rate).not.toHaveProperty('approved');
+    await owner.post(`/pos/gst-rates/${rate.id}/approve`).expect(404);
+    const bag = await item('Leather Bag', '42022110', '1180');
+    const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: bag.id, quantity: '1' }], '1180')).expect(201)).body;
+    expect(res.sale).toMatchObject({ gstProvisional: false, taxableAmount: '1000.00', cgst: '90.00', sgst: '90.00' });
+    expect(res.sale.lines[0].gstRate).toBe('18');
+    expect(res.sale.checkFlags).not.toContain('gst_provisional');
+    expect((await prisma.posBill.findUniqueOrThrow({ where: { id: res.sale.id } })).gstProvisional).toBe(false);
+  });
 
-    const b2 = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body.sale;
-    expect(b2.gstProvisional).toBe(false);
-    await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(200);
+  it('a GST rate can be edited; the edit is in the history and saved bills keep their own rate', async () => {
+    const rate = (await owner.post('/pos/gst-rates').send({ hsnCode: '9503', rate: '12', effectiveFrom: '2026-04-01' }).expect(201)).body;
+    const toy = await item('Toy Car', '95030010', '112');
+    const before = (await T(owner.post('/pos/bills')).send(sale([{ itemId: toy.id, quantity: '1' }], '112')).expect(201)).body.sale;
+    expect(before.lines[0].gstRate).toBe('12');
 
-    // Withdrawing the approval makes bills provisional again and switches live billing off.
-    await owner.post('/gst/settings/withdraw-approval').send({ reason: 'CA asked for a change' }).expect(200);
-    expect((await owner.get('/pos/settings').expect(200)).body.liveAllowed).toBe(false);
+    // Only someone with the rate-list right may change it.
+    await owner.post('/users').send({ firstName: 'Meena', email: 'meena@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [await roleId(prisma, 'cashier')], storeIds: [MAIN] }).expect(201);
+    const cashier = await login(app, 'meena@rademics.test', 'Temp-pass-1234');
+    await cashier.post('/auth/change-password').send({ currentPassword: 'Temp-pass-1234', newPassword: 'Own-pass-12345' }).expect(204);
+    await cashier.patch(`/pos/gst-rates/${rate.id}`).send({ rate: '5' }).expect(403);
+
+    const changed = (await owner.patch(`/pos/gst-rates/${rate.id}`).send({ rate: '5', note: 'Corrected rate' }).expect(200)).body;
+    expect(changed).toMatchObject({ rate: '5', note: 'Corrected rate' });
+    const audit = await prisma.auditLog.findFirst({ where: { entityType: 'gst_rate', entityId: rate.id, action: 'update' }, orderBy: { at: 'desc' } });
+    expect(audit?.changes).toMatchObject({ rate: { old: '12', new: '5' }, note: { old: null, new: 'Corrected rate' } });
+
+    const after = (await T(owner.post('/pos/bills')).send(sale([{ itemId: toy.id, quantity: '1' }], '112')).expect(201)).body.sale;
+    expect(after).toMatchObject({ gstProvisional: false, taxableAmount: '106.67' });
+    expect(after.lines[0].gstRate).toBe('5');
+    // The bill saved before the change keeps the 12% it was made with.
+    expect((await owner.get(`/pos/bills/${before.id}`).expect(200)).body.lines[0].gstRate).toBe('12');
+  });
+
+  it('the Owner switches the tills live without any GST approval; nobody else can', async () => {
+    await owner.post('/users').send({ firstName: 'Arun', email: 'arun@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [await roleId(prisma, 'accountant')], storeIds: [MAIN] }).expect(201);
+    const accountant = await login(app, 'arun@rademics.test', 'Temp-pass-1234');
+    await accountant.post('/auth/change-password').send({ currentPassword: 'Temp-pass-1234', newPassword: 'Own-pass-12345' }).expect(204);
+    await accountant.patch('/pos/settings').send({ liveAllowed: true }).expect(403);
+    expect((await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(200)).body.liveAllowed).toBe(true);
+    const b = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body.sale;
+    expect(b.gstProvisional).toBe(false);
   });
 
   it('the rate list keeps price bands apart and refuses overlaps', async () => {

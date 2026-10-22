@@ -24,7 +24,7 @@ export class GettingStartedService {
     this.owner(user);
     const company = await this.company.current();
     const companyId = company.id;
-    const [tills, methods, items, stockIn, staff, logo, rates, gst, registrations, bills] = await Promise.all([
+    const [tills, methods, items, stockIn, staff, logo, rates, registrations, bills] = await Promise.all([
       this.prisma.till.count({ where: { companyId, active: true } }),
       this.prisma.paymentMethod.count({ where: { companyId, active: true } }),
       this.prisma.item.count({ where: { active: true } }),
@@ -32,7 +32,6 @@ export class GettingStartedService {
       this.prisma.user.count({ where: { active: true } }),
       this.prisma.company.count({ where: { id: companyId, logo: { not: null } } }),
       this.prisma.gstRate.count(),
-      this.prisma.gstSettings.findUnique({ where: { companyId }, select: { approvedAt: true } }),
       this.prisma.gstRegistration.count({ where: { companyId, active: true } }),
       this.prisma.posBill.count({ where: { companyId } }),
     ]);
@@ -46,7 +45,7 @@ export class GettingStartedService {
       gst_rates:
         registrations === 0
           ? { done: true, note: 'Not registered for GST yet; nothing to do now' }
-          : { done: rates > 0 && !!gst?.approvedAt, note: rates > 0 && !gst?.approvedAt ? 'Rates added; waiting for the accountant’s approval' : null },
+          : { done: rates > 0, note: rates > 0 ? `${rates} ${rates === 1 ? 'rate' : 'rates'}` : null },
       test_bill: { done: bills > 0, note: null },
       go_live: { done: !!company.goLiveDate, note: company.goLiveDate ? `Went live on ${company.goLiveDate.toISOString().slice(0, 10)}` : null },
     };

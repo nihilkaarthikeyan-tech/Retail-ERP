@@ -60,7 +60,6 @@ export const PERMISSIONS = {
   'pos.reports': 'See till reports',
   'offers.manage': 'Create and change offers and coupons',
   'gst_rates.manage': 'Enter GST rates per HSN code',
-  'gst_rates.approve': 'Approve GST rates (after the Chartered Accountant signs off)',
   // Module 7
   'accounts.view': 'See the chart of accounts, ledgers, statements and financial reports',
   'accounts.manage': 'Change the chart of accounts, default accounts and bank accounts',
@@ -152,7 +151,6 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleCode, PermissionKey[]> = 
     'pos.reports',
     'pos.setup',
     'gst_rates.manage',
-    'gst_rates.approve',
     'accounts.view',
     'accounts.manage',
     'journals.post',

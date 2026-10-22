@@ -50,7 +50,7 @@ const till: TillDto = {
 };
 
 function rate(over: Partial<GstRateDto> = {}): GstRateDto {
-  return { id: "r1111111-1111-4111-8111-111111111111", hsnCode: "1006", rate: "5", cessRate: "0", effectiveFrom: "2026-04-01", approved: false, approvedAt: null, approvedById: null, note: null, ...over };
+  return { id: "r1111111-1111-4111-8111-111111111111", hsnCode: "1006", rate: "5", cessRate: "0", effectiveFrom: "2026-04-01", note: null, ...over };
 }
 
 const bill: PosBillDto = {
@@ -78,7 +78,7 @@ const bill: PosBillDto = {
   changeAmount: "128.00",
   offline: false,
   checkFlags: [],
-  gstProvisional: true,
+  gstProvisional: false,
   returnReason: null,
   cancelReason: null,
   reprints: 0,
@@ -152,40 +152,38 @@ describe("TillDeviceBox", () => {
 });
 
 describe("GstRatesView", () => {
-  it("shows no Approve button without the approve right", async () => {
+  it("every rate can be edited and there is no approval step", async () => {
     mockApi({
       "/auth/me": () => ({ status: 200, body: user(["gst_rates.manage"]) }),
-      "/pos/gst-rates": () => ({ status: 200, body: [rate()] }),
+      "/pos/gst-rates": () => ({ status: 200, body: [rate(), rate({ id: "r2222222-2222-4222-8222-222222222222", hsnCode: "3402", rate: "18" })] }),
     });
     render(
       <AuthProvider>
         <GstRatesView />
       </AuthProvider>,
     );
-    expect(await screen.findByRole("button", { name: "Edit" })).toBeTruthy();
-    expect(screen.getByText("Not approved yet")).toBeTruthy();
+    expect(await screen.findAllByRole("button", { name: "Edit" })).toHaveLength(2);
+    expect(screen.getByText(/applies to new bills as soon as it is saved/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByText(/approved/i)).toBeNull();
   });
 
-  it("approves only after the accountant's sign-off is confirmed, and never offers it for an approved rate", async () => {
+  it("changes a rate with the edit form", async () => {
     const fetchMock = mockApi({
-      "/auth/me": () => ({ status: 200, body: user(["gst_rates.approve"]) }),
-      "/pos/gst-rates": () => ({ status: 200, body: [rate(), rate({ id: "r2222222-2222-4222-8222-222222222222", hsnCode: "3402", rate: "18", approved: true, approvedAt: "2026-10-01T05:00:00.000Z" })] }),
-      [`POST /pos/gst-rates/${rate().id}/approve`]: () => ({ status: 200, body: rate({ approved: true }) }),
+      "/auth/me": () => ({ status: 200, body: user(["gst_rates.manage"]) }),
+      "GET /pos/gst-rates": () => ({ status: 200, body: [rate()] }),
+      [`PATCH /pos/gst-rates/${rate().id}`]: () => ({ status: 200, body: rate({ rate: "12" }) }),
     });
     render(
       <AuthProvider>
         <GstRatesView />
       </AuthProvider>,
     );
-    const approveButtons = await screen.findAllByRole("button", { name: "Approve" });
-    expect(approveButtons).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    fireEvent.click(approveButtons[0]);
-    expect(await screen.findByText(/Chartered Accountant has signed off/)).toBeTruthy();
-    expect(writes(fetchMock)).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Yes, the accountant has signed off" }));
-    await waitFor(() => expect(writes(fetchMock)).toEqual([{ path: `/pos/gst-rates/${rate().id}/approve`, body: {} }]));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText(/GST %/), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
+    expect(writes(fetchMock)[0]).toMatchObject({ path: `/pos/gst-rates/${rate().id}`, body: { rate: "12", effectiveFrom: "2026-04-01" } });
   });
 });
 

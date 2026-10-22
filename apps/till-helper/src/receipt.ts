@@ -105,7 +105,8 @@ export function columnsFor(paper: PaperWidth): number {
   return paper === 58 ? 32 : 48;
 }
 
-export const PROVISIONAL_NOTE = 'GST rates not yet approved — test bill';
+/** Only an older bill saved as provisional (before 22 Oct 2026) carries this note; new bills never do. */
+export const PROVISIONAL_NOTE = 'GST provisional (an older bill)';
 
 // ---------------------------------------------------------------------------
 // Shape check (the helper is reachable only from the till page, but a bad

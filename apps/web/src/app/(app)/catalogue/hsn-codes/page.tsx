@@ -93,7 +93,7 @@ export default function HsnCodesPage() {
           </Button>
         ) : null}
       </div>
-      <p className="muted">Codes and descriptions only; the GST rate per code is set up with the GST module after the Chartered Accountant approves it.</p>
+      <p className="muted">Codes and descriptions only; the GST rate for each code is set under GST rates and applies as soon as it is saved.</p>
       <form
         className="scan-box"
         role="search"

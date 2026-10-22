@@ -376,7 +376,7 @@ export class GstReturnsService {
     if (w.registrationFromStore) out.push(`${w.registrationFromStore} older bills had no GST registration recorded; the registration of their store was used.`);
     if (w.placeOfSupplyGuessed) out.push(`${w.placeOfSupplyGuessed} older bills had no place of supply recorded; the buyer's state (or the store's state) was used.`);
     if (w.hsnFromItem) out.push(`${w.hsnFromItem} older bill lines had no HSN code recorded; the item's present HSN code was used.`);
-    if (w.provisional) out.push(`${w.provisional} bills are provisional: the GST settings are not yet approved by the Chartered Accountant.`);
+    if (w.provisional) out.push(`${w.provisional} older bills were saved as GST provisional (before the GST settings applied straight away); check their GST before filing.`);
     return out;
   }
 

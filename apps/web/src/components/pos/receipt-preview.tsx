@@ -47,7 +47,7 @@ export function ReceiptPreview({ receipt }: { receipt: ReceiptDto }) {
       <div ref={ref} style={paper} aria-label={`Receipt ${receipt.number}`}>
         <div style={{ textAlign: "center", fontWeight: 700 }}>{receipt.kind === "return" ? "RETURN RECEIPT" : "RECEIPT"}</div>
         {receipt.duplicate ? <div style={{ textAlign: "center" }}>** DUPLICATE **</div> : null}
-        {receipt.provisional ? <div style={{ textAlign: "center" }}>GST provisional (rate not approved yet)</div> : null}
+        {receipt.provisional ? <div style={{ textAlign: "center" }}>GST provisional (an older bill)</div> : null}
         <div style={rule} />
         <div style={row}>
           <span>Bill {receipt.number}</span>

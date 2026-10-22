@@ -1,15 +1,14 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// GST settings (plan 08 §5) and "GST settings approved by the CA" (scenario
-// 8.11). Every setting has a default; until the accountant approves them every
-// bill stays provisional and the tills cannot be switched live.
+// GST settings (plan 08 §5, scenario 8.11). Every setting has a default, and
+// a change applies to new bills as soon as it is saved (owner decision of
+// 22 Oct 2026: there is no separate approval step).
 "use client";
 
 import { type FormEvent, useState } from "react";
 import { defaultHsnDigits, type GstSettingsInput, gstSettingsSchema, hasPermission } from "shared";
-import { Alert, Badge, Button, CheckInput, Dialog, SelectInput, TextInput, TextareaInput } from "@/components/ui";
+import { Alert, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { formatDateTime } from "@/lib/format";
 import { useModules } from "@/lib/modules";
 import { useLoad } from "@/lib/use-load";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -27,10 +26,6 @@ export interface GstSettingsDto {
   eWayStateLimits: Record<string, string>;
   defaultTransporterId: string | null;
   defaultTransporterName: string | null;
-  approved: boolean;
-  approvedAt: string | null;
-  approvedById: string | null;
-  approvalNote: string | null;
 }
 
 export const TURNOVER_LABELS: Record<GstSettingsDto["turnoverBand"], string> = {
@@ -159,80 +154,17 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
   );
 }
 
-function Approval({ s, canApprove, onChanged }: { s: GstSettingsDto; canApprove: boolean; onChanged: (s: GstSettingsDto) => void }) {
-  const [asking, setAsking] = useState<"approve" | "withdraw" | null>(null);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function confirm() {
-    setError(null);
-    if (!note.trim()) return setError(asking === "approve" ? "Write what the accountant approved" : "Write why the approval is taken back");
-    setBusy(true);
-    try {
-      onChanged(asking === "approve" ? await api.post<GstSettingsDto>("/gst/settings/approve", { note: note.trim() }) : await api.post<GstSettingsDto>("/gst/settings/withdraw-approval", { reason: note.trim() }));
-      setAsking(null);
-      setNote("");
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="card">
-      <h2 style={{ marginTop: 0 }}>Approval by the Chartered Accountant</h2>
-      {s.approved ? (
-        <p>
-          <Badge kind="ok">Approved {formatDateTime(s.approvedAt)}</Badge> {s.approvalNote}
-        </p>
-      ) : (
-        <Alert kind="info">Not approved yet. Until the accountant approves the GST settings and rates, every bill is marked provisional and the tills cannot be switched live.</Alert>
-      )}
-      {canApprove ? (
-        <div className="actions">
-          {s.approved ? (
-            <Button onClick={() => setAsking("withdraw")}>Take the approval back</Button>
-          ) : (
-            <Button variant="primary" onClick={() => setAsking("approve")}>
-              Record the accountant’s approval
-            </Button>
-          )}
-        </div>
-      ) : null}
-      <Dialog open={asking !== null} title={asking === "approve" ? "Approve the GST settings?" : "Take the approval back?"} onClose={() => setAsking(null)}>
-        {asking === "approve" ? <Alert kind="info">Approve only after the Chartered Accountant has signed off the GST settings and rates. Who approved and when are kept.</Alert> : <Alert kind="info">Bills become provisional again and the tills are switched off live billing until it is approved again.</Alert>}
-        <TextareaInput id="gst-approval-note" label={asking === "approve" ? "Note (for example the accountant's name and letter date)" : "Reason"} value={note} onChange={(e) => setNote(e.target.value)} />
-        <Alert kind="error">{error}</Alert>
-        <div className="actions">
-          <Button variant="primary" busy={busy} onClick={() => void confirm()}>
-            {asking === "approve" ? "Yes, the accountant has signed off" : "Take it back"}
-          </Button>
-          <Button onClick={() => setAsking(null)}>Cancel</Button>
-        </div>
-      </Dialog>
-    </section>
-  );
-}
-
 export function GstSettingsView() {
   const { user } = useAuth();
   const settings = useLoad(() => api.get<GstSettingsDto>("/gst/settings"));
   const canEdit = !!user && hasPermission(user, "gst_rates.manage");
-  const canApprove = !!user && hasPermission(user, "gst_rates.approve");
   const s = settings.data;
   return (
     <>
       <h1>GST settings</h1>
-      <p className="muted">How GST works for this business. The GST law itself is built in; these settings only say which parts apply to you. Rates per HSN code are under GST rates.</p>
+      <p className="muted">How GST works for this business. The GST law itself is built in; these settings only say which parts apply to you. Rates per HSN code are under GST rates. A change applies to new bills as soon as it is saved; bills already made keep the GST they were saved with.</p>
       <Alert kind="error">{settings.error}</Alert>
-      {s ? (
-        <>
-          <Approval s={s} canApprove={canApprove} onChanged={(n) => settings.setData(n)} />
-          <Form key={String(s.approvedAt)} s={s} canEdit={canEdit} onSaved={(n) => settings.setData(n)} />
-        </>
-      ) : null}
+      {s ? <Form s={s} canEdit={canEdit} onSaved={(n) => settings.setData(n)} /> : null}
     </>
   );
 }

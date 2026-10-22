@@ -1676,7 +1676,7 @@ model PurchaseSettings {
 // Module 6 — Point of sale (plan 06 and pos-offline-and-devices). Stock leaves
 // at every sale (decision 39); values and account roles are stored for the
 // day-end summary that module 7 posts. GST rates come from the HSN rate list
-// and stay provisional until approved (plan 06 answer 1).
+// and apply as soon as they are saved (owner decision of 22 Oct 2026).
 // ---------------------------------------------------------------------------
 
 enum PaymentKind {
@@ -1704,7 +1704,8 @@ enum PosBillStatus {
   cancelled
 }
 
-/// Decision 56: effective-dated HSN rate list; a change is a new row, never an edit after approval.
+/// Decision 56: effective-dated HSN rate list. Since 22 Oct 2026 a rate applies as soon as it is saved
+/// and may be edited (audit history); approvedAt/approvedById are kept only as history.
 model GstRate {
   id            String    @id @default(uuid()) @db.Uuid
   hsnCode       String
@@ -1955,7 +1956,8 @@ model PosBill {
   offline            Boolean       @default(false)
   /// price_changed, offer_changed, gst_changed, stock_negative, expired_batch, before_lock …
   checkFlags         String[]
-  gstProvisional     Boolean       @default(true)
+  /// Only bills saved before 22 Oct 2026 (or returns of them) can be provisional.
+  gstProvisional     Boolean       @default(false)
   /// Plan 08: consumer, business (B2B tax invoice) or bill_of_supply (composition).
   invoiceKind        String        @default("consumer")
   buyerGstin         String?
@@ -2110,7 +2112,7 @@ model PosSettings {
   /// Plan 06 answer 6: a difference above this at closing needs a manager PIN.
   cashDifferenceApprovalAmount Decimal @default(100) @db.Decimal(16, 2)
   printReceiptCopies           Int     @default(1)
-  /// Plan 06 answer 1: tills bill for real only after the CA approves the rates and the Owner switches this on.
+  /// Plan 06 answer 1: tills bill for real only once the Owner switches this on.
   liveAllowed                  Boolean @default(false)
   /// Plan 11 B4: the service item the delivery charge is billed as.
   deliveryItemId               String? @db.Uuid
@@ -2926,7 +2928,8 @@ model TallyLedgerMap {
 // Module 8: Tax (GST) (docs/plans/08-gst.md).
 // ---------------------------------------------------------------------------
 
-/// What each business sets for GST; the CA's approval switches bills from provisional to final.
+/// What each business sets for GST; in force as soon as it is saved (owner decision of 22 Oct 2026).
+/// approvedAt, approvedById and approvalNote are kept only as history of the old approval step.
 model GstSettings {
   companyId              String    @id @db.Uuid
   /// regular or composition.
@@ -2940,7 +2943,7 @@ model GstSettings {
   eInvoiceApplies        Boolean   @default(false)
   /// Show sales under ₹200 with no invoice wanted as one combined daily invoice in the reports.
   combineSmallSales      Boolean   @default(true)
-  /// How free samples are taxed (decision 61); set by the CA.
+  /// How free samples are taxed (decision 61).
   freeSampleTax          String    @default("not_set")
   receiptTaxTable        Boolean   @default(true)
   eWayLimit              Decimal   @default(50000) @db.Decimal(16, 2)

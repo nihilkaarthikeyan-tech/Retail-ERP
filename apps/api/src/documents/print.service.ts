@@ -365,7 +365,7 @@ export class PrintService {
         ...(late ? [['Note', 'Issued after the GST time limit (section 34): the tax of the original invoice is not reduced in the return'] as [string, string]] : []),
         ...(delivery ? [['Delivery address', delivery.address] as [string, string]] : []),
         ['Till', b.till.code],
-        ...(b.gstProvisional ? [['GST', 'Provisional: rates or settings not yet approved by the accountant'] as [string, string]] : []),
+        ...(b.gstProvisional ? [['GST', 'Provisional: saved before the GST settings applied straight away; check its GST'] as [string, string]] : []),
         ...einvoice.details,
         ...eway,
       ],

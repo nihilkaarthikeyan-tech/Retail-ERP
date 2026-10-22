@@ -106,7 +106,7 @@ describe('12.6 Guided setup', () => {
     const registrations = (await owner.get('/company/gst-registrations').expect(200)).body;
     expect(registrations).toEqual([expect.objectContaining({ gstin: '33AAACR1234A1ZA', stateCode: '33', isDefault: true })]);
     const gst = (await owner.get('/gst/settings').expect(200)).body;
-    expect(gst).toMatchObject({ scheme: 'regular', filingFrequency: 'monthly', turnoverBand: '5cr_to_10cr', hsnDigits: 6, eInvoiceApplies: true, approved: false });
+    expect(gst).toMatchObject({ scheme: 'regular', filingFrequency: 'monthly', turnoverBand: '5cr_to_10cr', hsnDigits: 6, eInvoiceApplies: true });
 
     const years = (await owner.get('/financial-years').expect(200)).body;
     expect(years).toEqual([expect.objectContaining({ name: financialYearName(indianFinancialYear()), status: 'open' })]);
@@ -189,7 +189,7 @@ describe('12.7 Getting-started checklist', () => {
     expect(await step('staff')).toMatchObject({ done: true, note: '1 person besides you' });
   });
 
-  it('adding a till, importing items, loading stock, approving GST rates and making a test bill tick their steps', async () => {
+  it('adding a till, importing items, loading stock, adding GST rates and making a test bill tick their steps', async () => {
     const list = (await owner.get('/price-lists').expect(200)).body.find((l: { code: string }) => l.code === 'STD-SELL');
     tillId = (await owner.post('/pos/tills').send({ storeId: MAIN, code: 'T1', name: 'Counter 1', locationId: loc['MAIN-FLOOR'], priceListId: list.id, paymentMethods: [{ paymentMethodId: pm.CASH, isDefault: true }] }).expect(201)).body.id;
     expect(await step('tills')).toMatchObject({ done: true, note: '1 till' });
@@ -212,11 +212,9 @@ describe('12.7 Getting-started checklist', () => {
     await owner.post(`/stock/documents/${count.id}/finalise`).expect(200);
     expect((await step('opening_stock')).done).toBe(true);
 
-    // GST rates: added, then the accountant's approval.
+    // GST rates: done as soon as one rate is saved (no approval step since 22 Oct 2026).
     await owner.post('/pos/gst-rates').send({ hsnCode: '4414', rate: '12', effectiveFrom: '2026-04-01' }).expect(201);
-    expect(await step('gst_rates')).toMatchObject({ done: false, note: 'Rates added; waiting for the accountant’s approval' });
-    await owner.post('/gst/settings/approve').send({ note: 'Checked by CA R. Iyer' }).expect(200);
-    expect((await step('gst_rates')).done).toBe(true);
+    expect(await step('gst_rates')).toMatchObject({ done: true, note: expect.stringMatching(/^\d+ rates?$/) });
 
     // A test bill at the till.
     expect((await step('test_bill')).done).toBe(false);

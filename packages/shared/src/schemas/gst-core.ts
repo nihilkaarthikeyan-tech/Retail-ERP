@@ -28,10 +28,6 @@ export const gstSettingsSchema = z
   .partial();
 export type GstSettingsInput = z.infer<typeof gstSettingsSchema>;
 
-/** "GST settings approved by the CA" (plan 08 §5, 8.11): who and when are recorded by the API. */
-export const gstApprovalSchema = z.object({ note: z.string().trim().min(1, 'Write what the accountant approved').max(500) });
-export type GstApprovalInput = z.infer<typeof gstApprovalSchema>;
-
 /** A GSTIN checked with its check character (plan 08 G4). */
 export const checkedGstin = z
   .string()

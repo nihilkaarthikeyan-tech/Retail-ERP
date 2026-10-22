@@ -111,7 +111,7 @@ function GoLive({ settings, isOwner, onSaved }: { settings: PosSettingsDto; isOw
         {settings.liveAllowed ? <Badge kind="ok">Tills are live</Badge> : <Badge kind="warn">Not live yet</Badge>}
       </div>
       <p>
-        Tills charge real GST only after the Chartered Accountant has approved the GST rates. Until then every bill is marked provisional. Only the Owner can switch the tills live, and only once the accountant has approved rates.
+        GST rates and settings apply to bills as soon as they are saved, so check them and make a test bill first. Only the Owner can switch the tills live.
       </p>
       <Alert kind="error">{error}</Alert>
       {isOwner ? (

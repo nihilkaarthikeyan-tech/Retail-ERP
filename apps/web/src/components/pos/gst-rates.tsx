@@ -1,15 +1,17 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// The HSN GST rate list (decision 56; plan 06 answer 1): enter, approve.
+// The HSN GST rate list (decision 56; plan 06 answer 1): enter and change.
+// Owner decision of 22 Oct 2026: a rate applies as soon as it is saved; every
+// change is kept in the history, and saved bills keep the rate they used.
 // Plan 08 G2: exempt and nil-rated kept apart from 0%, and price bands (a rate
 // chosen by the selling price per unit, GST included, e.g. clothing).
 "use client";
 
 import { useState, type FormEvent } from "react";
 import { gstRateSchema } from "shared";
-import { Alert, Badge, Button, DataTable, Dialog, SelectInput, TextInput, type Column } from "@/components/ui";
+import { Alert, Button, DataTable, Dialog, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { showQuantity } from "@/lib/stock";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -48,8 +50,6 @@ export function GstRatesView() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [approving, setApproving] = useState<GstRateDto | null>(null);
-  const [approveError, setApproveError] = useState<string | null>(null);
 
   function open(r: GstRateDto | "new") {
     setErrors({});
@@ -91,24 +91,8 @@ export function GstRatesView() {
     }
   }
 
-  async function approve() {
-    if (!approving) return;
-    setApproveError(null);
-    setBusy(true);
-    try {
-      await api.post(`/pos/gst-rates/${approving.id}/approve`);
-      setApproving(null);
-      await rates.reload();
-    } catch (err) {
-      setApproveError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const term = search.trim();
   const rows = (rates.data ?? []).filter((r) => !term || r.hsnCode.startsWith(term));
-  const pending = (rates.data ?? []).filter((r) => !r.approved).length;
 
   const columns: Column<GstRateDto>[] = [
     { key: "hsn", header: "HSN code", render: (r) => <span className="mono">{r.hsnCode}</span> },
@@ -118,35 +102,16 @@ export function GstRatesView() {
     { key: "from", header: "Starts on", render: (r) => formatDate(r.effectiveFrom) },
     { key: "note", header: "Note", render: (r) => r.note ?? <span className="muted">—</span> },
     {
-      key: "approved",
-      header: "Approved",
-      render: (r) => (r.approved ? <Badge kind="ok">Approved {formatDateTime(r.approvedAt)}</Badge> : <Badge kind="warn">Not approved yet</Badge>),
-    },
-    {
       key: "actions",
       header: "",
       render: (r) =>
-        r.approved ? null : (
+        rights.gstManage ? (
           <span className="row-actions">
-            {rights.gstManage ? (
-              <Button size="small" onClick={() => open(r)}>
-                Edit
-              </Button>
-            ) : null}
-            {rights.gstApprove ? (
-              <Button
-                size="small"
-                variant="primary"
-                onClick={() => {
-                  setApproveError(null);
-                  setApproving(r);
-                }}
-              >
-                Approve
-              </Button>
-            ) : null}
+            <Button size="small" onClick={() => open(r)}>
+              Edit
+            </Button>
           </span>
-        ),
+        ) : null,
     },
   ];
 
@@ -162,9 +127,8 @@ export function GstRatesView() {
         ) : null}
       </div>
       <p className="muted">
-        The GST rate for each HSN code and the date it starts. Till bills using a rate that is not approved yet are marked provisional. An approved rate cannot be changed: add a new rate with a later start date.
+        The GST rate for each HSN code and the date it starts. A rate applies to new bills as soon as it is saved. When the government changes a rate, add a new rate with the date it starts; bills already made keep the rate they were saved with. Every change is kept in the history.
       </p>
-      {pending ? <Alert kind="info">{pending} rate{pending === 1 ? " is" : "s are"} waiting for the accountant’s approval.</Alert> : null}
       <div className="filter-row">
         <TextInput id="gst-search" label="HSN code" placeholder="Starts with…" inputMode="numeric" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
@@ -195,24 +159,6 @@ export function GstRatesView() {
             <Button onClick={() => setEditing(null)}>Cancel</Button>
           </div>
         </form>
-      </Dialog>
-
-      <Dialog open={approving !== null} title="Approve this GST rate?" onClose={() => setApproving(null)}>
-        {approving ? (
-          <>
-            <p>
-              HSN <span className="mono">{approving.hsnCode}</span>: {showQuantity(approving.rate)}% GST from {formatDate(approving.effectiveFrom)}.
-            </p>
-            <Alert kind="info">Approve only after the Chartered Accountant has signed off this rate. Once approved it cannot be changed, and the tills charge it as real GST.</Alert>
-            <Alert kind="error">{approveError}</Alert>
-            <div className="actions">
-              <Button variant="primary" busy={busy} onClick={() => void approve()}>
-                Yes, the accountant has signed off
-              </Button>
-              <Button onClick={() => setApproving(null)}>Cancel</Button>
-            </div>
-          </>
-        ) : null}
       </Dialog>
     </>
   );

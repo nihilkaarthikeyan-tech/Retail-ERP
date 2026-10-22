@@ -39,7 +39,6 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
     expect([surf.tax.taxable.toFixed(2), surf.tax.cgst.toFixed(2), surf.tax.sgst.toFixed(2)]).toEqual(["111.86", "10.07", "10.07"]);
     expect(bill.sale!.taxable.toFixed(2)).toBe("340.43");
     expect(bill.sale!.rounding.toFixed(2)).toBe("0.00");
-    expect(bill.provisional).toBe(true);
     const pay = checkPayments(bill.net, [{ methodId: CASH, amount: "500", reference: "" }], sampleSnapshot().till.paymentMethods);
     expect(pay.change.toFixed(2)).toBe("128.00");
     expect(pay.problem).toBeNull();
@@ -116,9 +115,9 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
 
   it("finds the GST rate by the longest HSN prefix and the latest start date", () => {
     const rates = [
-      { hsnCode: "3402", rate: "18", effectiveFrom: "2026-04-01", approved: true },
-      { hsnCode: "340220", rate: "12", effectiveFrom: "2026-04-01", approved: true },
-      { hsnCode: "340220", rate: "5", effectiveFrom: "2026-11-01", approved: true },
+      { hsnCode: "3402", rate: "18", effectiveFrom: "2026-04-01" },
+      { hsnCode: "340220", rate: "12", effectiveFrom: "2026-04-01" },
+      { hsnCode: "340220", rate: "5", effectiveFrom: "2026-11-01" },
     ];
     expect(gstRateFor(rates, "34022010", DATE)?.rate).toBe("12");
     expect(gstRateFor(rates, "34022010", "2026-11-02")?.rate).toBe("5");

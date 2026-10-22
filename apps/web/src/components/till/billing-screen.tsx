@@ -838,7 +838,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             ) : null}
             {gstByRate.size ? (
               <table className="table till-gst">
-                <caption>GST{bill.provisional ? " (provisional)" : ""}</caption>
+                <caption>GST</caption>
                 <thead>
                   <tr>
                     <th>Rate</th>

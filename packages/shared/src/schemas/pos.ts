@@ -111,7 +111,7 @@ export const posSettingsSchema = z
   .object({
     cashDifferenceApprovalAmount: nonNegativeDecimalString,
     printReceiptCopies: z.number().int().min(0).max(3),
-    /** Owner only, after the CA approves the GST rates (plan 06 answer 1). */
+    /** Owner only (plan 06 answer 1); no GST approval step since 22 Oct 2026. */
     liveAllowed: z.boolean(),
     /** Plan 11 B4: the service item a home-delivery charge is billed as. */
     deliveryItemId: uuid.nullable(),

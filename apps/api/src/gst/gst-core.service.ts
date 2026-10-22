@@ -1,11 +1,11 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // GST common core on the server (plan 08 §2, §5): the company's GST settings
-// with defaults, the CA's approval, the seller's registration for a store, the
+// with defaults (in force as soon as they are saved), the seller's registration for a store, the
 // rate in force for an item (by HSN, date and selling price) and the place of
 // supply of a document. Used by the till, the offline till snapshot,
 // purchases and the GST reports; the rules themselves live in shared/gst-core.
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { type DecimalInput, type GstApprovalInput, type GstSettingsInput, pickGstRate, resolveSupply, type Supply, type SupplyInput } from 'shared';
+import { type DecimalInput, type GstSettingsInput, pickGstRate, resolveSupply, type Supply, type SupplyInput } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
@@ -46,10 +46,6 @@ export function gstSettingsDto(s: GstSettings) {
     eWayStateLimits: (s.eWayStateLimits ?? {}) as Record<string, string>,
     defaultTransporterId: s.defaultTransporterId,
     defaultTransporterName: s.defaultTransporterName,
-    approved: !!s.approvedAt,
-    approvedAt: s.approvedAt,
-    approvedById: s.approvedById,
-    approvalNote: s.approvalNote,
     updatedAt: s.updatedAt,
   };
 }
@@ -66,7 +62,6 @@ export function rateRow(r: GstRate) {
     priceFrom: r.priceFrom?.toString() ?? null,
     priceUpTo: r.priceUpTo?.toString() ?? null,
     effectiveFrom: iso(r.effectiveFrom),
-    approved: !!r.approvedAt,
   };
 }
 
@@ -98,31 +93,6 @@ export class GstCoreService {
       const { updatedAt: _a, ...b } = gstSettingsDto(before);
       const { updatedAt: _b, ...a } = gstSettingsDto(after);
       await this.audit.recordUpdate(tx, actor, 'gst_settings', company.id, b, a);
-      return gstSettingsDto(after);
-    });
-  }
-
-  /** "GST settings approved by the CA" (plan 08 §5, 8.11): who, when and a note. */
-  async approve(input: GstApprovalInput, actor: Actor) {
-    const company = await this.company.current();
-    return this.prisma.$transaction(async (tx) => {
-      const before = await ensureGstSettings(tx, company.id);
-      if (before.approvedAt) throw new BadRequestException('The GST settings are already approved');
-      const after = await tx.gstSettings.update({ where: { companyId: company.id }, data: { approvedAt: new Date(), approvedById: actor.userId, approvalNote: input.note, updatedById: actor.userId } });
-      await this.audit.record(tx, actor, { action: 'update', entityType: 'gst_settings', entityId: company.id, changes: { approved: { old: false, new: true }, note: input.note, scheme: after.scheme, turnoverBand: after.turnoverBand } });
-      return gstSettingsDto(after);
-    });
-  }
-
-  /** Taking the approval back (for example when the CA asks for a change): bills are provisional again and live billing goes off. */
-  async withdrawApproval(reason: string, actor: Actor) {
-    const company = await this.company.current();
-    return this.prisma.$transaction(async (tx) => {
-      const before = await ensureGstSettings(tx, company.id);
-      if (!before.approvedAt) throw new BadRequestException('The GST settings are not approved');
-      const after = await tx.gstSettings.update({ where: { companyId: company.id }, data: { approvedAt: null, approvedById: null, updatedById: actor.userId } });
-      await tx.posSettings.updateMany({ where: { companyId: company.id, liveAllowed: true }, data: { liveAllowed: false, updatedById: actor.userId } });
-      await this.audit.record(tx, actor, { action: 'update', entityType: 'gst_settings', entityId: company.id, changes: { approved: { old: true, new: false } }, reason });
       return gstSettingsDto(after);
     });
   }

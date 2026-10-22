@@ -40,7 +40,7 @@ function snapshot(): StoredSnapshot {
     till: { ...s.till, delivery: { charge: "50.00", freeAbove: "2000.00", itemId: id(9) } },
     items: [...s.items, item(id(1), "TEE-RED", "Tee red", "6109"), item(id(2), "TEE-BLUE", "Tee blue", "6109"), item(id(3), "TEE-BLACK", "Tee black", "6109"), item(id(9), "DELIVERY", "Home delivery", "9965", { isStockItem: false, itemGroup: { id: "x", path: "/x/" } })],
     prices: [...s.prices, price(id(1), "399"), price(id(2), "399"), price(id(3), "399")],
-    gstRates: [...s.gstRates, { hsnCode: "6109", rate: "5", effectiveFrom: "2026-04-01", approved: false }, { hsnCode: "9965", rate: "18", effectiveFrom: "2026-04-01", approved: false }],
+    gstRates: [...s.gstRates, { hsnCode: "6109", rate: "5", effectiveFrom: "2026-04-01" }, { hsnCode: "9965", rate: "18", effectiveFrom: "2026-04-01" }],
     offers: [
       { id: id(31), code: "TEES-ANY3", name: "Any 3 tees for ₹999", kind: "mix_match", appliesTo: "groups", targetIds: [TEES], value: null, buyQuantity: null, freeQuantity: null, setQuantity: 3, setPrice: "999.00", cheapestFree: false, minQuantity: null, minAmount: null, storeIds: [], customerGroupId: null, startDate: "2026-10-01", endDate: null, priority: 0, couponOnly: false, active: true },
     ],

@@ -33,8 +33,8 @@ function snapshot(over: Partial<StoredSnapshot> = {}): StoredSnapshot {
     // The list price is ₹2,699; the order agreed ₹2,499.
     prices: [price(KURTA, "2699"), price(DUPATTA, "1200")],
     gstRates: [
-      { hsnCode: "6205", rate: "5", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "9988", rate: "18", effectiveFrom: "2026-04-01", approved: false },
+      { hsnCode: "6205", rate: "5", effectiveFrom: "2026-04-01" },
+      { hsnCode: "9988", rate: "18", effectiveFrom: "2026-04-01" },
     ],
     // A 10% bill offer must not touch a bill that collects an order.
     offers: [{ id: "60000000-0000-4000-8000-000000000001", code: "BILL10", name: "10% off the bill", kind: "percent", appliesTo: "bill", targetIds: [], value: "10", buyQuantity: null, freeQuantity: null, minQuantity: null, minAmount: null, storeIds: [], customerGroupId: null, startDate: "2026-04-01", endDate: null, priority: 0, couponOnly: false, active: true }],

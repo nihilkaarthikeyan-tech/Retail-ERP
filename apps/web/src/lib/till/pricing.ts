@@ -250,7 +250,6 @@ export interface ComputedLine {
   discountAmount: Decimal;
   amount: Decimal;
   gstRate: Decimal;
-  provisional: boolean;
   tax: InclusiveTax;
   isFree: boolean;
   /** Plan 11 B4: the delivery charge line, added from the store's settings (not sent as a line). */
@@ -296,7 +295,6 @@ export interface ComputedBill {
   supply: Supply;
   problems: string[];
   approvals: NeededApproval[];
-  provisional: boolean;
   /** Plan 11 B4: the delivery charge worked out (zero at or above "free above"); null without delivery. */
   delivery: { charge: Decimal } | null;
   /** Plan 11 B3: each offer used on the sale and what it saves. */
@@ -457,7 +455,6 @@ interface FreeItem {
   /** One unit's worth: its price, else its MRP. */
   value: Decimal;
   gstRate: Decimal;
-  provisional: boolean;
 }
 
 /** The free item of a buy_get offer, as the server works it out; null when it cannot be given (the offer is then not used). */
@@ -467,7 +464,7 @@ export function freeItemFor(snapshot: TillSnapshot, offer: SnapOffer, customerId
   const value = listPriceFor(snapshot, item, item.baseUnitId, "1", customerId, date) ?? (item.mrp ? D(item.mrp) : null);
   if (!value || value.lte(0)) return null;
   const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date);
-  return { item, value, gstRate: D(rate?.rate ?? "0"), provisional: !rate?.approved };
+  return { item, value, gstRate: D(rate?.rate ?? "0") };
 }
 
 /** The offers used on a sale and what each saves: rupees off its lines, and its free lines at their list price. */
@@ -570,7 +567,6 @@ function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: T
     discountAmount: ZERO,
     amount,
     gstRate,
-    provisional: !rate?.approved,
     tax: supplyLineTax(amount, gstRate, supply),
     isFree: false,
     isDelivery: false,
@@ -677,7 +673,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         discountAmount: ZERO,
         amount: ZERO,
         gstRate,
-        provisional: !rate?.approved,
         tax: blankTax(),
         isFree: false,
         isDelivery: false,
@@ -741,7 +736,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         discountAmount: ZERO,
         amount: ZERO,
         gstRate: info.gstRate,
-        provisional: info.provisional,
         tax: blankTax(),
         isFree: true,
         isDelivery: false,
@@ -816,7 +810,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
             discountAmount: ZERO,
             amount: charge,
             gstRate: D(rate.rate),
-            provisional: !rate.approved,
             tax: blankTax(),
             isFree: false,
             isDelivery: true,
@@ -855,7 +848,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
           discountAmount: ZERO,
           amount: charge,
           gstRate: D(rate.rate),
-          provisional: !rate.approved,
           tax: blankTax(),
           isFree: false,
           isDelivery: false,
@@ -872,10 +864,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       if (!l.isFree && !l.problem && l.item.hsnCode) {
         const factor = D(l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1");
         const r = gstRateFor(snapshot.gstRates, l.item.hsnCode, date, bandUnitPrice(l.amount, l.quantity.mul(factor)));
-        if (r) {
-          l.gstRate = D(r.rate);
-          l.provisional = !r.approved;
-        }
+        if (r) l.gstRate = D(r.rate);
       }
       if (supply.noTax) l.gstRate = ZERO;
       l.tax = supplyLineTax(l.amount, l.gstRate, supply);
@@ -953,7 +942,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         discountAmount,
         amount,
         gstRate: D(rl.gstRate),
-        provisional: false,
         tax: supplyLineTax(amount, rl.gstRate, draft.ret!.supply ?? { interState: false, noTax: false }),
         isFree: rl.isFree,
         isDelivery: false,
@@ -969,8 +957,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   }
 
   const net = (sale?.total ?? ZERO).add(ret?.total ?? ZERO);
-  // Plan 08 §5, 8.11: provisional until the CA approves the GST settings.
-  const provisional = (sale?.lines ?? []).some((l) => l.provisional) || till.gst?.approved === false;
   // Plan 11 part 2: the order's advance (up to the bill) and the customer's credit pay part of it.
   const payable = Decimal.max(net, 0);
   const advance = draft.order ? Decimal.min(D(draft.order.advance || "0"), payable) : ZERO;
@@ -1021,7 +1007,6 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     supply,
     problems,
     approvals,
-    provisional,
     delivery,
     offers: offersUsed(sale?.lines ?? []),
     credit,

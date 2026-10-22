@@ -74,7 +74,7 @@ export function withHeader(r: Receipt, till: SnapTill, extra: { cashier?: string
   };
 }
 
-function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string, o: { soldAt: string; till: SnapTill; provisional: boolean; payments: Receipt["payments"]; change: Decimal; extras: LocalReceiptExtras; gst: ReceiptGst }): Receipt {
+function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string, o: { soldAt: string; till: SnapTill; payments: Receipt["payments"]; change: Decimal; extras: LocalReceiptExtras; gst: ReceiptGst }): Receipt {
   const staff = new Map((o.extras.staff ?? []).map((x) => [x.id, x]));
   const d = kind === "sale" ? o.extras.delivery : null;
   const byRate = new Map<string, { taxable: Decimal; cgst: Decimal; sgst: Decimal; igst: Decimal }>();
@@ -88,7 +88,8 @@ function partReceipt(part: ComputedPart, kind: "sale" | "return", number: string
     number,
     kind,
     duplicate: false,
-    provisional: o.provisional,
+    // Owner decision of 22 Oct 2026: GST applies as soon as it is saved, so a bill made now is never provisional.
+    provisional: false,
     soldAt: o.soldAt,
     till: o.till.code,
     footer: o.till.receiptFooter,
@@ -130,8 +131,8 @@ export function localReceipts(
   // The bill that carries the payments, as on the server: the sale unless money goes back.
   const holder = bill.net.gte(0) ? (bill.sale ? "sale" : "return") : bill.ret ? "return" : "sale";
   const out: Receipt[] = [];
-  if (bill.ret && numbers.ret) out.push(partReceipt(bill.ret, "return", numbers.ret, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "return" ? pays : [], change: holder === "return" ? o.change : new Decimal(0), extras, gst: localGst(bill, "return", o.till, extras) }));
-  if (bill.sale && numbers.sale) out.push(partReceipt(bill.sale, "sale", numbers.sale, { soldAt: o.soldAt, till: o.till, provisional: bill.provisional, payments: holder === "sale" ? pays : [], change: holder === "sale" ? o.change : new Decimal(0), extras, gst: localGst(bill, "sale", o.till, extras) }));
+  if (bill.ret && numbers.ret) out.push(partReceipt(bill.ret, "return", numbers.ret, { soldAt: o.soldAt, till: o.till, payments: holder === "return" ? pays : [], change: holder === "return" ? o.change : new Decimal(0), extras, gst: localGst(bill, "return", o.till, extras) }));
+  if (bill.sale && numbers.sale) out.push(partReceipt(bill.sale, "sale", numbers.sale, { soldAt: o.soldAt, till: o.till, payments: holder === "sale" ? pays : [], change: holder === "sale" ? o.change : new Decimal(0), extras, gst: localGst(bill, "sale", o.till, extras) }));
   return out;
 }
 

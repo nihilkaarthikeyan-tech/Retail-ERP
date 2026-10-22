@@ -95,7 +95,7 @@ describe("settings centre (12.8)", () => {
     expect(screen.getByText("Fancy and gift: Fashion jewellery, cosmetics, toys, bags, gifts, stationery and decor.")).toBeTruthy();
     expect(screen.getByRole("link", { name: /My modules/ }).getAttribute("href")).toBe("/settings/modules");
     // The older screen stays reachable from here.
-    expect(screen.getAllByRole("link", { name: "GST settings and the accountant’s approval" })[0].getAttribute("href")).toBe("/gst/settings");
+    expect(screen.getAllByRole("link", { name: "GST settings" })[0].getAttribute("href")).toBe("/gst/settings");
   });
 
   it("“Back to default” puts a setting back through its own module’s settings API", async () => {

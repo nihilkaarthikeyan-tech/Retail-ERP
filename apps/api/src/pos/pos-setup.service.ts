@@ -22,7 +22,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import type { GstRate, PaymentMethod, Store } from '../generated/prisma/client.js';
-import { ensureGstSettings, rateRow } from '../gst/gst-core.service.js';
+import { rateRow } from '../gst/gst-core.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ensurePosDefaults, fromIso, iso, newToken, PosCommon, sha256 } from './pos-common.service.js';
 
@@ -53,11 +53,13 @@ export class PosSetupService {
     });
   }
 
-  /** Only before approval; an approved rate is changed by a new row with a later start date. */
+  /**
+   * Owner decision of 22 Oct 2026: a rate applies as soon as it is saved and may be changed; every
+   * change goes to the audit history, and bills already saved keep the rate they stored.
+   */
   async updateGstRate(id: string, input: Partial<GstRateInput>, actor: Actor) {
     const before = await this.prisma.gstRate.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('GST rate not found');
-    if (before.approvedAt) throw new BadRequestException('An approved rate cannot be changed; add a new rate with a later start date');
     const merged = { rate: input.rate ?? before.rate.toString(), kind: input.kind ?? before.kind, priceFrom: input.priceFrom !== undefined ? input.priceFrom : (before.priceFrom?.toString() ?? null), priceUpTo: input.priceUpTo !== undefined ? input.priceUpTo : (before.priceUpTo?.toString() ?? null) };
     const data = rateFields(merged as GstRateInput);
     const effectiveFrom = input.effectiveFrom ?? iso(before.effectiveFrom)!;
@@ -81,17 +83,6 @@ export class PosSetupService {
     if (banded && others.some((o) => (o.priceFrom === null ? row.priceFrom === null : row.priceFrom !== null && new Decimal(o.priceFrom).eq(row.priceFrom)))) throw new ConflictException(`HSN ${row.hsnCode} already has a band from that price starting ${row.effectiveFrom}`);
     const problem = priceBandProblem([...others, { ...row }]);
     if (problem) throw new BadRequestException(problem);
-  }
-
-  async approveGstRate(id: string, actor: Actor) {
-    const rate = await this.prisma.gstRate.findUnique({ where: { id } });
-    if (!rate) throw new NotFoundException('GST rate not found');
-    if (rate.approvedAt) throw new BadRequestException('Already approved');
-    return this.prisma.$transaction(async (tx) => {
-      const after = await tx.gstRate.update({ where: { id }, data: { approvedById: actor.userId, approvedAt: new Date() } });
-      await this.audit.record(tx, actor, { action: 'update', entityType: 'gst_rate', entityId: id, changes: { approved: true, hsnCode: rate.hsnCode, rate: rate.rate.toString() } });
-      return gstDto(after);
-    });
   }
 
   // ---- Payment methods ----
@@ -254,17 +245,8 @@ export class PosSetupService {
 
   async updateSettings(input: PosSettingsInput, actor: Actor, user: CurrentUser) {
     const company = await this.common.currentCompany();
-    // Plan 06 answer 1: only the Owner switches tills live, and only once some rates are approved.
-    if (input.liveAllowed !== undefined) {
-      if (!user.isOwnerAdmin) throw new ForbiddenException('Only the Owner can switch the tills live');
-      if (input.liveAllowed && !(await this.prisma.gstRate.count({ where: { approvedAt: { not: null } } }))) {
-        throw new BadRequestException('No GST rate has been approved yet; the accountant approves the rates first');
-      }
-      // Plan 08 §5, 8.11: live billing needs the CA's approval of the GST settings.
-      if (input.liveAllowed && !(await ensureGstSettings(this.prisma, company.id)).approvedAt) {
-        throw new BadRequestException('The GST settings are not approved by the accountant yet; until then every bill is provisional and live billing stays off');
-      }
-    }
+    // Plan 06 answer 1: only the Owner switches tills live (no GST approval step since the owner's decision of 22 Oct 2026).
+    if (input.liveAllowed !== undefined && !user.isOwnerAdmin) throw new ForbiddenException('Only the Owner can switch the tills live');
     // Plan 11 B4: the delivery charge is billed as a sellable service item (no stock).
     if (input.deliveryItemId) {
       const item = await this.prisma.item.findUnique({ where: { id: input.deliveryItemId } });
@@ -320,7 +302,7 @@ function rateFields(input: Pick<GstRateInput, 'rate' | 'kind' | 'priceFrom' | 'p
 }
 
 function gstDto(r: GstRate) {
-  return { id: r.id, hsnCode: r.hsnCode, rate: r.rate.toString(), cessRate: r.cessRate.toString(), kind: r.kind, priceFrom: r.priceFrom?.toFixed(2) ?? null, priceUpTo: r.priceUpTo?.toFixed(2) ?? null, effectiveFrom: iso(r.effectiveFrom), approved: !!r.approvedAt, approvedAt: r.approvedAt, approvedById: r.approvedById, note: r.note };
+  return { id: r.id, hsnCode: r.hsnCode, rate: r.rate.toString(), cessRate: r.cessRate.toString(), kind: r.kind, priceFrom: r.priceFrom?.toFixed(2) ?? null, priceUpTo: r.priceUpTo?.toFixed(2) ?? null, effectiveFrom: iso(r.effectiveFrom), note: r.note };
 }
 
 function methodDto(m: PaymentMethod) {

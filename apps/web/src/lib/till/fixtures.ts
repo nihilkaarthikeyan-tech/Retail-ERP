@@ -85,9 +85,9 @@ export function sampleSnapshot(over: Partial<TillSnapshot> = {}): StoredSnapshot
     ],
     prices: [price(BASMATI, "120"), price(SURF, "132"), price(ARIEL, "150"), price(PARLE, "10")],
     gstRates: [
-      { hsnCode: "1006", rate: "5", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "3402", rate: "18", effectiveFrom: "2026-04-01", approved: false },
-      { hsnCode: "1905", rate: "18", effectiveFrom: "2026-04-01", approved: false },
+      { hsnCode: "1006", rate: "5", effectiveFrom: "2026-04-01" },
+      { hsnCode: "3402", rate: "18", effectiveFrom: "2026-04-01" },
+      { hsnCode: "1905", rate: "18", effectiveFrom: "2026-04-01" },
     ],
     offers: [],
     coupons: [],

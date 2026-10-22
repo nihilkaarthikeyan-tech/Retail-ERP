@@ -3,7 +3,8 @@
 // server: price-band rates (8.3), business tax invoices with IGST (8.2), a
 // delivery to another state (G1), composition bills of supply (8.6), buyer
 // details from ₹50,000 (G5), credit notes keeping the original bill's tax (8.5)
-// and bills provisional until the CA approves the GST settings (8.11).
+// and no provisional bills: GST applies as soon as it is saved (8.11, owner
+// decision of 22 Oct 2026).
 import { describe, expect, it } from "vitest";
 import { gstinCheckCharacter } from "shared";
 import { CASH, PREFIX, sampleSnapshot, TILL_ID } from "./fixtures";
@@ -30,14 +31,14 @@ function snapshot(gst: Partial<NonNullable<StoredSnapshot["till"]["gst"]>> = {})
   const s = sampleSnapshot();
   return {
     ...s,
-    till: { ...s.till, cashierDiscountPercent: "25", gst: { scheme: "regular", approved: false, hsnDigits: 4, receiptTaxTable: true, sellerState: "33", ...gst } },
+    till: { ...s.till, cashierDiscountPercent: "25", gst: { scheme: "regular", hsnDigits: 4, receiptTaxTable: true, sellerState: "33", ...gst } },
     items: [item(SHIRT_1050, "Cotton shirt", "62052000"), item(SHIRT_2000, "Linen shirt", "62052000"), item(SHIRT_3000, "Silk shirt", "62052000"), item(LAPTOP, "Laptop", "84713010")],
     prices: [price(SHIRT_1050, "1050"), price(SHIRT_2000, "2000"), price(SHIRT_3000, "3000"), price(LAPTOP, "70800")],
     gstRates: [
-      { hsnCode: "6205", rate: "12", effectiveFrom: "2024-04-01", approved: true },
-      { hsnCode: "6205", rate: "5", priceFrom: null, priceUpTo: "2500", effectiveFrom: "2025-09-22", approved: true },
-      { hsnCode: "6205", rate: "18", priceFrom: "2500", priceUpTo: null, effectiveFrom: "2025-09-22", approved: true },
-      { hsnCode: "8471", rate: "18", effectiveFrom: "2025-04-01", approved: true },
+      { hsnCode: "6205", rate: "12", effectiveFrom: "2024-04-01" },
+      { hsnCode: "6205", rate: "5", priceFrom: null, priceUpTo: "2500", effectiveFrom: "2025-09-22" },
+      { hsnCode: "6205", rate: "18", priceFrom: "2500", priceUpTo: null, effectiveFrom: "2025-09-22" },
+      { hsnCode: "8471", rate: "18", effectiveFrom: "2025-04-01" },
     ],
   };
 }
@@ -137,8 +138,12 @@ describe("GST at the till (plan 08)", () => {
     expect(receipt.gst).toMatchObject({ title: "Credit note", original: { number: `${PREFIX}000001` } });
   });
 
-  it("8.11 bills stay provisional until the CA approves the GST settings, even with approved rates", () => {
-    expect(priceBill(draft([line(SHIRT_1050)]), { snapshot: snapshot({ approved: false }), date: DATE }).provisional).toBe(true);
-    expect(priceBill(draft([line(SHIRT_1050)]), { snapshot: snapshot({ approved: true }), date: DATE }).provisional).toBe(false);
+  it("8.11 a bill made with a newly added rate is real GST at once: its receipt is not provisional", () => {
+    const s = snapshot();
+    s.gstRates = [...s.gstRates, { hsnCode: "8471", rate: "28", effectiveFrom: DATE }];
+    const bill = priceBill(draft([line(LAPTOP)]), { snapshot: s, date: DATE });
+    expect(bill.sale!.lines[0].gstRate.toString()).toBe("28");
+    const [receipt] = localReceipts(bill, { sale: `${PREFIX}000044` }, { soldAt: "2026-10-18T05:00:00.000Z", till: s.till, payments: [], change: bill.net.sub(bill.net) });
+    expect(receipt.provisional).toBe(false);
   });
 });

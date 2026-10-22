@@ -112,7 +112,7 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
   it('6.1 a sale of ₹372.00 with ₹128.00 change; stock leaves at once', async () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: basmati.id, quantity: '2' }, { itemId: surf.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '500' }])).expect(201)).body;
     first = res.sale;
-    expect(res.sale).toMatchObject({ total: '372.00', taxableAmount: '340.43', cgst: '15.79', sgst: '15.78', changeAmount: '128.00', gstProvisional: true, costValue: '275.00' });
+    expect(res.sale).toMatchObject({ total: '372.00', taxableAmount: '340.43', cgst: '15.79', sgst: '15.78', changeAmount: '128.00', gstProvisional: false, costValue: '275.00' });
     expect(res.sale.lines.map((l: Record<string, string>) => [l.taxableAmount, l.cgst, l.sgst, l.costValue])).toEqual([
       ['228.57', '5.72', '5.71', '180.00'],
       ['111.86', '10.07', '10.07', '95.00'],
@@ -365,31 +365,27 @@ describe('6.9 offers and coupons (decision 17), 6.10 expired batch, 6.11 offline
 describe('go-live switch (plan 06 answer 1)', () => {
   beforeAll(() => freshTill());
 
-  it('only the Owner switches tills live, after a GST rate is approved; then unapproved rates are refused', async () => {
-    // A test bill sold before going live (its GST rate is still unapproved).
+  it('only the Owner switches tills live, with no GST approval step; an old provisional bill is returned with its flag', async () => {
+    // Owner decision of 22 Oct 2026: a rate applies as soon as it is saved, so this bill is real GST.
     const soap = await item('Lux Soap', '3402', '40');
     await opening(soap.id, '10', '25');
     await openShift(owner);
-    const testBill = (await T(owner.post('/pos/bills')).send(sale([{ itemId: soap.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '40' }])).expect(201)).body;
-    expect(testBill.sale.checkFlags).toContain('gst_provisional');
+    const firstBill = (await T(owner.post('/pos/bills')).send(sale([{ itemId: soap.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '40' }])).expect(201)).body;
+    expect(firstBill.sale.gstProvisional).toBe(false);
+    expect(firstBill.sale.checkFlags).not.toContain('gst_provisional');
     const acct = await staff('Ravi', 'ravi@rademics.test', 'accountant');
     await acct.agent.patch('/pos/settings').send({ liveAllowed: true }).expect(403);
-    await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(400);
-    const rates = (await owner.get('/pos/gst-rates').expect(200)).body;
-    await acct.agent.post(`/pos/gst-rates/${rates.find((r: { hsnCode: string }) => r.hsnCode === '1006').id}/approve`).expect(200);
-    // Plan 08 (scenario 8.11): live billing also needs the CA's approval of the GST settings.
-    expect((await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(400)).body.message).toMatch(/GST settings are not approved/);
-    await acct.agent.post('/gst/settings/approve').send({ note: 'Rates and settings checked' }).expect(200);
     await owner.patch('/pos/settings').send({ liveAllowed: true }).expect(200);
+    // Once live every rate in the list can be used.
     const rice = await item('Ponni Rice 1 kg', '1006', '70');
     await opening(rice.id, '10', '50');
     await T(owner.post('/pos/bills')).send(sale([{ itemId: rice.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '70' }])).expect(201);
-    expect((await T(owner.post('/pos/bills')).send(sale([{ itemId: soap.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '40' }])).expect(400)).body.message).toMatch(/not approved yet/);
-    n--;
-    // The test-period bill can still be returned after going live; its receipt says the GST was provisional.
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: testBill.sale.id, lines: [{ lineNo: 1, itemId: soap.id, quantity: '1', returnOfLineId: testBill.sale.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-40' }] };
+    await T(owner.post('/pos/bills')).send(sale([{ itemId: soap.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '40' }])).expect(201);
+    // A bill saved as provisional before the change (simulated here) keeps that as history; its return copies the flag.
+    await prisma.posBill.update({ where: { id: firstBill.sale.id }, data: { gstProvisional: true } });
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: firstBill.sale.id, lines: [{ lineNo: 1, itemId: soap.id, quantity: '1', returnOfLineId: firstBill.sale.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-40' }] };
     const res = (await T(owner.post('/pos/bills')).send(back).expect(201)).body;
-    expect(res.return).toMatchObject({ total: '-40.00' });
+    expect(res.return).toMatchObject({ total: '-40.00', gstProvisional: true });
     expect(res.return.checkFlags).toContain('gst_provisional');
     void OWNER;
   });
