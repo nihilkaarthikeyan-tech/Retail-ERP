@@ -4,9 +4,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { AuthLayout } from "@/components/auth-layout";
 import { LoginForm } from "@/components/login-form";
 import { useAuth } from "@/lib/auth-context";
-import { BrandMark } from "@/components/brand-mark";
 
 export default function LoginPage() {
   const { user, loading } = useAuth();
@@ -17,18 +17,17 @@ export default function LoginPage() {
   }, [loading, user, router]);
 
   return (
-    <main className="public-page narrow">
-      <Link href="/" className="public-brand">
-        <BrandMark />
-        Retail ERP
-      </Link>
-      <h1>Log in</h1>
-      <p className="muted">Log in to your shop.</p>
+    <AuthLayout
+      title="Log in"
+      intro="Log in to your shop."
+      footer={
+        // Plan 14: a new shop starts here.
+        <>
+          New to Retail ERP? <Link href="/signup">Start your free trial</Link>
+        </>
+      }
+    >
       {!loading && !user ? <LoginForm /> : <p className="muted">Loading…</p>}
-      {/* Plan 14: a new shop starts here. */}
-      <p className="public-switch">
-        New to Retail ERP? <Link href="/signup">Start your free trial</Link>
-      </p>
-    </main>
+    </AuthLayout>
   );
 }

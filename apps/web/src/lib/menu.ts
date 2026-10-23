@@ -131,6 +131,7 @@ export const MENU: MenuEntry[] = [
   { href: "/history", label: "Change history", permissions: ["audit.view"], section: "Administration", icon: "history" },
   { href: "/history/logins", label: "Login history", permissions: ["audit.view"], section: "Administration", icon: "login" },
   { href: "/go-live", label: "Going live", ownerAdminOnly: true, section: "Administration", icon: "flag" },
+  { href: "/my-data", label: "Download all my data", ownerAdminOnly: true, section: "Administration", icon: "download" },
   // Plan 12 §5: one Settings page; the older settings screens (catalogue, parties, inventory,
   // purchases, till, GST, printing) are reached from it.
   { href: "/settings", label: "Settings", permissions: ["stock.lock", "purchase.settings", "pos.setup", "gst_rates.manage", "print.settings", "reports.summary_email"], section: "Administration", exact: true, icon: "settings" },

@@ -4,9 +4,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { AuthLayout } from "@/components/auth-layout";
 import { SignupForm } from "@/components/signup-form";
 import { useAuth } from "@/lib/auth-context";
-import { BrandMark } from "@/components/brand-mark";
 
 /** Plan 14: a new shop signs up, then sets up its shop. */
 export default function SignupPage() {
@@ -18,17 +18,16 @@ export default function SignupPage() {
   }, [loading, user, router]);
 
   return (
-    <main className="public-page narrow">
-      <Link href="/" className="public-brand">
-        <BrandMark />
-        Retail ERP
-      </Link>
-      <h1>Start your free trial</h1>
-      <p className="muted">Billing, stock, GST and accounts for your shop. Set up in a few minutes.</p>
+    <AuthLayout
+      title="Start your free trial"
+      intro="14 days free, no card needed. Set up your shop in a few minutes."
+      footer={
+        <>
+          Already have an account? <Link href="/login">Log in</Link>
+        </>
+      }
+    >
       {!loading && !user ? <SignupForm /> : <p className="muted">Loading…</p>}
-      <p className="public-switch">
-        Already have an account? <Link href="/login">Log in</Link>
-      </p>
-    </main>
+    </AuthLayout>
   );
 }
