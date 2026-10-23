@@ -709,6 +709,11 @@ img.auth-shot.only-light,
 }
 
 .lp-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
 }
 
@@ -739,31 +744,13 @@ img.auth-shot.only-light,
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 10px;
   font-size: 14px;
   font-weight: 500;
 }
 
-.lp-subbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: color-mix(in srgb, var(--bg) 94%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line);
-}
-
-.lp-subbar .lp-bar-row {
-  min-height: 56px;
-}
-
-.lp-subbar-title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.lp-subbar .lp-bar-end {
-  gap: 16px;
+.lp-bar-end .theme-switch {
+  margin-left: 8px;
 }
 
 .lp-hero {
@@ -1182,8 +1169,7 @@ img.lp-shot.only-light,
   .lp-wrap {
     padding: 0 20px;
   }
-  .lp-nav,
-  .lp-subbar-title {
+  .lp-nav {
     display: none;
   }
   .lp-bar-row {
@@ -1241,10 +1227,7 @@ img.lp-shot.only-light,
 }
 
 @media (max-width: 560px) {
-  .lp-subbar .lp-bar-end > a:not(.btn) {
-    display: none;
-  }
-  .lp-bar-end > a[href="#contact"] {
+  .lp-bar-end .btn:not(.btn-primary) {
     display: none;
   }
 }
@@ -4665,4 +4648,43 @@ button.shell-nav-heading[aria-expanded="false"] .shell-nav-chevron {
 /* Screens still using a toolbar for their title line get the same look. */
 .toolbar > h1 {
   margin: 0;
+}
+
+/* Light / Dark / System: three small buttons in a pill (owner, 23 October 2026). */
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+
+.theme-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.theme-switch button:hover {
+  color: var(--fg);
+}
+
+.theme-switch button.is-on {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.theme-switch button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }

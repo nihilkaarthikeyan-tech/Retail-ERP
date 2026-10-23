@@ -2,35 +2,36 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Icon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/icons";
 import { type Theme, THEME_STORAGE_KEY } from "@/lib/theme";
 
 const CHANGE_EVENT = "themechange";
 
-function currentTheme(): Theme {
+/** What is chosen: light, dark, or follow the system. */
+function currentChoice(): Theme {
   const picked = document.documentElement.dataset.theme;
-  if (picked === "light" || picked === "dark") return picked;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return picked === "dark" ? "dark" : picked === "light" ? "light" : "system";
 }
 
 function subscribe(onChange: () => void): () => void {
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  media.addEventListener("change", onChange);
   window.addEventListener(CHANGE_EVENT, onChange);
-  return () => {
-    media.removeEventListener("change", onChange);
-    window.removeEventListener(CHANGE_EVENT, onChange);
-  };
+  return () => window.removeEventListener(CHANGE_EVENT, onChange);
 }
 
-/** Light/dark switch for the top bar. The choice is kept in this browser only. */
-export function ThemeToggle() {
-  // The server cannot know the theme; null renders a neutral label until the browser answers.
-  const theme = useSyncExternalStore<Theme | null>(subscribe, currentTheme, () => null);
+const OPTIONS: { value: Theme; label: string; icon: IconName }[] = [
+  { value: "light", label: "Light", icon: "sun" },
+  { value: "dark", label: "Dark", icon: "moon" },
+  { value: "system", label: "System", icon: "monitor" },
+];
 
-  function toggle() {
-    const next: Theme = currentTheme() === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
+/** Light / Dark / System, three small buttons. The choice is kept in this browser only. */
+export function ThemeToggle() {
+  // The server cannot know the choice; "light" matches what a first-time visitor sees.
+  const choice = useSyncExternalStore<Theme>(subscribe, currentChoice, () => "light");
+
+  function choose(next: Theme) {
+    if (next === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, next);
     } catch {
@@ -39,11 +40,13 @@ export function ThemeToggle() {
     window.dispatchEvent(new Event(CHANGE_EVENT));
   }
 
-  const goingTo: Theme = theme === "dark" ? "light" : "dark";
   return (
-    <button type="button" className="btn btn-small" onClick={toggle} aria-label={`Switch to ${goingTo} mode`}>
-      <Icon name={goingTo === "dark" ? "moon" : "sun"} size={15} />
-      {goingTo === "dark" ? "Dark" : "Light"}
-    </button>
+    <div className="theme-switch" role="radiogroup" aria-label="Appearance">
+      {OPTIONS.map((o) => (
+        <button key={o.value} type="button" role="radio" aria-checked={choice === o.value} aria-label={`${o.label} mode`} title={o.label} className={choice === o.value ? "is-on" : undefined} onClick={() => choose(o.value)}>
+          <Icon name={o.icon} size={15} />
+        </button>
+      ))}
+    </div>
   );
 }

@@ -110,34 +110,23 @@ export default function LandingPage() {
             Retail ERP
           </Link>
           <nav className="lp-nav" aria-label="Page">
-            <a href="#shops">Shop types</a>
             <a href="#billing">Features</a>
+            <a href="#shops">Shop types</a>
             <a href="#hardware">Hardware</a>
             <a href="#pricing">Pricing</a>
+            <a href="#contact">Talk to us</a>
           </nav>
           <div className="lp-bar-end">
+            <Link href="/login" className="btn btn-small">
+              Log in
+            </Link>
+            <Link href="/signup" className="btn btn-small btn-primary">
+              Start free trial
+            </Link>
             <ThemeToggle />
-            <a href="#contact">Talk to us</a>
-            <Link href="/login">Log in</Link>
           </div>
         </div>
       </header>
-
-      <div className="lp-subbar">
-        <div className="lp-wrap lp-bar-row">
-          <span className="lp-subbar-title">Billing and stock for shops</span>
-          <div className="lp-bar-end">
-            <a href="#top">Overview</a>
-            <a href="#pricing">Pricing</a>
-            <a href="#contact" className="btn btn-small">
-              Book a demo
-            </a>
-            <Link href="/signup" className="btn btn-small btn-primary">
-              Start free
-            </Link>
-          </div>
-        </div>
-      </div>
 
       <main>
         <section id="top" className="lp-wrap lp-hero">

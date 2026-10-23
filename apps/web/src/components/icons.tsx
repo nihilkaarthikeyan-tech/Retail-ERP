@@ -108,6 +108,7 @@ const PATHS = {
   download: <path d="M12 4v11.5M7.5 11l4.5 4.5 4.5-4.5M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />,
   flag: <path d="M5.5 21V3.5M5.5 4.5h12l-2.5 4 2.5 4h-12" />,
   // Quick search (owner, 23 October 2026)
+  monitor: <path d="M3.5 5.5h17v10h-17zM9 19.5h6M12 15.5v4" />,
   search: <path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20.5 20.5l-4.2-4.2" />,
 };
 
