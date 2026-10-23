@@ -43,6 +43,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  // On a phone the menu is a drawer opened with the ☰ button.
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Ctrl+K (Cmd+K on a Mac) opens quick search from anywhere.
   useEffect(() => {
@@ -98,6 +100,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="shell">
       <header className="shell-head">
         {ready ? (
+          <button type="button" className="shell-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open the menu" aria-expanded={menuOpen}>
+            <Icon name="menu" size={20} />
+          </button>
+        ) : null}
+        <Link href="/dashboard" className="shell-brand shell-brand-compact">
+          <BrandMark />
+          Retail ERP
+        </Link>
+        {ready ? (
           <button type="button" className="shell-search" onClick={() => setSearchOpen(true)} aria-label="Quick search">
             <Icon name="search" size={16} />
             <span>Search screens, items, customers, bills</span>
@@ -137,15 +148,36 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
         </div>
       </header>
-      <aside className="shell-side">
-        <Link href="/dashboard" className="shell-brand">
-          <BrandMark />
-          Retail ERP
-        </Link>
+      {menuOpen ? <div className="shell-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" /> : null}
+      <aside
+        className={`shell-side${menuOpen ? " is-open" : ""}`}
+        onClick={(e) => {
+          // Picking a screen on a phone closes the drawer.
+          if ((e.target as HTMLElement).closest("a")) setMenuOpen(false);
+        }}
+      >
+        <div className="shell-side-top">
+          <Link href="/dashboard" className="shell-brand">
+            <BrandMark />
+            Retail ERP
+          </Link>
+          <button type="button" className="shell-menu-close" onClick={() => setMenuOpen(false)} aria-label="Close the menu">
+            ×
+          </button>
+        </div>
         {ready ? (
           <Suspense fallback={<AppMenu user={user} pathname="" />}>
             <CurrentMenu user={user} />
           </Suspense>
+        ) : null}
+        {ready ? (
+          <div className="shell-side-foot">
+            <ThemeToggle />
+            <Button size="small" onClick={onLogout}>
+              <Icon name="logout" size={15} />
+              Log out
+            </Button>
+          </div>
         ) : null}
       </aside>
       <div className="shell-main">

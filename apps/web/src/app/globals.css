@@ -425,48 +425,132 @@ p {
   max-width: 1240px;
 }
 
-@media (max-width: 720px) {
-  /* On a phone the menu sits under the top bar and the whole page scrolls as one. */
+/* The ☰ button, the compact brand in the top bar and the drawer close button show only on small screens. */
+.shell-menu-button,
+.shell-brand-compact,
+.shell-menu-close,
+.shell-backdrop,
+.shell-side-foot {
+  display: none;
+}
+
+.shell-side-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  /* On a phone or small tablet: a compact top bar, the page full width, and the
+     menu as a drawer that slides in over the page (owner, 23 October 2026). */
   .shell {
     grid-template-columns: 1fr;
     grid-template-areas:
       "head"
-      "side"
       "main";
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
   }
-  .shell-side,
-  .shell-main {
-    overflow: visible;
+  .shell-head {
+    flex-wrap: nowrap;
+    gap: 8px;
+    min-height: 56px;
+    padding: 8px 12px;
+  }
+  .shell-head .theme-switch,
+  .shell-head-end > button {
+    display: none;
+  }
+  .shell-side-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .shell-menu-button,
+  .shell-menu-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .shell-brand-compact {
+    display: flex;
+    padding: 0 4px;
+  }
+  .shell-head .shell-search {
+    flex: none;
+    min-width: 0;
+    max-width: none;
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+    margin-left: auto;
+  }
+  .shell-brand-compact {
+    white-space: nowrap;
+    font-size: 15px;
+  }
+  .shell-search span,
+  .shell-search kbd,
+  .shell-date,
+  .shell-user-text,
+  .shell-head-end > a[href="/change-password"] {
+    display: none;
+  }
+  .shell-head-end {
+    margin-left: 0;
+    gap: 8px;
+  }
+  .shell-user {
+    padding: 0;
   }
   .shell-side {
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 10px 12px;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: min(320px, 86vw);
+    border-right: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    transform: translateX(-105%);
+    transition: transform 0.2s ease-out;
   }
-  .shell-brand {
-    padding-bottom: 8px;
+  .shell-side.is-open {
+    transform: none;
   }
-  .shell-nav {
-    gap: 6px;
+  .shell-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: var(--backdrop);
   }
-  .shell-nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .shell-nav-heading {
-    padding: 4px 0 2px;
-  }
-  .shell-nav-group-admin {
-    padding-top: 6px;
-  }
-  .shell-head,
   .shell-content {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding: 20px 16px 40px;
+  }
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tile:nth-child(2n + 1) {
+    box-shadow: none;
+  }
+  .tile:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-side {
+    transition: none;
   }
 }
 

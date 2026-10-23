@@ -109,6 +109,7 @@ const PATHS = {
   flag: <path d="M5.5 21V3.5M5.5 4.5h12l-2.5 4 2.5 4h-12" />,
   // Quick search (owner, 23 October 2026)
   monitor: <path d="M3.5 5.5h17v10h-17zM9 19.5h6M12 15.5v4" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
   search: <path d="M11 18.5a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15zM20.5 20.5l-4.2-4.2" />,
 };
 
