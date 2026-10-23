@@ -7,7 +7,7 @@ import { useState, type FormEvent } from "react";
 import { businessDate, hasPermission, PARTY_STATUSES } from "shared";
 import { ExportButton } from "@/components/documents/export-button";
 import { HoldBadge, PartyStatusBadge } from "@/components/parties/status-badge";
-import { Alert, Badge, Button, CheckInput, DataTable, SelectInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, CheckInput, DataTable, EmptyState, PageHeader, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups } from "@/lib/catalogue";
@@ -89,16 +89,14 @@ export function SuppliersList() {
 
   return (
     <>
-      <div className="toolbar">
-        <h1 style={{ margin: 0 }}>Suppliers</h1>
-        <span className="spacer" />
+      <PageHeader title="Suppliers">
         <ExportButton kind="suppliers" />
         {canManage ? (
           <Link href="/suppliers/new" className="btn btn-primary">
             Add supplier
           </Link>
         ) : null}
-      </div>
+      </PageHeader>
       <form onSubmit={onSearch} className="scan-box" role="search">
         <label htmlFor="suppliers-search" className="sr-only">
           Search suppliers
@@ -126,7 +124,25 @@ export function SuppliersList() {
         <CheckInput id="suppliers-transporters" label="Transporters only" checked={filters.transporters === "true"} onChange={(e) => setFilter("transporters", e.target.checked ? "true" : "")} />
       </div>
       <Alert kind="error">{suppliers.error ?? groups.error}</Alert>
-      <DataTable columns={columns} rows={suppliers.data?.rows} rowKey={(s) => s.id} loading={suppliers.loading} empty={filters.search ? `No suppliers match "${filters.search}".` : "No suppliers yet."} />
+      <DataTable columns={columns} rows={suppliers.data?.rows} rowKey={(s) => s.id} loading={suppliers.loading} empty={
+          filters.search ? (
+            `No suppliers match "${filters.search}".`
+          ) : (
+            <EmptyState title="No suppliers yet" text="Add the people you buy from, so purchase orders and goods receipts can name them.">
+              {canManage ? (
+                <Link href="/suppliers/new" className="btn btn-primary">
+                  Add supplier
+                </Link>
+              ) : null}
+              {hasPermission(user, "import.masters") ? (
+                <Link href="/imports" className="btn">
+                  Import from Excel
+                </Link>
+              ) : null}
+            </EmptyState>
+          )
+        }
+      />
       <div className="toolbar">
         <span className="muted">
           {total} supplier{total === 1 ? "" : "s"}

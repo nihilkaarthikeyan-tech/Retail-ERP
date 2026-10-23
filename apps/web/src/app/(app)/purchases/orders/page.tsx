@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { OrderStatusBadge, useOrderStores } from "@/components/purchasing/orders-shared";
-import { Alert, Badge, Button, CheckInput, DataTable, SelectInput, TextInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, CheckInput, DataTable, EmptyState, PageHeader, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
@@ -77,15 +77,13 @@ export default function PurchaseOrdersPage() {
 
   return (
     <>
-      <div className="toolbar">
-        <h1 style={{ margin: 0 }}>Purchase orders</h1>
-        <span className="spacer" />
+      <PageHeader title="Purchase orders">
         {rights.order ? (
           <Link href="/purchases/orders/new" className="btn btn-primary">
             New purchase order
           </Link>
         ) : null}
-      </div>
+      </PageHeader>
       <div className="filter-row">
         <TextInput id="po-search" label="Search" placeholder="Order number or supplier" value={typed} onChange={(e) => setTyped(e.target.value)} />
         <SelectInput id="po-status" label="Status" value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
@@ -107,7 +105,20 @@ export default function PurchaseOrdersPage() {
         <CheckInput id="po-overdue" label="Overdue only" description="Goods still expected after the needed-by date" checked={filters.overdue} onChange={(e) => setFilter("overdue", e.target.checked)} />
       </div>
       <Alert kind="error">{orders.error ?? stores.error}</Alert>
-      <DataTable columns={columns} rows={orders.data?.rows} rowKey={(o) => o.id} loading={orders.loading} empty="No purchase orders match." />
+      <DataTable columns={columns} rows={orders.data?.rows} rowKey={(o) => o.id} loading={orders.loading} empty={
+          typed.trim() ? (
+            "No purchase orders match."
+          ) : (
+            <EmptyState title="No purchase orders yet" text="Order stock from a supplier here; the goods are received against the order when they arrive.">
+              {rights.order ? (
+                <Link href="/purchases/orders/new" className="btn btn-primary">
+                  New purchase order
+                </Link>
+              ) : null}
+            </EmptyState>
+          )
+        }
+      />
       <div className="toolbar">
         <span className="muted">
           {total} order{total === 1 ? "" : "s"}

@@ -2,9 +2,11 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useSyncExternalStore } from "react";
 import type { CurrentUser, ModuleKey } from "shared";
 import { Icon } from "@/components/icons";
 import { areaOf, isActive, type MenuEntry, visibleMenu } from "@/lib/menu";
+import { getCollapsed, getCounts, getServerCollapsed, getServerCounts, mostUsed, subscribeMenuStore, toggleCollapsed } from "@/lib/menu-usage";
 import { useModules } from "@/lib/modules";
 
 interface AppMenuProps {
@@ -25,28 +27,71 @@ function groupBySection(entries: MenuEntry[]): { section: string | undefined; en
   return groups;
 }
 
-/** Left-hand menu: only the pages the user has rights for (and whose module is on), coloured by area of the shop. */
+function Entry({ entry, pathname }: { entry: MenuEntry; pathname: string }) {
+  return (
+    <li>
+      <Link href={entry.href} aria-current={isActive(entry, pathname) ? "page" : undefined}>
+        <Icon name={entry.icon} />
+        {entry.label}
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * Left-hand menu: only the pages the user has rights for (and whose module is
+ * on). Each group folds shut with a click (remembered on this computer), the
+ * group of the current page never folds, and the five screens this person
+ * opens most sit at the top (owner, 23 October 2026).
+ */
 export function AppMenu({ user, pathname, modules }: AppMenuProps) {
   const loaded = useModules().modules;
-  const groups = groupBySection(visibleMenu(user, modules ?? loaded));
+  const entries = useMemo(() => visibleMenu(user, modules ?? loaded), [user, modules, loaded]);
+  const groups = groupBySection(entries);
+  const collapsed = useSyncExternalStore(subscribeMenuStore, getCollapsed, getServerCollapsed);
+  const counts = useSyncExternalStore(subscribeMenuStore, getCounts, getServerCounts);
+  const favourites = useMemo(() => {
+    const top = mostUsed(
+      counts,
+      entries.map((e) => e.href),
+    );
+    return top.map((h) => entries.find((e) => e.href === h)).filter((e): e is MenuEntry => !!e);
+  }, [counts, entries]);
+
   return (
     <nav className="shell-nav" aria-label="Main menu">
+      {favourites.length > 0 ? (
+        <div className="shell-nav-group shell-nav-favourites">
+          <div className="shell-nav-heading">Most used</div>
+          <ul>
+            {favourites.map((entry) => (
+              <Entry key={`fav-${entry.href}`} entry={entry} pathname={pathname} />
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {groups.map((group, i) => {
         const area = areaOf(group.section);
         const classes = ["shell-nav-group", `area-${area}`, area === "admin" ? "shell-nav-group-admin" : ""];
+        const section = group.section;
+        const holdsCurrent = group.entries.some((e) => isActive(e, pathname));
+        const open = !section || holdsCurrent || !collapsed.includes(section);
+        const id = `menu-group-${i}`;
         return (
-          <div key={group.section ?? `top-${i}`} className={classes.filter(Boolean).join(" ")}>
-            {group.section ? <div className="shell-nav-heading">{group.section}</div> : null}
-            <ul>
-              {group.entries.map((entry) => (
-                <li key={entry.href}>
-                  <Link href={entry.href} aria-current={isActive(entry, pathname) ? "page" : undefined}>
-                    <Icon name={entry.icon} />
-                    {entry.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+          <div key={section ?? `top-${i}`} className={classes.filter(Boolean).join(" ")}>
+            {section ? (
+              <button type="button" className="shell-nav-heading" aria-expanded={open} aria-controls={id} onClick={() => toggleCollapsed(section)}>
+                {section}
+                <span className="shell-nav-chevron" aria-hidden="true" />
+              </button>
+            ) : null}
+            {open ? (
+              <ul id={id}>
+                {group.entries.map((entry) => (
+                  <Entry key={entry.href} entry={entry} pathname={pathname} />
+                ))}
+              </ul>
+            ) : null}
           </div>
         );
       })}

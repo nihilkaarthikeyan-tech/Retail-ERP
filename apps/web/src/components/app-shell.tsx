@@ -7,11 +7,14 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { businessDate, type CurrentUser } from "shared";
 import { AppMenu } from "@/components/app-menu";
 import { Icon } from "@/components/icons";
+import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui";
+import { Button, ToastProvider } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, fullName } from "@/lib/format";
+import { MENU } from "@/lib/menu";
+import { recordVisit } from "@/lib/menu-usage";
 import { BrandMark } from "@/components/brand-mark";
 
 function initials(user: CurrentUser): string {
@@ -19,20 +22,39 @@ function initials(user: CurrentUser): string {
   return (letters || user.email[0] || "?").toUpperCase();
 }
 
-/** Reads the current path (runtime-only data, so it sits behind Suspense). */
+/** Reads the current path (runtime-only data, so it sits behind Suspense) and counts the visit for "Most used". */
 function CurrentMenu({ user }: { user: CurrentUser }) {
   const pathname = usePathname();
+  useEffect(() => {
+    if (MENU.some((e) => e.href === pathname)) recordVisit(pathname);
+  }, [pathname]);
   return <AppMenu user={user} pathname={pathname} />;
 }
 
+const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 /**
- * Shell for every logged-in page: top bar (today's business date, light/dark
- * switch, user, logout) and the menu on the left. Sends visitors to /setup, /login or /change-password as needed.
+ * Shell for every logged-in page: the menu on the left with the brand at its
+ * top, and a top bar over the page (today's business date, light/dark switch,
+ * user, logout). Sends visitors to /setup, /login or /change-password as needed.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Ctrl+K (Cmd+K on a Mac) opens quick search from anywhere.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,12 +94,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const ready = !loading && setupNeeded !== null && !!user && !setupNeeded && !user.mustChangePassword;
 
   return (
+    <ToastProvider>
     <div className="shell">
       <header className="shell-head">
-        <Link href="/dashboard" className="shell-brand">
-          <BrandMark />
-          Retail ERP
-        </Link>
+        {ready ? (
+          <button type="button" className="shell-search" onClick={() => setSearchOpen(true)} aria-label="Quick search">
+            <Icon name="search" size={16} />
+            <span>Search screens, items, customers, bills</span>
+            <kbd>{isMac() ? "⌘" : "Ctrl"} K</kbd>
+          </button>
+        ) : null}
         {ready ? (
           <span className="shell-date">
             <Icon name="calendar" size={15} />
@@ -112,6 +138,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <aside className="shell-side">
+        <Link href="/dashboard" className="shell-brand">
+          <BrandMark />
+          Retail ERP
+        </Link>
         {ready ? (
           <Suspense fallback={<AppMenu user={user} pathname="" />}>
             <CurrentMenu user={user} />
@@ -121,6 +151,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="shell-main">
         <main className="shell-content">{children}</main>
       </div>
+      {ready ? <QuickSearch user={user} open={searchOpen} onClose={() => setSearchOpen(false)} /> : null}
     </div>
+    </ToastProvider>
   );
 }

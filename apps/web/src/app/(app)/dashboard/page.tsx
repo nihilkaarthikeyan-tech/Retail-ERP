@@ -4,6 +4,7 @@
 import { useRouter } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { hasPermission } from "shared";
+import { Attention } from "@/components/attention";
 import { ItemSearchBox } from "@/components/items/item-search-box";
 import { GettingStarted } from "@/components/getting-started";
 import { Dashboards } from "@/components/reports/dashboards";
@@ -52,6 +53,8 @@ export default function DashboardPage() {
       ) : null}
 
       <GettingStarted />
+
+      <Attention />
 
       <Dashboards />
 

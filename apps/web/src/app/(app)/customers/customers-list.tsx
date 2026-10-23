@@ -8,7 +8,7 @@ import { hasPermission, PARTY_STATUSES } from "shared";
 import { ExportButton } from "@/components/documents/export-button";
 import { QuickAddDialog } from "@/components/parties/quick-add-dialog";
 import { PartyStatusBadge } from "@/components/parties/status-badge";
-import { Alert, Badge, Button, DataTable, SelectInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, DataTable, EmptyState, PageHeader, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups, showMoney } from "@/lib/catalogue";
@@ -84,9 +84,7 @@ export function CustomersList() {
 
   return (
     <>
-      <div className="toolbar">
-        <h1 style={{ margin: 0 }}>Customers</h1>
-        <span className="spacer" />
+      <PageHeader title="Customers">
         <ExportButton kind="customers" />
         {canQuickAdd ? <Button onClick={() => setQuickAdd(true)}>Quick add</Button> : null}
         {canManage ? (
@@ -94,7 +92,7 @@ export function CustomersList() {
             Add customer
           </Link>
         ) : null}
-      </div>
+      </PageHeader>
       <form onSubmit={onSearch} className="scan-box" role="search">
         <label htmlFor="customers-search" className="sr-only">
           Search customers
@@ -121,7 +119,25 @@ export function CustomersList() {
         </SelectInput>
       </div>
       <Alert kind="error">{customers.error ?? groups.error}</Alert>
-      <DataTable columns={columns} rows={customers.data?.rows} rowKey={(c) => c.id} loading={customers.loading} empty={filters.search ? `No customers match "${filters.search}".` : "No customers yet."} />
+      <DataTable columns={columns} rows={customers.data?.rows} rowKey={(c) => c.id} loading={customers.loading} empty={
+          filters.search ? (
+            `No customers match "${filters.search}".`
+          ) : (
+            <EmptyState title="No customers yet" text="Customers are added at the billing counter as they buy, or you can add them here or import a list from Excel.">
+              {canManage ? (
+                <Link href="/customers/new" className="btn btn-primary">
+                  Add customer
+                </Link>
+              ) : null}
+              {hasPermission(user, "import.masters") ? (
+                <Link href="/imports" className="btn">
+                  Import from Excel
+                </Link>
+              ) : null}
+            </EmptyState>
+          )
+        }
+      />
       <div className="toolbar">
         <span className="muted">
           {total} customer{total === 1 ? "" : "s"}

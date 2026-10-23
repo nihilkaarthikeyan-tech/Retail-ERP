@@ -7,7 +7,7 @@ import { useState } from "react";
 import { hasPermission } from "shared";
 import { ExportButton } from "@/components/documents/export-button";
 import { ItemSearchBox } from "@/components/items/item-search-box";
-import { ActiveBadge, Alert, Button, DataTable, SelectInput, type Column } from "@/components/ui";
+import { ActiveBadge, Alert, Button, DataTable, EmptyState, PageHeader, SelectInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useModules } from "@/lib/modules";
@@ -77,16 +77,14 @@ export function ItemsList() {
 
   return (
     <>
-      <div className="toolbar">
-        <h1 style={{ margin: 0 }}>Items</h1>
-        <span className="spacer" />
+      <PageHeader title="Items">
         <ExportButton kind="items" />
         {canManage ? (
           <Link href="/items/new" className="btn btn-primary">
             Add item
           </Link>
         ) : null}
-      </div>
+      </PageHeader>
       <ItemSearchBox key={filters.search} initial={filters.search} onSearch={(text) => setFilter("search", text)} />
       <div className="filter-row">
         <SelectInput id="items-group" label="Group" value={filters.groupId} onChange={(e) => setFilter("groupId", e.target.value)}>
@@ -133,7 +131,24 @@ export function ItemsList() {
         rows={items.data?.rows}
         rowKey={(i) => i.id}
         loading={items.loading}
-        empty={filters.search ? `No items match "${filters.search}".` : "No items yet."}
+        empty={
+          filters.search ? (
+            `No items match "${filters.search}".`
+          ) : (
+            <EmptyState title="No items yet" text="Add your first item, or bring your whole list from Excel with prices and opening stock.">
+              {canManage ? (
+                <Link href="/items/new" className="btn btn-primary">
+                  Add item
+                </Link>
+              ) : null}
+              {hasPermission(user, "import.masters") ? (
+                <Link href="/imports" className="btn">
+                  Import from Excel
+                </Link>
+              ) : null}
+            </EmptyState>
+          )
+        }
       />
       <div className="toolbar">
         <span className="muted">

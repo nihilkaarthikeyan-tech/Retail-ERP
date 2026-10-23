@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { type BillPage, FlagBadges, type PosBillDto, useTills } from "@/components/pos/pos-shared";
-import { Alert, Badge, Button, DataTable, SelectInput, TextInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, DataTable, EmptyState, PageHeader, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { rupees } from "@/lib/purchasing";
@@ -70,7 +70,7 @@ export default function PosBillsPage() {
 
   return (
     <>
-      <h1>Till bills</h1>
+      <PageHeader title="Till bills" note="Every bill and return made at the billing counter." />
       <div className="filter-row">
         <TextInput id="pb-search" label="Bill number" placeholder="Part of the number" value={typed} onChange={(e) => setTyped(e.target.value)} />
         <SelectInput id="pb-till" label="Till" value={filters.tillId} onChange={(e) => setFilter("tillId", e.target.value)}>
@@ -90,7 +90,18 @@ export default function PosBillsPage() {
         </SelectInput>
       </div>
       <Alert kind="error">{bills.error ?? tills.error}</Alert>
-      <DataTable columns={columns} rows={bills.data?.rows} rowKey={(b) => b.id} loading={bills.loading} empty="No bills match." rowClassName={(b) => (b.status === "cancelled" ? "row-muted" : undefined)} />
+      <DataTable columns={columns} rows={bills.data?.rows} rowKey={(b) => b.id} loading={bills.loading} empty={
+          filters.search || filters.tillId || filters.from || filters.to || filters.kind ? (
+            "No bills match."
+          ) : (
+            <EmptyState title="No bills yet" text="Bills made at the billing counter appear here as soon as they are saved.">
+              <Link href="/till" className="btn btn-primary">
+                Open the billing counter
+              </Link>
+            </EmptyState>
+          )
+        }
+        rowClassName={(b) => (b.status === "cancelled" ? "row-muted" : undefined)} />
       <div className="toolbar">
         <span className="muted">
           {total} bill{total === 1 ? "" : "s"}

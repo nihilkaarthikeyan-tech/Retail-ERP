@@ -9,6 +9,7 @@ import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { AttentionService } from './attention.service.js';
 import { DashboardsService } from './dashboards.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
 import { SalesReportsService } from './sales-reports.service.js';
@@ -29,11 +30,16 @@ export class ReportsController {
     private readonly stock: StockAnalysisService,
     private readonly money: MoneyReportsService,
     private readonly dashboards: DashboardsService,
+    private readonly attention: AttentionService,
     private readonly summary: SummaryEmailService,
     private readonly seasons: SeasonReportsService,
   ) {}
 
   // ---- Dashboards ----
+  /** "Needs your attention": each line checks its own right, so anyone logged in may ask. */
+  @Get('attention') attentionList(@ReqUser() user: AuthUser) {
+    return this.attention.list(user);
+  }
   @Get('dashboards') @RequireAnyPermission('pos.reports', 'purchase.view', 'accounts.view') available(@ReqUser() user: AuthUser) {
     return { dashboards: this.dashboards.available(user) };
   }
