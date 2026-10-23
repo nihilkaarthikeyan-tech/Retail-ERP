@@ -11,6 +11,7 @@ import { ItemsModule } from '../items/items.module.js';
 import { OrdersModule } from '../orders/orders.module.js';
 import { PartiesModule } from '../parties/parties.module.js';
 import { PricingModule } from '../pricing/pricing.module.js';
+import { DataExportService } from './data-export.service.js';
 import { DocumentsController } from './documents.controller.js';
 import { GoLiveService } from './go-live.service.js';
 import { LabelsService } from './labels.service.js';
@@ -19,6 +20,6 @@ import { PrintService } from './print.service.js';
 @Module({
   imports: [CompanyModule, GstPortalModule, AccountingModule, CatalogueModule, InventoryModule, ItemsModule, OrdersModule, PartiesModule, PricingModule],
   controllers: [DocumentsController],
-  providers: [PrintService, LabelsService, GoLiveService, ImportsService, ImportKindsService],
+  providers: [PrintService, LabelsService, GoLiveService, ImportsService, ImportKindsService, DataExportService],
 })
 export class DocumentsModule {}

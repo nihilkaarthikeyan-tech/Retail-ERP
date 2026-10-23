@@ -846,3 +846,12 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### 14.5 Clearing trial data clears only the shop's own data
 - **Then** a shop clearing its trial data (decision 72) removes only its own bills, stock movements and ledger entries; every other shop's data is untouched.
+
+### 14.6 Download all my data
+- **Given** two shops, each with items, customers and users
+- **Then:**
+  - the Owner of one shop downloads one zip with a CSV file per list and a "READ ME" naming each file and its row count;
+  - the file holds only that shop's rows, never another shop's;
+  - passwords, PINs and login sessions are not in it;
+  - amounts keep every digit as stored (an MRP of 249 is 249.00);
+  - the download is recorded in the shop's change history; only the Owner can download.

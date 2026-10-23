@@ -6,6 +6,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { hashPassword } from '../../src/auth/password.js';
+import { readCsv, readZip } from '../../src/imports/spreadsheet.js';
 import { PrismaService, SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { runForCompany, runRequest } from '../../src/prisma/tenancy.js';
 import { type Agent, agent, createTestApp, login, OWNER, resetDatabase, SETUP_INPUT } from '../helpers.js';
@@ -168,7 +169,39 @@ describe('14.1 Two shops with the same codes', () => {
     expect(ra.status).toBe(201);
     expect(rb.status).toBe(201);
   });
+
+  it('14.6 the owner downloads all the shop data: only their own rows, never a password', async () => {
+    const zip = readZip((await A.agent.get('/data-export').buffer(true).parse(binary as never).expect(200)).body as Buffer);
+    const text = (name: string) => zip.get(name)!.toString('utf8').replace(/^﻿/, '');
+    expect(text('READ ME.txt')).toMatch(/Rademics Retail Pvt Ltd/);
+    for (const name of ['Company.csv', 'Item.csv', 'Customer.csv', 'Store.csv', 'User.csv', 'AuditLog.csv']) expect(zip.has(name)).toBe(true);
+    for (const name of ['Session.csv', 'PosCashierToken.csv', 'UserPin.csv']) expect(zip.has(name)).toBe(false);
+    // Shop B's rows are never in shop A's file.
+    const all = [...zip.entries()].map(([, b]) => b.toString('utf8')).join('\n');
+    expect(all).toContain(A.companyId);
+    expect(all).not.toContain(B.companyId);
+    expect(all).not.toContain('Ravi Textiles');
+    // Users come without their password hash.
+    const users = readCsv(text('User.csv'));
+    expect(users[0]).toContain('email');
+    expect(users[0]).not.toContain('passwordHash');
+    expect(users.slice(1).map((r) => r[users[0].indexOf('email')])).toContain(OWNER.email);
+    expect(all).not.toMatch(/\$argon2|\$scrypt|scrypt\$/);
+    // Amounts keep every digit, and the download is in the history.
+    const items = readCsv(text('Item.csv'));
+    expect(items.slice(1).map((r) => r[items[0].indexOf('mrp')])).toContain('249.00');
+    const logged = await prisma.auditLog.findMany({ where: { companyId: A.companyId, action: 'export', entityType: 'company' } });
+    expect(logged).toHaveLength(1);
+    // Shop B's owner gets shop B's own data.
+    expect(readZip((await B.agent.get('/data-export').buffer(true).parse(binary as never).expect(200)).body as Buffer).get('Company.csv')!.toString('utf8')).toContain('Ravi Textiles');
+  });
 });
+
+const binary = (res: NodeJS.ReadableStream, cb: (err: Error | null, body: Buffer) => void) => {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+};
 
 describe('14.2 Sign-up, login and a switched-off shop', () => {
   beforeAll(async () => {

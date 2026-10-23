@@ -28,6 +28,7 @@ import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { ImportsService } from '../imports/imports.service.js';
+import { DataExportService } from './data-export.service.js';
 import { GoLiveService } from './go-live.service.js';
 import { LabelsService } from './labels.service.js';
 import { PrintService } from './print.service.js';
@@ -55,6 +56,7 @@ export class DocumentsController {
     private readonly labelsService: LabelsService,
     private readonly goLive: GoLiveService,
     private readonly imports: ImportsService,
+    private readonly dataExport: DataExportService,
   ) {}
 
   // ---- Printing ----
@@ -156,6 +158,9 @@ export class DocumentsController {
     @Res() res: Response,
   ) {
     sendFile(res, await this.imports.export(kind, format, actor, user));
+  }
+  @Get('data-export') @RequirePermission('data.export_all') async exportAll(@ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
+    sendFile(res, await this.dataExport.exportAll(actor, user));
   }
 
   // ---- Going live (decision 72) ----

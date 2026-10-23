@@ -77,6 +77,7 @@ export const PERMISSIONS = {
   'import.opening': 'Import opening stock and unpaid bills from before going live',
   'export.masters': 'Export items, prices, customers, suppliers and reorder levels for Excel',
   'golive.manage': 'Clear trial data and record the go-live date (Owner)',
+  'data.export_all': 'Download a copy of all the shop’s data (Owner)',
   // Plan 11
   'sales_staff.manage': 'Add and change the salespeople of own stores',
   'deliveries.manage': 'See and update home deliveries of own stores',

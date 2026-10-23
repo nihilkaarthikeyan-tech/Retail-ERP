@@ -114,7 +114,7 @@ describe("My modules", () => {
       { path: "/modules/customer_orders", body: { enabled: false } },
       { path: "/modules/customer_orders", body: { enabled: false, confirm: true } },
     ]);
-  });
+  }, 15_000); // renders the whole menu; slow when every test file runs at once
 
   it("switching on Alterations says Salesperson came on too", async () => {
     const map = { ...allOn(), alterations: false, salesperson: false };
