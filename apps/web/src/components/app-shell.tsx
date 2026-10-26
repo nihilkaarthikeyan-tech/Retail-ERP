@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { businessDate, type CurrentUser } from "shared";
 import { AppMenu } from "@/components/app-menu";
+import { ConfirmEmailBar } from "@/components/email-link-forms";
 import { Icon } from "@/components/icons";
 import { QuickSearch } from "@/components/quick-search";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -181,7 +182,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : null}
       </aside>
       <div className="shell-main">
-        <main className="shell-content">{children}</main>
+        <main className="shell-content">
+          {ready ? <ConfirmEmailBar /> : null}
+          {children}
+        </main>
       </div>
       {ready ? <QuickSearch user={user} open={searchOpen} onClose={() => setSearchOpen(false)} /> : null}
     </div>

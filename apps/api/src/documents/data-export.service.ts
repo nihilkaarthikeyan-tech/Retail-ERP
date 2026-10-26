@@ -13,7 +13,7 @@ import { type Cell, writeCsv, writeZip } from '../imports/spreadsheet.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 /** Tables of login secrets only: never in the copy. */
-export const SECRET_TABLES = new Set(['Session', 'PosCashierToken', 'UserPin']);
+export const SECRET_TABLES = new Set(['Session', 'PosCashierToken', 'UserPin', 'UserToken']);
 /** Columns holding a password, PIN or token hash: left out of every table. */
 export const isSecretColumn = (column: string) => /hash$/i.test(column);
 

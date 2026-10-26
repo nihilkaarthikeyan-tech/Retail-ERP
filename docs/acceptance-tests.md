@@ -855,3 +855,20 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
   - passwords, PINs and login sessions are not in it;
   - amounts keep every digit as stored (an MRP of 249 is 249.00);
   - the download is recorded in the shop's change history; only the Owner can download.
+
+### 14.7 Forgot password
+- **Given** a shop owner who has forgotten their password
+- **Then:**
+  - "Forgot password?" answers the same for any email, so it never tells who has an account; only an active account in an active shop gets an email;
+  - the email's link works once and stops working after 30 minutes; asking again makes the earlier link stop working; at most three links an hour are sent to one person;
+  - only a hash of the link is kept in the database;
+  - a too-short new password is refused and the link still works;
+  - saving the new password ends every open session of the account, the old password stops working, a "your password was changed" email follows, and both the request and the reset are in the login history.
+
+### 14.8 Confirm your email at sign-up
+- **Then:**
+  - signing up sends a "confirm your email" link, and the owner sees a reminder bar with "Send the link again" until it is used;
+  - sending it again makes the earlier link stop working; the link works once (7 days);
+  - a confirm link cannot reset a password and a reset link cannot confirm an email;
+  - everyone already using the system before this change counts as confirmed.
+

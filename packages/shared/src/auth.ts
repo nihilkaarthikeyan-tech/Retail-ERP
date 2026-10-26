@@ -12,6 +12,8 @@ export interface CurrentUser {
   allStores: boolean;
   stores: { id: string; code: string; name: string; isDefault: boolean }[];
   mustChangePassword: boolean;
+  /** False while the person has not yet confirmed their email by its link (owner, 26 October 2026). */
+  emailConfirmed?: boolean;
   roles: { id: string; code: string; name: string }[];
 }
 

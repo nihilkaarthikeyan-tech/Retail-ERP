@@ -16,6 +16,10 @@ export type AuditAction =
   | 'logout'
   | 'password_change'
   | 'password_reset'
+  /** "Forgot password?" asked for a link (owner, 26 October 2026). */
+  | 'password_reset_requested'
+  /** The person confirmed their email by its link. */
+  | 'email_confirmed'
   | 'sessions_ended'
   | 'counter_change'
   | 'setup'
@@ -24,7 +28,7 @@ export type AuditAction =
   /** A document printed (blueprint 16: every print is logged). */
   | 'print';
 
-export const LOGIN_ACTIONS: AuditAction[] = ['login', 'login_failed', 'login_locked', 'logout'];
+export const LOGIN_ACTIONS: AuditAction[] = ['login', 'login_failed', 'login_locked', 'logout', 'password_reset_requested', 'password_reset'];
 
 export interface AuditEntry {
   action: AuditAction;

@@ -54,6 +54,22 @@ export const changePasswordSchema = z.object({
 });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 
+/** "Forgot password?" (owner, 26 October 2026): the email to send the link to. */
+export const forgotPasswordSchema = z.object({ email });
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+/** The one-time code from an emailed link. */
+const linkToken = z.string().trim().min(20).max(200);
+
+export const newPasswordByLinkSchema = z.object({
+  token: linkToken,
+  newPassword: z.string().min(1).max(200),
+});
+export type NewPasswordByLinkInput = z.infer<typeof newPasswordByLinkSchema>;
+
+export const confirmEmailSchema = z.object({ token: linkToken });
+export type ConfirmEmailInput = z.infer<typeof confirmEmailSchema>;
+
 // ---- Setup ----
 
 export const setupSchema = z.object({

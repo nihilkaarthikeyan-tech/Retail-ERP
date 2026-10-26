@@ -1,11 +1,12 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { type ChangePasswordInput, changePasswordSchema, type CurrentUser, type LoginInput, loginSchema } from 'shared';
+import { type ChangePasswordInput, changePasswordSchema, type ConfirmEmailInput, confirmEmailSchema, type CurrentUser, type ForgotPasswordInput, forgotPasswordSchema, type LoginInput, loginSchema, type NewPasswordByLinkInput, newPasswordByLinkSchema } from 'shared';
 import { type Actor, type AuthUser, clientIp, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthService } from './auth.service.js';
 import { AllowPasswordChangePending, Public } from './decorators.js';
+import { EmailLinksService } from './email-links.service.js';
 import { SESSION_COOKIE } from './session.js';
 
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
@@ -23,7 +24,10 @@ export function setSessionCookie(res: Response, token: string, sessionMaxHours: 
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly links: EmailLinksService,
+  ) {}
 
   @Public()
   @Post('login')
@@ -65,6 +69,38 @@ export class AuthController {
     @Body(new ZodValidationPipe(changePasswordSchema)) input: ChangePasswordInput,
   ) {
     await this.auth.changePassword(user, input, actor);
+  }
+
+  // ---- Emailed links (owner, 26 October 2026) ----
+
+  /** Always 200 with the same answer, whether or not the email has an account. */
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(200)
+  async forgotPassword(@Body(new ZodValidationPipe(forgotPasswordSchema)) input: ForgotPasswordInput, @Req() req: Request): Promise<{ ok: true }> {
+    await this.links.forgotPassword(input, clientIp(req));
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(204)
+  async newPasswordByLink(@Body(new ZodValidationPipe(newPasswordByLinkSchema)) input: NewPasswordByLinkInput, @Req() req: Request) {
+    await this.links.newPasswordByLink(input, clientIp(req));
+  }
+
+  @Public()
+  @Post('confirm-email')
+  @HttpCode(204)
+  async confirmEmail(@Body(new ZodValidationPipe(confirmEmailSchema)) input: ConfirmEmailInput, @Req() req: Request) {
+    await this.links.confirmEmail(input, clientIp(req));
+  }
+
+  @AllowPasswordChangePending()
+  @Post('resend-confirmation')
+  @HttpCode(200)
+  resendConfirmation(@ReqUser() user: AuthUser, @Req() req: Request) {
+    return this.links.resendConfirmation(user, clientIp(req));
   }
 
   @Get('sessions')

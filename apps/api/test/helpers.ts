@@ -23,7 +23,7 @@ export async function createTestApp(): Promise<INestApplication<App>> {
 export async function resetDatabase(prisma: SystemPrisma): Promise<void> {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "AuditLog", "Session", "UserStore", "UserRole", "RolePermission", "Role", "User",
+      "AuditLog", "Session", "UserToken", "UserStore", "UserRole", "RolePermission", "Role", "User",
       "NumberSeriesCounter", "NumberSeries", "FinancialYear", "Store", "GstRegistration",
       "Price", "PriceList", "CatalogueSettings", "Barcode", "ItemUnit", "ItemVariantValue",
       "ItemVariantAttribute", "Item", "VariantAttributeValue", "VariantAttribute", "HsnCode",

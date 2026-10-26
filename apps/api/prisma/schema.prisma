@@ -57,6 +57,7 @@ model Company {
 
   users             User[]
   sessions          Session[]
+  userTokens        UserToken[]
   gstRegistrations  GstRegistration[]
   stores            Store[]
   financialYears    FinancialYear[]
@@ -224,6 +225,8 @@ model User {
   failedLoginCount   Int       @default(0)
   lockedUntil        DateTime?
   lastLoginAt        DateTime?
+  /// When the person confirmed their email by its link (owner, 26 October 2026); null = not yet.
+  emailVerifiedAt    DateTime?
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -233,6 +236,7 @@ model User {
   roles    UserRole[]
   stores   UserStore[]
   sessions Session[]
+  tokens   UserToken[]
   company  Company     @relation(fields: [companyId], references: [id])
 
   @@index([companyId])
@@ -297,6 +301,28 @@ model UserStore {
   store Store @relation(fields: [storeId], references: [id])
 
   @@id([userId, storeId])
+  @@index([companyId])
+}
+
+/// A one-time link sent by email (owner, 26 October 2026): "choose a new password" or
+/// "confirm your email". Only a hash of the link is kept; it works once, until it expires.
+model UserToken {
+  /// The shop this row belongs to (filled in by the database from the request's shop).
+  companyId String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  /// "password_reset" or "email_confirm"
+  purpose   String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([userId, purpose])
   @@index([companyId])
 }
 

@@ -254,6 +254,7 @@ export class AuthService {
         .filter((us) => us.store.active)
         .map((us) => ({ id: us.store.id, code: us.store.code, name: us.store.name, isDefault: us.isDefault })),
       mustChangePassword: user.mustChangePassword,
+      emailConfirmed: !!user.emailVerifiedAt,
       roles: activeRoles.map((r) => ({ id: r.id, code: r.code, name: r.name })),
     };
   }

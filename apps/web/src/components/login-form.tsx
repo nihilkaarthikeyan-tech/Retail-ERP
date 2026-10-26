@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { type CurrentUser, loginSchema } from "shared";
@@ -60,6 +61,9 @@ export function LoginForm() {
         error={fieldErrors.password}
         required
       />
+      <p className="login-forgot">
+        <Link href="/forgot-password">Forgot password?</Link>
+      </p>
       <div className="actions">
         <Button type="submit" variant="primary" busy={busy}>
           Log in

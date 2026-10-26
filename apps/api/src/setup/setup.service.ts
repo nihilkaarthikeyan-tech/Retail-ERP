@@ -23,6 +23,7 @@ import {
 } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import { AuthService, type LoginMeta, userAccessInclude } from '../auth/auth.service.js';
+import { EmailLinksService } from '../auth/email-links.service.js';
 import { hashPassword } from '../auth/password.js';
 import type { Actor, AuthUser } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
@@ -94,6 +95,7 @@ export class SetupService {
     private readonly stores: StoresService,
     private readonly posSetup: PosSetupService,
     private readonly defaults: CompanyDefaults,
+    private readonly links: EmailLinksService,
   ) {}
 
   /** For the logged-in person: does their shop still need the guided setup? */
@@ -123,6 +125,8 @@ export class SetupService {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, include: userAccessInclude });
     const settings = await this.auth.securitySettings();
     const session = await this.auth.openSession(user, meta, { userId, ipAddress: meta.ipAddress }, settings);
+    // "Confirm your email" goes out in the background; sign-up never waits on the mail server.
+    void this.links.sendConfirmation(user, meta.ipAddress).catch(() => undefined);
     return { ...session, sessionMaxHours: settings.sessionMaxHours };
   }
 
