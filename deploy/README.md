@@ -36,14 +36,15 @@ Address: **https://retailerp.52digit.com** — the web app at `/`, the API at `/
 ## Email (new-enquiry alert and daily summary)
 
 The Retail ERP emails each new contact-form message to `LEAD_ALERT_TO` (editor.publicationmart@gmail.com unless set).
-To connect the mail account it sends from, run on the server as root and type the password when asked:
+It sends from **no-reply@rademics.ai** (Hostinger Business Email: `smtp.hostinger.com`, port 465, SSL; the free plan allows 100 emails a day).
+To connect or change the mail account, run on the server as root and type the password when asked:
 
 ```sh
 bash /opt/retail-erp/app/deploy/set-mail.sh
 ```
 
-For Gmail, turn on 2-Step Verification for the account, then make an **app password** at
-https://myaccount.google.com/apppasswords and use those 16 letters as the password.
+To send from Gmail instead, answer `smtp.gmail.com` and port 587, and use an **app password** made at
+https://myaccount.google.com/apppasswords (2-Step Verification must be on).
 
 ## Updating to a new version
 
