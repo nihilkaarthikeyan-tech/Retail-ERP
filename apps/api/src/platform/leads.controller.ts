@@ -3,6 +3,7 @@ import { Body, Controller, HttpCode, Logger, Post, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { type LeadInput, leadSchema, SHOP_TYPES, type ShopTypeKey } from 'shared';
 import { Public } from '../auth/decorators.js';
+import { RateLimit } from '../auth/rate-limit.js';
 import { clientIp } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { SystemPrisma } from '../prisma/prisma.service.js';
@@ -28,6 +29,7 @@ export class LeadsController {
   ) {}
 
   @Public()
+  @RateLimit('contactForm')
   @Post()
   @HttpCode(201)
   async create(@Body(new ZodValidationPipe(leadSchema)) input: LeadInput, @Req() req: Request): Promise<{ ok: true }> {

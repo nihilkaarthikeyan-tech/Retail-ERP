@@ -26,6 +26,8 @@ export function useTestDatabase(): void {
   process.env.WEB_ORIGIN ??= 'http://localhost:3000';
   // Emails are kept in memory, never sent (plan 09).
   process.env.MAIL_TRANSPORT = 'memory';
+  // Rate limits are off for the thousands of requests the tests make; module 14 switches them on to test them.
+  process.env.RATE_LIMIT = 'off';
   process.env.SUMMARY_EMAIL_SCHEDULE = 'off';
   // Plan 13: the nightly points and gift card expiry runs only when a test calls it.
   process.env.EXPIRY_SCHEDULE = 'off';

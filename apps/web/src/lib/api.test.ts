@@ -93,6 +93,19 @@ describe("api client", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.statusCode).toBe(0);
     expect(err.message).toMatch(/Cannot reach the server/);
+    expect(err.message).not.toMatch(/Failed to fetch/);
+  });
+
+  it("says plainly when the server crashed, is restarting, or was asked too often", async () => {
+    mockFetch(500, { statusCode: 500, message: "Internal server error" });
+    expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toMatch(/Something went wrong on our side/);
+    mockFetch(503, "<html>Service Unavailable</html>");
+    expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toMatch(/restarting or busy/);
+    mockFetch(429, { statusCode: 429, message: "Too many tries from this connection. Please wait a few minutes and try again." });
+    expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toMatch(/Too many tries/);
+    // A real explanation from the server is kept as it is.
+    mockFetch(409, { statusCode: 409, message: "This bill is already cancelled" });
+    expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toBe("This bill is already cancelled");
   });
 });
 

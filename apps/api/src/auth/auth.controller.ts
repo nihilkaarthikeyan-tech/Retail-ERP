@@ -7,6 +7,7 @@ import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { AuthService } from './auth.service.js';
 import { AllowPasswordChangePending, Public } from './decorators.js';
 import { EmailLinksService } from './email-links.service.js';
+import { RateLimit } from './rate-limit.js';
 import { SESSION_COOKIE } from './session.js';
 
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
@@ -30,6 +31,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @RateLimit('login')
   @Post('login')
   @HttpCode(200)
   async login(
@@ -75,6 +77,7 @@ export class AuthController {
 
   /** Always 200 with the same answer, whether or not the email has an account. */
   @Public()
+  @RateLimit('forgotPassword')
   @Post('forgot-password')
   @HttpCode(200)
   async forgotPassword(@Body(new ZodValidationPipe(forgotPasswordSchema)) input: ForgotPasswordInput, @Req() req: Request): Promise<{ ok: true }> {
@@ -83,6 +86,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit('emailLink')
   @Post('reset-password')
   @HttpCode(204)
   async newPasswordByLink(@Body(new ZodValidationPipe(newPasswordByLinkSchema)) input: NewPasswordByLinkInput, @Req() req: Request) {
@@ -90,6 +94,7 @@ export class AuthController {
   }
 
   @Public()
+  @RateLimit('emailLink')
   @Post('confirm-email')
   @HttpCode(204)
   async confirmEmail(@Body(new ZodValidationPipe(confirmEmailSchema)) input: ConfirmEmailInput, @Req() req: Request) {

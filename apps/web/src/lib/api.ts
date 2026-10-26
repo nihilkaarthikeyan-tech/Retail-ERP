@@ -93,6 +93,16 @@ function parseBody(text: string): unknown {
   }
 }
 
+/** Plain words for failures that carry no useful message of their own (owner, 26 October 2026). */
+export const OFFLINE_MESSAGE = "Cannot reach the server. Check your internet connection and try again.";
+
+function plainMessage(status: number, message: string | null): string {
+  if (status === 429) return message ?? "Too many tries. Please wait a few minutes and try again.";
+  if (status === 502 || status === 503 || status === 504) return "The server is restarting or busy. Please try again in a minute.";
+  if (status >= 500 && (!message || /internal server error/i.test(message))) return "Something went wrong on our side. Please try again; if it keeps happening, tell us what you were doing.";
+  return message ?? `Request failed (HTTP ${status})`;
+}
+
 function errorFromBody(status: number, body: unknown): ApiError {
   if (body && typeof body === "object") {
     const b = body as {
@@ -100,12 +110,7 @@ function errorFromBody(status: number, body: unknown): ApiError {
       errors?: unknown;
       code?: unknown;
     };
-    const message =
-      typeof b.message === "string"
-        ? b.message
-        : Array.isArray(b.message)
-          ? b.message.join(", ")
-          : `Request failed (HTTP ${status})`;
+    const message = plainMessage(status, typeof b.message === "string" ? b.message : Array.isArray(b.message) ? b.message.join(", ") : null);
     const errors = Array.isArray(b.errors)
       ? (b.errors as unknown[]).flatMap((e) => {
           if (e && typeof e === "object" && "message" in e) {
@@ -117,7 +122,7 @@ function errorFromBody(status: number, body: unknown): ApiError {
       : [];
     return new ApiError(status, message, errors, typeof b.code === "string" ? b.code : undefined, body);
   }
-  return new ApiError(status, `Request failed (HTTP ${status})`, [], undefined, body);
+  return new ApiError(status, plainMessage(status, null), [], undefined, body);
 }
 
 async function request<T>(
@@ -138,8 +143,8 @@ async function request<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
     });
-  } catch (err) {
-    throw new ApiError(0, `Cannot reach the server (${err instanceof Error ? err.message : String(err)})`);
+  } catch {
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
 
   if (res.status === 204) return undefined as T;
@@ -164,8 +169,8 @@ async function send(method: "GET" | "POST", path: string, body: FormData | undef
       body,
       cache: "no-store",
     });
-  } catch (err) {
-    throw new ApiError(0, `Cannot reach the server (${err instanceof Error ? err.message : String(err)})`);
+  } catch {
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
   if (!res.ok) {
     if (res.status === 401 && options.redirectOnUnauthorized !== false) onUnauthorized();

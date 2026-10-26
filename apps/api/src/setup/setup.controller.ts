@@ -5,6 +5,7 @@ import { type CurrentUser, type SetupInput, type SetupProgressInput, setupFinish
 import { setSessionCookie } from '../auth/auth.controller.js';
 import { AllowPasswordChangePending, Public } from '../auth/decorators.js';
 import { type AuthUser, clientIp, ReqUser } from '../common/request-context.js';
+import { RateLimit } from '../auth/rate-limit.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { SetupService } from './setup.service.js';
 
@@ -51,6 +52,7 @@ export class SignupController {
   constructor(private readonly setup: SetupService) {}
 
   @Public()
+  @RateLimit('signup')
   @Post('signup')
   @HttpCode(201)
   async signup(@Body(new ZodValidationPipe(signupSchema)) input: SignupInput, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<CurrentUser> {

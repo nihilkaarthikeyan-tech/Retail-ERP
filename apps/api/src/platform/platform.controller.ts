@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { type PlatformLoginInput, platformLoginSchema, type PlatformShopSwitchInput, platformShopSwitchSchema } from 'shared';
 import { Public } from '../auth/decorators.js';
 import { clientIp } from '../common/request-context.js';
+import { RateLimit } from '../auth/rate-limit.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { PLATFORM_COOKIE, PLATFORM_LIMITS, type PlatformAdminUser, PlatformAuthService } from './platform-auth.service.js';
 import { PlatformGuard, ReqPlatformAdmin } from './platform.guard.js';
@@ -26,6 +27,7 @@ export class PlatformController {
   ) {}
 
   @Public()
+  @RateLimit('login')
   @Post('login')
   @HttpCode(200)
   async login(@Body(new ZodValidationPipe(platformLoginSchema)) input: PlatformLoginInput, @Req() req: Request, @Res({ passthrough: true }) res: Response) {

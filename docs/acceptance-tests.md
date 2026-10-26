@@ -872,3 +872,10 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
   - a confirm link cannot reset a password and a reset link cannot confirm an email;
   - everyone already using the system before this change counts as confirmed.
 
+### 14.9 Rate limits
+- **Then:**
+  - from one connection, at most 20 login tries in 10 minutes (the 21st is refused even with the right password), 5 sign-ups an hour, 5 "forgot password" requests in 15 minutes, 20 link uses in 15 minutes and 5 contact-form messages an hour;
+  - the whole API takes about 20 requests a second from one connection, enough for a busy shop sharing one internet line;
+  - a refused request says "Too many tries from this connection. Please wait a few minutes and try again." and tells the browser when to try again;
+  - one limit being reached does not block other pages.
+
