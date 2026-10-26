@@ -33,6 +33,18 @@ Address: **https://retailerp.52digit.com** — the web app at `/`, the API at `/
    Running it again for the same email gives a new password and ends that admin's open sessions.
    Shops sign up themselves at `/signup`.
 
+## Email (new-enquiry alert and daily summary)
+
+The Retail ERP emails each new contact-form message to `LEAD_ALERT_TO` (editor.publicationmart@gmail.com unless set).
+To connect the mail account it sends from, run on the server as root and type the password when asked:
+
+```sh
+bash /opt/retail-erp/app/deploy/set-mail.sh
+```
+
+For Gmail, turn on 2-Step Verification for the account, then make an **app password** at
+https://myaccount.google.com/apppasswords and use those 16 letters as the password.
+
 ## Updating to a new version
 
 ```sh

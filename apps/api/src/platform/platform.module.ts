@@ -1,5 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { Module } from '@nestjs/common';
+import { MailerService } from '../reports/mailer.service.js';
 import { LeadsController } from './leads.controller.js';
 import { PlatformAuthService } from './platform-auth.service.js';
 import { PlatformController } from './platform.controller.js';
@@ -9,6 +10,6 @@ import { PlatformService } from './platform.service.js';
 /** Plan 14: what sits above the shops (landing page messages, the Retail ERP admin screen). */
 @Module({
   controllers: [LeadsController, PlatformController],
-  providers: [PlatformAuthService, PlatformService, PlatformGuard],
+  providers: [PlatformAuthService, PlatformService, PlatformGuard, MailerService],
 })
 export class PlatformModule {}

@@ -7,6 +7,9 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { hashPassword } from '../../src/auth/password.js';
 import { readCsv, readZip } from '../../src/imports/spreadsheet.js';
+import { DEFAULT_LEAD_ALERT_TO } from '../../src/platform/leads.controller.js';
+import { PlatformModule } from '../../src/platform/platform.module.js';
+import { MailerService } from '../../src/reports/mailer.service.js';
 import { PrismaService, SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { runForCompany, runRequest } from '../../src/prisma/tenancy.js';
 import { type Agent, agent, createTestApp, login, OWNER, resetDatabase, SETUP_INPUT } from '../helpers.js';
@@ -294,6 +297,14 @@ describe('14.3 The Retail ERP admin', () => {
     await request(app.getHttpServer()).post('/leads').send({ name: 'Bot', phone: '9999999999', website: 'http://spam.example' }).expect(201);
     const leads = (await admin.get('/platform/leads').expect(200)).body as { id: string; name: string; handledAt: string | null }[];
     expect(leads.map((l) => l.name)).toEqual(['Ravi']);
+    // Each real message is emailed to Rademics; the robot's is not.
+    await new Promise((r) => setTimeout(r, 50));
+    const outbox = app.select(PlatformModule).get(MailerService, { strict: true }).outbox;
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].to).toEqual([DEFAULT_LEAD_ALERT_TO]);
+    expect(outbox[0].subject).toBe('New Retail ERP enquiry: Ravi, Ravi Footwear');
+    expect(outbox[0].text).toContain('Phone: 9840012345');
+    expect(outbox[0].text).toContain('Kind of shop: Footwear');
     const handled = (await admin.patch(`/platform/leads/${leads[0].id}`).send({ handled: true }).expect(200)).body;
     expect(handled.handledAt).not.toBeNull();
     // A shop never sees the messages.
