@@ -43,6 +43,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      LEAD_ALERT_TO: ${LEAD_ALERT_TO:-}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-4061}:4000"
 
