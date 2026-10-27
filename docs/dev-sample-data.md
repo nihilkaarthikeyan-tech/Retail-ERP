@@ -67,3 +67,16 @@ Not part of any shop. Log in at http://localhost:3001/admin/login.
 
 - Email `admin@retailerp.test`, password `646cpnPnDBZAOnTXTKbx` (development only; made by `node dist/platform/create-admin.js`)
 - On the company server the admin is made with the same command and the password goes into a root-only file (deploy/README.md).
+
+## Walkthrough demo shop (local only, made 27 October 2026)
+
+A made-up clothing shop for the step-by-step walkthrough and demo video. Local database only; never on the live site.
+
+- Shop: Sri Lakshmi Fashions
+- Owner: Lakshmi (no surname)
+- Email: `lakshmi@srilakshmi-demo.test`
+- Password: `Lakshmi-demo-5854`, till PIN `482916` (manager approvals)
+
+- Staff made in the launch check (all must change the password at first login; the new one is noted here):
+  - Arun, cashier at Anna Nagar only: `arun@srilakshmi-demo.test`, first password `Arun-cashier-4417`, own password `Arun-own-pass-8823`
+  - Nobody, no roles (to see what a user without rights gets): `nobody@srilakshmi-demo.test`, first password `Some-long-pass-99`, own password `Nobody-own-pass-31`

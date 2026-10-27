@@ -78,13 +78,11 @@ function MailStatus({ mail }: { mail: SummaryEmailSettingsDto["mail"] }) {
   return (
     <div className="alert alert-info" role="status">
       <p>
-        <strong>Email is not set up on the server yet</strong>, so nothing can be sent.
+        <strong>Sending email is not switched on yet</strong>, so nothing can be sent.
       </p>
-      <p>
-        Whoever runs the server needs to add the mail account the email is sent from (your company mail, Gmail or Zoho) to the server settings: <span className="mono">SMTP_HOST</span> and the other <span className="mono">SMTP_</span> settings (<span className="mono">SMTP_PORT</span>, <span className="mono">SMTP_SECURE</span>,{" "}
-        <span className="mono">SMTP_USER</span>, <span className="mono">SMTP_PASSWORD</span>) and <span className="mono">MAIL_FROM</span> in the server&apos;s <span className="mono">.env</span> file, then restart the server.
-      </p>
-      <p>You can still choose and save everything below now. The email starts going out once the mail account is added.</p>
+      {/* A shop owner on the hosted service cannot change the server (launch check, 27 October 2026). */}
+      <p>Retail ERP support switches it on for your shop; contact them if it is not working.</p>
+      <p>You can still choose and save everything below now. The email starts going out as soon as sending is switched on.</p>
     </div>
   );
 }

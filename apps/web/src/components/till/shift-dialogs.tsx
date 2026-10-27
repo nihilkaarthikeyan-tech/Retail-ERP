@@ -20,9 +20,21 @@ export function OpenShiftScreen({ engine, openedBy }: { engine: TillEngine; open
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Launch check, 27 October 2026: an empty box became ₹0 without a question.
+  const [zeroAsked, setZeroAsked] = useState(false);
+  const zero = !/[1-9]/.test(amount);
+
+  function change(value: string) {
+    setAmount(value);
+    setZeroAsked(false);
+  }
 
   async function open(e?: FormEvent) {
     e?.preventDefault();
+    if (zero && !zeroAsked) {
+      setZeroAsked(true);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -42,11 +54,12 @@ export function OpenShiftScreen({ engine, openedBy }: { engine: TillEngine; open
         <label className="till-pin-label" htmlFor="till-start-cash">
           Starting cash (₹)
         </label>
-        <input id="till-start-cash" className="input till-input-big" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} autoFocus />
-        <NumPad value={amount} onChange={setAmount} label="Starting cash pad" />
+        <input id="till-start-cash" className="input till-input-big" inputMode="decimal" value={amount} onChange={(e) => change(e.target.value.replace(/[^\d.]/g, ""))} autoFocus />
+        <NumPad value={amount} onChange={change} label="Starting cash pad" />
+        {zeroAsked ? <Alert>Starting cash ₹0: is the drawer really empty? If not, type the amount first.</Alert> : null}
         <Alert kind="error">{error}</Alert>
         <Button type="submit" variant="primary" className="till-big" busy={busy}>
-          Open shift
+          {zeroAsked ? "Yes, open with ₹0" : "Open shift"}
         </Button>
       </form>
     </div>

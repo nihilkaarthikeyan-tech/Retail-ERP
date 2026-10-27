@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 
 type Route = (url: URL, init: RequestInit | undefined) => { status: number; body: unknown };
 
-const REG = { id: "r1111111-1111-4111-8111-111111111111", gstin: "33AAACR1234A1ZV", stateCode: "33", legalNameOnCertificate: null, addressLine1: null, addressLine2: null, city: null, pincode: null, isDefault: true, active: true };
+const REG = { id: "r1111111-1111-4111-8111-111111111111", gstin: "33AAACR1234A1ZA", stateCode: "33", legalNameOnCertificate: null, addressLine1: null, addressLine2: null, city: null, pincode: null, isDefault: true, active: true };
 const me = { id: "u1", firstName: "Anand", lastName: null, email: "a@example.com", isOwnerAdmin: false, permissions: ["gst.input_credit", "company.view"], allStores: true, stores: [], mustChangePassword: false, roles: [] };
 
 function mockApi(routes: Record<string, Route>) {
@@ -89,9 +89,9 @@ describe("input credit matching", () => {
     upload,
     summary: { matched: 1, value_difference: 1, only_portal: 0, only_books: 1 },
     rows: [
-      { status: "value_difference", supplierGstin: "33AAHCS1234J1ZX", supplierName: "Sri Ganesh", number: "SGT/002", kind: "invoice", portal: { date: "2026-09-10", taxable: "3200.00", igst: "0.00", cgst: "80.00", sgst: "80.00", reverseCharge: false, itcAvailable: "Y" }, books: { id: "b2", ourNumber: "PB-2", date: "2026-09-10", taxable: "3000.00", igst: "0.00", cgst: "75.00", sgst: "75.00", reverseCharge: false }, differences: ["Taxable value: portal ₹3200.00, books ₹3000.00"] },
-      { status: "only_books", supplierGstin: "33AAHCS1234J1ZX", supplierName: "Sri Ganesh", number: "SGT/003", kind: "invoice", portal: null, books: { id: "b3", ourNumber: "PB-3", date: "2026-09-12", taxable: "4000.00", igst: "0.00", cgst: "100.00", sgst: "100.00", reverseCharge: false }, differences: [] },
-      { status: "matched", supplierGstin: "33AAHCS1234J1ZX", supplierName: "Sri Ganesh", number: "sgt-1", kind: "invoice", portal: { date: "2026-09-01", taxable: "2000.00", igst: "0.00", cgst: "50.00", sgst: "50.00", reverseCharge: false, itcAvailable: "Y" }, books: { id: "b1", ourNumber: "PB-1", date: "2026-09-01", taxable: "2000.00", igst: "0.00", cgst: "50.00", sgst: "50.00", reverseCharge: false }, differences: [] },
+      { status: "value_difference", supplierGstin: "33AAHCS1234J1ZJ", supplierName: "Sri Ganesh", number: "SGT/002", kind: "invoice", portal: { date: "2026-09-10", taxable: "3200.00", igst: "0.00", cgst: "80.00", sgst: "80.00", reverseCharge: false, itcAvailable: "Y" }, books: { id: "b2", ourNumber: "PB-2", date: "2026-09-10", taxable: "3000.00", igst: "0.00", cgst: "75.00", sgst: "75.00", reverseCharge: false }, differences: ["Taxable value: portal ₹3200.00, books ₹3000.00"] },
+      { status: "only_books", supplierGstin: "33AAHCS1234J1ZJ", supplierName: "Sri Ganesh", number: "SGT/003", kind: "invoice", portal: null, books: { id: "b3", ourNumber: "PB-3", date: "2026-09-12", taxable: "4000.00", igst: "0.00", cgst: "100.00", sgst: "100.00", reverseCharge: false }, differences: [] },
+      { status: "matched", supplierGstin: "33AAHCS1234J1ZJ", supplierName: "Sri Ganesh", number: "sgt-1", kind: "invoice", portal: { date: "2026-09-01", taxable: "2000.00", igst: "0.00", cgst: "50.00", sgst: "50.00", reverseCharge: false, itcAvailable: "Y" }, books: { id: "b1", ourNumber: "PB-1", date: "2026-09-01", taxable: "2000.00", igst: "0.00", cgst: "50.00", sgst: "50.00", reverseCharge: false }, differences: [] },
     ],
   };
 
@@ -114,7 +114,7 @@ describe("input credit matching", () => {
     expect(await screen.findByText("No statement has been uploaded for this GSTIN yet.")).toBeTruthy();
     const file = new File([JSON.stringify({ data: {} })], "GSTR2B.json", { type: "application/json" });
     fireEvent.change(screen.getByLabelText("GSTR-2B JSON file"), { target: { files: [file] } });
-    expect(await screen.findByText(/GSTR2B.json: 3 documents for 33AAACR1234A1ZV, 2026-09/)).toBeTruthy();
+    expect(await screen.findByText(/GSTR2B.json: 3 documents for 33AAACR1234A1ZA, 2026-09/)).toBeTruthy();
     expect(await screen.findByText("Taxable value: portal ₹3200.00, books ₹3000.00")).toBeTruthy();
     expect(screen.getByText("Not reported by the supplier yet")).toBeTruthy();
     const post = fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === "POST")!;
@@ -129,7 +129,7 @@ describe("input credit matching", () => {
     mockApi({
       ...common,
       "GET /gst/inward-statements": () => ({ status: 200, body: [] }),
-      "POST /gst/inward-statements": () => ({ status: 400, body: { statusCode: 400, message: "The statement is for GSTIN 27AAACR1234A1ZB, which is not one of this company’s registrations" } }),
+      "POST /gst/inward-statements": () => ({ status: 400, body: { statusCode: 400, message: "The statement is for GSTIN 27AAACR1234A1Z3, which is not one of this company’s registrations" } }),
     });
     render(
       <AuthProvider>

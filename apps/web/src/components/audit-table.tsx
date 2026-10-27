@@ -7,17 +7,26 @@ import { Alert, Button, DataTable, SelectInput, TextInput, type Column } from "@
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime, fullName } from "@/lib/format";
-import type { AuditPage, AuditRow, UserDto } from "@/lib/types";
+import { actionName, addressName, fieldName, reasonName, RECORD_NAMES, recordName } from "@/lib/audit-labels";
+import type { AuditPage, AuditRow, RoleDto, StoreDto, UserDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
-function show(value: unknown): string {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Names of the users and stores this person may see, to show instead of record numbers. */
+type Names = ReadonlyMap<string, string>;
+
+function show(value: unknown, names?: Names): string {
   if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "string") return names?.get(value) ?? (UUID.test(value) ? "(a record)" : value);
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.length ? value.map((v) => show(v, names)).join(", ") : "none";
   return JSON.stringify(value);
 }
 
 /** Renders the `changes` JSON: "field: old → new" rows, or "field: value" for plain facts. */
-export function Changes({ changes }: { changes: unknown }) {
+export function Changes({ changes, names }: { changes: unknown; names?: Names }) {
   if (!changes || typeof changes !== "object") return <span className="muted">—</span>;
   const entries = Object.entries(changes as Record<string, unknown>);
   if (entries.length === 0) return <span className="muted">—</span>;
@@ -27,13 +36,15 @@ export function Changes({ changes }: { changes: unknown }) {
         const isDiff = value !== null && typeof value === "object" && "old" in value && "new" in value;
         return (
           <li key={field}>
-            <strong>{field}</strong>:{" "}
+            <strong>{fieldName(field)}</strong>:{" "}
             {isDiff ? (
               <>
-                {show((value as { old: unknown }).old)} → {show((value as { new: unknown }).new)}
+                {show((value as { old: unknown }).old, names)} → {show((value as { new: unknown }).new, names)}
               </>
+            ) : field === "reason" && typeof value === "string" ? (
+              reasonName(value)
             ) : (
-              show(value)
+              show(value, names)
             )}
           </li>
         );
@@ -42,15 +53,7 @@ export function Changes({ changes }: { changes: unknown }) {
   );
 }
 
-/** Plain words for actions that are not simple record changes. */
-const ACTION_LABELS: Record<string, string> = {
-  export: "Downloaded a report",
-  print: "Printed",
-};
-
-export function actionLabel(action: string): string {
-  return ACTION_LABELS[action] ?? action;
-}
+export const actionLabel = actionName;
 
 const FILTER_LABELS: Record<string, string> = { from: "From", to: "To", asOn: "As on", store: "Store", itemGroup: "Item group", brand: "Brand", showBy: "Shown by", rankBy: "Ranked by", show: "Showing", howMany: "How many", days: "Days" };
 
@@ -128,6 +131,16 @@ export function AuditTable({ path, withEntity, record }: AuditTableProps) {
   const { user: me } = useAuth();
   const canListUsers = hasPermission(me, "users.view");
   const users = useLoad<UserDto[]>(() => (canListUsers ? api.get<UserDto[]>("/users") : Promise.resolve([])), [canListUsers]);
+  const canListStores = hasPermission(me, "stores.view");
+  const stores = useLoad<StoreDto[]>(() => (canListStores ? api.get<StoreDto[]>("/stores") : Promise.resolve([])), [canListStores]);
+  const canListRoles = hasPermission(me, "roles.manage");
+  const roles = useLoad<RoleDto[]>(() => (canListRoles ? api.get<RoleDto[]>("/roles") : Promise.resolve([])), [canListRoles]);
+  // Record numbers become names; role codes (kept in the history) become role names.
+  const names: Names = new Map([
+    ...(users.data ?? []).map((u) => [u.id, fullName(u)] as const),
+    ...(stores.data ?? []).map((st) => [st.id, st.code] as const),
+    ...(roles.data ?? []).flatMap((r) => [[r.id, r.name] as const, [r.code, r.name] as const]),
+  ]);
 
   const [filters, setFilters] = useState({ userId: "", entityType: "", from: "", to: "" });
   const [applied, setApplied] = useState(filters);
@@ -202,7 +215,7 @@ export function AuditTable({ path, withEntity, record }: AuditTableProps) {
       header: "Who",
       render: (r) => (r.user ? (r.user.email ? `${fullName(r.user)} (${r.user.email})` : r.user.id) : <span className="muted">system</span>),
     },
-    { key: "action", header: "Action", render: (r) => (r.action in ACTION_LABELS ? actionLabel(r.action) : <span className="mono">{r.action}</span>) },
+    { key: "action", header: "What", render: (r) => actionName(r.action) },
     ...(withEntity
       ? [
           {
@@ -210,16 +223,31 @@ export function AuditTable({ path, withEntity, record }: AuditTableProps) {
             header: "Record",
             render: (r: AuditRow) => (
               <>
-                <span className="mono">{r.entityType}</span>
-                {r.entityId ? <span className="muted mono"> {r.entityId}</span> : null}
+                {recordName(r.entityType)}
+                {r.entityId && names.get(r.entityId) ? <strong> {names.get(r.entityId)}</strong> : null}
               </>
             ),
           } satisfies Column<AuditRow>,
         ]
       : []),
-    { key: "changes", header: withEntity ? "Changes" : "Details", render: (r) => (r.action === "export" ? <ExportDetails changes={r.changes} /> : r.action === "print" ? <PrintDetails changes={r.changes} /> : <Changes changes={r.changes} />) },
+    {
+      key: "changes",
+      header: withEntity ? "Changes" : "Details",
+      render: (r) =>
+        r.action === "export" ? (
+          <ExportDetails changes={r.changes} />
+        ) : r.action === "print" ? (
+          <PrintDetails changes={r.changes} />
+        ) : (
+          <>
+            {/* Login history has no record column: say whose password or sessions it was. */}
+            {!withEntity && r.entityType === "user" && r.entityId && r.entityId !== r.user?.id ? <p className="muted">For {names.get(r.entityId) ?? "another user"}</p> : null}
+            <Changes changes={r.changes} names={names} />
+          </>
+        ),
+    },
     { key: "reason", header: "Reason", render: (r) => r.reason ?? <span className="muted">—</span> },
-    { key: "ip", header: "Address", render: (r) => r.ipAddress ?? "—" },
+    { key: "ip", header: "From", render: (r) => addressName(r.ipAddress) },
   ];
 
   return (
@@ -237,7 +265,16 @@ export function AuditTable({ path, withEntity, record }: AuditTableProps) {
             </SelectInput>
           ) : null}
           {withEntity && !record ? (
-            <TextInput id="audit-entity" label="Record type" value={filters.entityType} onChange={(e) => setFilters({ ...filters, entityType: e.target.value })} hint="For example user, store, role, company, number_series, or report for downloads." />
+            <SelectInput id="audit-entity" label="Kind of record" value={filters.entityType} onChange={(e) => setFilters({ ...filters, entityType: e.target.value })}>
+              <option value="">Any</option>
+              {Object.entries(RECORD_NAMES)
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([type, name]) => (
+                  <option key={type} value={type}>
+                    {name}
+                  </option>
+                ))}
+            </SelectInput>
           ) : null}
           <TextInput id="audit-from" label="From" type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
           <TextInput id="audit-to" label="To" type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />

@@ -292,7 +292,11 @@ export class SetupService {
 
     let gstRegistrationId: string | null = null;
     if (d.gst) {
-      const registration = await this.company.createGstRegistrationIn(tx, companyId, { gstin: d.gst.gstin, legalNameOnCertificate: d.gst.legalNameOnCertificate, isDefault: true }, actor);
+      // The registered address is the shop's own when the GSTIN is for the shop's state (the e-invoice
+      // and printed bills need it); found empty in the launch check of 27 October 2026.
+      const sameState = d.gst.gstin.slice(0, 2) === company.stateCode;
+      const address = sameState ? { addressLine1: company.addressLine1, addressLine2: company.addressLine2, city: company.city, pincode: company.pincode } : {};
+      const registration = await this.company.createGstRegistrationIn(tx, companyId, { gstin: d.gst.gstin, legalNameOnCertificate: d.gst.legalNameOnCertificate, isDefault: true, ...address }, actor);
       gstRegistrationId = registration.id;
     }
     if (d.gst?.settings) await this.setGstSettings(tx, companyId, d.gst.settings, actor);

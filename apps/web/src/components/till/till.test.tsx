@@ -67,7 +67,7 @@ describe("status", () => {
   it("is green online, amber offline with the count waiting, red when bills could not be sent", () => {
     expect(statusText(base)).toEqual({ tone: "ok", text: "Online" });
     expect(statusText({ ...base, online: false, waiting: 12 })).toEqual({ tone: "warn", text: "Offline, 12 waiting" });
-    expect(statusText({ ...base, problems: 3 })).toEqual({ tone: "danger", text: "3 bills could not be sent" });
+    expect(statusText({ ...base, problems: 3 })).toEqual({ tone: "danger", text: "3 not sent: see why" });
   });
 
   it("tells a computer that is not a till how to set it up", () => {
@@ -385,5 +385,69 @@ describe("selling below cost (plan 11 A2, scenario 11.2)", () => {
     fireEvent(box, new Event("cancel"));
     const pay = await screen.findByRole("dialog", { name: "Payment" });
     expect(within(pay).getByText(/below cost; a manager must approve it\. Not approved: change the price on the bill, or ask a manager/)).toBeTruthy();
+  });
+});
+
+// Found in the launch check of 27 October 2026: a cashier of another store could open a shift here.
+describe("a cashier who may not work at this till's store", () => {
+  it("is told plainly and cannot open a shift", async () => {
+    const store = new MemoryStore();
+    const snap = sampleSnapshot();
+    const other = { id: "f0000000-0000-4000-8000-000000000009", code: "ANNA", name: "Anna Nagar", isDefault: true };
+    const api = fakeApi({ me: async () => ({ ...sampleUser, allStores: false, stores: [other] }), snapshot: async () => snap, currentShift: async () => null });
+    const engine = new TillEngine({ store, api, device, now: () => at, uuid });
+    render(<TillApp device={device} engine={engine} />);
+    expect(await screen.findByText(new RegExp(`Ravi is not allowed to work at ${snap.till.store.name}`))).toBeTruthy();
+    expect(screen.queryByText("Open the shift")).toBeNull();
+  });
+});
+
+// Found in the launch check of 27 October 2026: a refused shift opening stayed red on the till for ever.
+describe("a refused item that is not a bill", () => {
+  it("can be removed from the till; a refused bill cannot", async () => {
+    const store = new MemoryStore();
+    const refuse = () => Promise.reject(new ApiError(403, "You are not allowed to work in this store"));
+    const engine = new TillEngine({ store, api: fakeApi({ me: async () => sampleUser, snapshot: async () => sampleSnapshot(), currentShift: async () => null, openShift: refuse, postBill: refuse }), device, now: () => at, uuid });
+    await engine.queue.enqueue({ clientId: "s-x", kind: "shift_open", label: "Shift opened 2026-10-15", payload: {} });
+    await engine.queue.enqueue({ clientId: "b-x", kind: "bill", label: "Bill MAT1/2627/000009", payload: {} });
+    await engine.sync(true);
+    expect((await engine.queue.items()).map((i) => i.status)).toEqual(["problem", "problem"]);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<TillApp device={device} engine={engine} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Sync status: 2 not sent/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getAllByRole("button", { name: "Remove" })).toHaveLength(1);
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    });
+    await waitFor(async () => expect((await engine.queue.items()).map((i) => i.kind)).toEqual(["bill"]));
+  });
+});
+
+// Found in the launch check of 27 October 2026: a barcode added in the back office did not scan for up to 15 minutes.
+describe("a scan the till's copy does not know", () => {
+  it("fetches the latest changes once while online and adds the item", async () => {
+    const store = new MemoryStore();
+    const old = sampleSnapshot();
+    await store.set("snapshot", old);
+    const shift: LocalShift = { clientId: uuid(), id: "s1", businessDate: "2026-10-15", openedAt: at.toISOString(), openedByName: "Ravi", openingCash: [] };
+    await store.set("shift", shift);
+    await store.set("shiftid:" + shift.clientId, "s1");
+    const withBarcode = old.items.map((i, n) => (n === 0 ? { ...i, barcodes: [...i.barcodes, { code: "8909999000017", unitId: null }] } : i));
+    let downloads = 0;
+    // The first download (when the till starts) is before the barcode was added; the next one has it.
+    const snapshot = vi.fn(async () => ({ ...sampleSnapshot(), full: false, items: downloads++ === 0 ? [] : [withBarcode[0]] }));
+    const api = fakeApi({ me: async () => sampleUser, snapshot, currentShift: async () => ({ id: "s1", clientId: shift.clientId, businessDate: "2026-10-15", openedById: "u", openedAt: at.toISOString(), status: "open", openingCash: [], cashMovements: [] }) });
+    const engine = new TillEngine({ store, api, device, now: () => at, uuid });
+    render(<TillApp device={device} engine={engine} />);
+    await screen.findByRole("search");
+    await waitFor(() => expect(engine.getState().online).toBe(true));
+    const calls = snapshot.mock.calls.length;
+    const box = screen.getByLabelText(/Scan a barcode/);
+    fireEvent.change(box, { target: { value: "8909999000017" } });
+    fireEvent.submit(box.closest("form")!);
+    await waitFor(() => expect(screen.getAllByText(old.items[0].name).length).toBeGreaterThan(0));
+    expect(snapshot.mock.calls.length).toBe(calls + 1);
+    expect(screen.queryByText(/Nothing found/)).toBeNull();
   });
 });

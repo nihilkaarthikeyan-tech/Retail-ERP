@@ -296,7 +296,7 @@ export class EWayBillsService {
       documentId: r.documentId,
       documentNumber: r.documentNumber,
       documentKind: r.documentType === 'stock_document' ? 'Transfer' : 'Bill',
-      documentDate: doc?.date ?? isoDay(r.createdAt)!,
+      documentDate: doc?.date ?? businessDate(r.createdAt),
       storeId: doc?.storeId ?? '',
       fromState: doc?.fromState ?? null,
       toState: doc?.toState ?? null,

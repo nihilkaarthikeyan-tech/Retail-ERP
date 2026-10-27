@@ -79,7 +79,7 @@ describe('10.2 purchase order and 10.3 payment receipt prints, 10.11 store limit
     const po = (await owner.post('/purchase/orders').send({ storeId: MAIN, supplierId: s.id, neededBy: addDays(today(), 7), lines: [{ itemId: rice.id, quantity: '10', rate: '1200', gstRate: '5' }] }).expect(201)).body;
     const draft = (await owner.get(`/print/purchase_order/${po.id}`).expect(200)).body;
     expect(draft).toMatchObject({ title: 'Purchase order', mark: 'DRAFT', paper: 'A4' });
-    expect(draft.letterhead).toMatchObject({ legalName: 'Rademics Retail Pvt Ltd', gstin: '33AAACR1234A1ZV' });
+    expect(draft.letterhead).toMatchObject({ legalName: 'Rademics Retail Pvt Ltd', gstin: '33AAACR1234A1ZA' });
     expect(draft.party).toMatchObject({ label: 'Supplier', name: 'Sri Murugan Traders' });
     expect(draft.lines[0]).toMatchObject({ item: expect.stringContaining('Ponni Rice'), rate: '1200.00', total: '12600.00' });
     expect(draft.totals).toContainEqual(['Total', '12600.00']);

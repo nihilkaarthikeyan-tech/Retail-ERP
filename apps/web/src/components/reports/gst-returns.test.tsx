@@ -44,8 +44,8 @@ function mockApi(routes: Record<string, Route>) {
 const ok = (body: unknown) => () => ({ status: 200, body });
 const paths = (fn: ReturnType<typeof vi.fn>, path: string) => fn.mock.calls.map((c) => new URL(String(c[0]))).filter((u) => u.pathname === path);
 
-const REGS = { filingFrequency: "monthly", currentPeriod: "2026-10", registrations: [{ id: "r1", gstin: "33AAACR1234A1ZV", stateCode: "33", isDefault: true, active: true, stores: [{ id: "s1", code: "MAIN", name: "Main" }] }] };
-const header = { gstin: "33AAACR1234A1ZV", gstRegistrationId: "r1", stateCode: "33", period: "2026-09", periodLabel: "September 2026", from: "2026-09-01", to: "2026-09-30", fp: "092026", filingFrequency: "monthly", workedOutAt: "2026-10-16T09:00:00.000Z" };
+const REGS = { filingFrequency: "monthly", currentPeriod: "2026-10", registrations: [{ id: "r1", gstin: "33AAACR1234A1ZA", stateCode: "33", isDefault: true, active: true, stores: [{ id: "s1", code: "MAIN", name: "Main" }] }] };
+const header = { gstin: "33AAACR1234A1ZA", gstRegistrationId: "r1", stateCode: "33", period: "2026-09", periodLabel: "September 2026", from: "2026-09-01", to: "2026-09-30", fp: "092026", filingFrequency: "monthly", workedOutAt: "2026-10-16T09:00:00.000Z" };
 const F = (taxable: string, igst = "0.00", cgst = "0.00", sgst = "0.00") => ({ taxable, igst, cgst, sgst, cess: "0.00", tax: "0.00" });
 const item = (rate: string, taxable: string, igst: string) => ({ rate, taxable, igst, cgst: "0.00", sgst: "0.00", cess: "0.00" });
 
@@ -137,7 +137,7 @@ describe("GSTR-1 screen", () => {
     Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:gstr1"), configurable: true, writable: true });
     Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), configurable: true, writable: true });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    const fetch = mockApi({ "/auth/me": ok(user(["gst.returns"])), "/reports/gst/registrations": ok(REGS), "/reports/gst/gstr1": ok(GSTR1), "/reports/gst/gstr1/json": ok({ gstin: "33AAACR1234A1ZV", fp: "092026" }), "/company": ok(null) });
+    const fetch = mockApi({ "/auth/me": ok(user(["gst.returns"])), "/reports/gst/registrations": ok(REGS), "/reports/gst/gstr1": ok(GSTR1), "/reports/gst/gstr1/json": ok({ gstin: "33AAACR1234A1ZA", fp: "092026" }), "/company": ok(null) });
     render(
       <AuthProvider>
         <Gstr1Report />

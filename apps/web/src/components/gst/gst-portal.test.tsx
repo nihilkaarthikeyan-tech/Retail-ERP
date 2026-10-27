@@ -109,7 +109,7 @@ describe("E-invoices screen", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     const fetch = mockApi({
       "GET /gst/e-invoices": ok(einvoices),
-      "POST /gst/e-invoices/export": ok({ fileName: "e-invoices-33AAACR1234A1ZV-2026-10-18.json", content: "[]", count: 1, skipped: [{ id: "e9", documentNumber: "MAIN-T1-2026-27-000009", problems: ["The document number must be 1 to 16 characters for the portal"] }] }),
+      "POST /gst/e-invoices/export": ok({ fileName: "e-invoices-33AAACR1234A1ZA-2026-10-18.json", content: "[]", count: 1, skipped: [{ id: "e9", documentNumber: "MAIN-T1-2026-27-000009", problems: ["The document number must be 1 to 16 characters for the portal"] }] }),
     });
     render(<EInvoicesScreen />);
     expect(await screen.findByText("T1-2627-000001")).toBeTruthy();
@@ -119,7 +119,7 @@ describe("E-invoices screen", () => {
     expect(screen.getByText(/Over 24 hours: correct it with a credit note/)).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Choose T1-2627-000001"));
     fireEvent.click(screen.getByRole("button", { name: "Export 1 chosen for the portal" }));
-    expect(await screen.findByText(/1 e-invoice saved to e-invoices-33AAACR1234A1ZV-2026-10-18.json/)).toBeTruthy();
+    expect(await screen.findByText(/1 e-invoice saved to e-invoices-33AAACR1234A1ZA-2026-10-18.json/)).toBeTruthy();
     expect(screen.getByText(/MAIN-T1-2026-27-000009: The document number must be 1 to 16 characters/)).toBeTruthy();
     const call = fetch.mock.calls.find(([u, i]) => String(u).endsWith("/gst/e-invoices/export") && i?.method === "POST");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ ids: ["e1"] });
@@ -216,7 +216,7 @@ describe("prints and menu", () => {
     date: "2026-10-18",
     mark: null,
     paper: "A4",
-    letterhead: { name: "Rademics", legalName: "Rademics Retail Pvt Ltd", storeName: null, address: [], gstin: "33AAACR1234A1ZV", phone: null, email: null, showLogo: false },
+    letterhead: { name: "Rademics", legalName: "Rademics Retail Pvt Ltd", storeName: null, address: [], gstin: "33AAACR1234A1ZA", phone: null, email: null, showLogo: false },
     party: null,
     details: [["E-invoice", "Not yet registered"]],
     columns: [{ key: "no", label: "#" }],

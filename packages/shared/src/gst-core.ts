@@ -61,7 +61,7 @@ export function gstinCheckCharacter(first14: string): string {
 export function gstinProblem(value: string, isStateCode?: (code: string) => boolean): string | null {
   const g = value.trim().toUpperCase();
   if (g.length !== 15) return 'A GSTIN has 15 letters and digits';
-  if (!GSTIN_SHAPE.test(g)) return 'This is not a GSTIN: it should look like 33ABCDE1234F1Z5';
+  if (!GSTIN_SHAPE.test(g)) return 'This is not a GSTIN: it should look like 33ABCDE1234F1Z7';
   if (isStateCode && !isStateCode(g.slice(0, 2))) return `The GSTIN starts with ${g.slice(0, 2)}, which is not a state code`;
   if (gstinCheckCharacter(g.slice(0, 14)) !== g[14]) return 'The GSTIN has a typing mistake: its last character does not match';
   return null;

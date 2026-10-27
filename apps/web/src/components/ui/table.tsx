@@ -42,7 +42,14 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing 
                 Loading…
               </td>
             </tr>
-          ) : !rows || rows.length === 0 ? (
+          ) : !rows ? (
+            // Nothing was loaded (the page shows why): not the same as an empty list.
+            <tr>
+              <td colSpan={columns.length} className="muted">
+                Could not load this list.
+              </td>
+            </tr>
+          ) : rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className="muted">
                 {empty}

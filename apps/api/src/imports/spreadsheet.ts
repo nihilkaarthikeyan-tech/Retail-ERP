@@ -11,6 +11,11 @@ export type Sheet = Cell[][];
 
 // ---- Zip ----
 
+/** An import file is a few megabytes; real Excel files unpack to well under this. */
+const MAX_UNZIPPED_BYTES = 50 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 500;
+const TOO_BIG = 'The Excel file is too large to read. Split it into smaller files of a few thousand rows each.';
+
 interface ZipEntry {
   name: string;
   data: Buffer;
@@ -28,6 +33,10 @@ export function readZip(buf: Buffer): Map<string, Buffer> {
   if (eocd < 0) throw new Error('This is not an Excel (.xlsx) file');
   const count = buf.readUInt16LE(eocd + 10);
   let p = buf.readUInt32LE(eocd + 16);
+  // Code audit, 27 October 2026: a crafted file of a few kilobytes can unpack to gigabytes
+  // ("zip bomb") and stop the server, so the unpacked size and the number of parts are capped.
+  if (count > MAX_ZIP_ENTRIES) throw new Error(TOO_BIG);
+  let total = 0;
   const out = new Map<string, Buffer>();
   for (let n = 0; n < count; n++) {
     if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('The Excel file is damaged');
@@ -43,8 +52,18 @@ export function readZip(buf: Buffer): Map<string, Buffer> {
     const start = local + 30 + localNameLen + localExtraLen;
     const raw = buf.subarray(start, start + compressed);
     if (method === 0) out.set(name, Buffer.from(raw));
-    else if (method === 8) out.set(name, inflateRawSync(raw));
+    else if (method === 8) {
+      let data: Buffer;
+      try {
+        data = inflateRawSync(raw, { maxOutputLength: MAX_UNZIPPED_BYTES - total });
+      } catch {
+        throw new Error(TOO_BIG);
+      }
+      out.set(name, data);
+    }
     else throw new Error('The Excel file uses a kind of compression that cannot be read');
+    total += out.get(name)?.length ?? 0;
+    if (total > MAX_UNZIPPED_BYTES) throw new Error(TOO_BIG);
     p += 46 + nameLen + extraLen + commentLen;
   }
   return out;
@@ -317,8 +336,15 @@ export function readSpreadsheet(fileName: string, buf: Buffer): Sheet {
 export function writeCsv(rows: Sheet): string {
   const esc = (c: Cell) => {
     if (c === null || c === undefined) return '';
-    const s = String(c);
+    const s = typeof c === 'string' ? noFormula(c) : String(c);
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return `﻿${rows.map((r) => r.map(esc).join(',')).join('\r\n')}\r\n`;
+}
+
+/** Code audit, 27 October 2026: text starting with = + - @ would run as a formula when the
+ *  CSV is opened in Excel (a customer named "=HYPERLINK(...)"), so it gets a leading '.
+ *  Plain numbers such as -120.50 are left alone. */
+export function noFormula(s: string): string {
+  return /^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s) ? `'${s}` : s;
 }

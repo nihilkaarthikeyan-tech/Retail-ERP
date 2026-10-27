@@ -1,4 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
+import { Logger } from '@nestjs/common';
 import { HealthService } from './health.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 
@@ -7,24 +8,23 @@ function serviceWith(queryRaw: () => Promise<unknown>): HealthService {
 }
 
 describe('HealthService', () => {
-  it('reports ok with the database version when the query succeeds', async () => {
-    const now = new Date('2026-10-14T10:00:00.000Z');
-    const result = await serviceWith(async () => [{ version: '17.6', now }]).check();
+  it('reports ok and only "connected" when the query succeeds', async () => {
+    const result = await serviceWith(async () => [{ '?column?': 1 }]).check();
 
     expect(result.status).toBe('ok');
-    expect(result.database).toEqual({
-      connected: true,
-      serverVersion: '17.6',
-      serverTime: '2026-10-14T10:00:00.000Z',
-    });
+    expect(result.database).toEqual({ connected: true });
   });
 
-  it('reports error with the reason when the database is unreachable', async () => {
+  // Code audit, 27 October 2026: anyone may ask, so the reason goes to the server log, not the answer.
+  it('reports error without the reason when the database is unreachable', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const result = await serviceWith(async () => {
       throw new Error('connection refused');
     }).check();
 
     expect(result.status).toBe('error');
-    expect(result.database).toEqual({ connected: false, error: 'connection refused' });
+    expect(result.database).toEqual({ connected: false });
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('connection refused'));
+    logged.mockRestore();
   });
 });

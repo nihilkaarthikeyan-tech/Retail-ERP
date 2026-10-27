@@ -4,12 +4,16 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CurrentUser } from "shared";
 import { MODULE_KEYS, modulesForShopType } from "shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppMenu } from "@/components/app-menu";
 import { ItemForm } from "@/components/items/item-form";
 import { MENU, visibleMenu } from "@/lib/menu";
 import { fullModuleMap, StaticModulesProvider } from "@/lib/modules";
 import { reportEntry, reportQuestion, visibleReports } from "@/lib/reports";
+import { openEveryMenuGroup } from "@/lib/menu-test-helpers";
+
+// These tests are about who sees which screen, not about folding (decision L11).
+beforeEach(openEveryMenuGroup);
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),

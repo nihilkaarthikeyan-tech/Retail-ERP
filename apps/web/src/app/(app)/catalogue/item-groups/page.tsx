@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { createItemGroupSchema, hasPermission, updateItemGroupSchema } from "shared";
+import { createItemGroupSchema, hasPermission, suggestCode, updateItemGroupSchema } from "shared";
 import { ActiveBadge, Alert, Badge, Button, CheckInput, Dialog, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -122,14 +122,27 @@ export default function ItemGroupsPage() {
       <Dialog open={editing !== null} title={title} onClose={() => setEditing(null)}>
         <form onSubmit={onSubmit} noValidate>
           <Alert kind="error">{error}</Alert>
+          <TextInput
+            id="group-name"
+            label="Name"
+            value={form.name}
+            onChange={(e) => {
+              const name = e.target.value;
+              // The code follows the name until the person types their own.
+              const follows = editing?.kind === "new" && form.code === suggestCode(form.name, 20, "-");
+              setForm({ ...form, name, ...(follows ? { code: suggestCode(name, 20, "-") } : {}) });
+            }}
+            error={errors.name}
+            required
+            autoComplete="off"
+          />
           {editing?.kind === "new" ? (
-            <TextInput id="group-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required className="mono" hint="Letters, digits, - . and /; cannot be changed later." autoComplete="off" />
+            <TextInput id="group-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required className="mono" hint="Filled in from the name; change it if you like. Letters, digits, - . and /; cannot be changed later." autoComplete="off" />
           ) : (
             <p>
               Code <span className="mono">{form.code}</span>
             </p>
           )}
-          <TextInput id="group-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} error={errors.name} required autoComplete="off" />
           <TextInput id="group-hsn" label="Default HSN / SAC code" value={form.hsnCode} onChange={(e) => setForm({ ...form, hsnCode: e.target.value })} error={errors.hsnCode} inputMode="numeric" className="mono" hint="4, 6 or 8 digits. Optional." />
           {editing?.kind === "edit" ? (
             <CheckInput id="group-active" label="Active" description="Switched-off groups cannot take new items." checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />

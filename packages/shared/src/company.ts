@@ -10,6 +10,20 @@ export function codeFromName(name: string): string {
 }
 
 /**
+ * A code suggested from a name as it is typed (launch check, 27 October 2026: owners
+ * typed a code for every group, brand and store). "Ethnic wear" → ETHNIC-WEAR with a
+ * joiner of "-", ANNANAGAR without. The person may still change it.
+ */
+export function suggestCode(name: string, max: number, joiner = ''): string {
+  const words = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .split(' ')
+    .filter((w) => w.length > 0);
+  return words.join(joiner).slice(0, max).replace(/-+$/, '');
+}
+
+/**
  * GSTIN format: 2-digit state code, 10-character PAN, entity number,
  * the letter Z, and a check character. Format only; the registration
  * itself is verified by the accountant on the GST portal.

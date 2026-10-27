@@ -207,10 +207,12 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
         if (itemBatches.length > 0) {
           for (const b of itemBatches) {
             if (have.has(`${row.item.id}|${b.batch.id}`)) continue;
-            added.push({ ...base, key: newLineKey(), trackBatches: true, batchId: b.batch.id, batchLabel: b.batch.batchNumber });
+            added.push({ ...base, key: newLineKey(), trackBatches: true, batchId: b.batch.id, batchLabel: b.batch.batchNumber, expected: blind ? null : b.quantity });
           }
         } else if (!have.has(`${row.item.id}|`)) {
-          added.push({ ...base, key: newLineKey() });
+          // Launch check, 27 October 2026: on a normal count, what is in stock now shows at once;
+          // saving works it out again at the count's own date and time.
+          added.push({ ...base, key: newLineKey(), expected: blind ? null : row.quantity });
         }
       }
       setLines([...lines, ...added]);
@@ -415,6 +417,8 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
           disabled={!editable}
           onChange={(e) => {
             setBlind(e.target.checked);
+            // Quantities shown before saving are hidden again once the count is blind.
+            if (e.target.checked && !doc) setLines(lines.map((l) => ({ ...l, expected: null })));
             touch();
           }}
         />
@@ -548,7 +552,13 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
           </Button>
         ) : null}
       </div>
-      {!doc ? <p className="muted">Save the draft to see the expected quantities; then it can be finalised.</p> : null}
+      {!doc ? (
+        <p className="muted">
+          {blind
+            ? "Expected quantities stay hidden on a blind count. Save the draft, then it can be finalised."
+            : "Lines added with “Add all in stock” show what is in stock now. Saving the draft works the expected quantities out at the count's date and time; then it can be finalised."}
+        </p>
+      ) : null}
       {doc && doc.status === "draft" && !canFinalise ? <p className="muted">The Store Manager (or someone else with the right) finalises the count.</p> : null}
       {doc ? <CancelDocumentDialog doc={doc} open={cancelOpen} onClose={() => setCancelOpen(false)} onCancelled={onSaved} /> : null}
     </div>

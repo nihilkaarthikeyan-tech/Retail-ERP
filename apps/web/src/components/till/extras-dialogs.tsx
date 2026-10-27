@@ -7,11 +7,11 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
-import { INDIAN_STATE_OPTIONS } from "shared";
+import { INDIAN_STATE_OPTIONS, INDIAN_STATES } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { rupees } from "@/lib/till/format";
 import { buyerProblem, type DraftBuyer, type DraftDelivery } from "@/lib/till/pricing";
-import type { SnapSalesStaff } from "@/lib/till/types";
+import type { SnapCustomer, SnapSalesStaff } from "@/lib/till/types";
 
 /** The salesperson whose code was typed or scanned (codes are kept in capitals). */
 export function staffByCode(staff: SnapSalesStaff[], code: string): SnapSalesStaff | undefined {
@@ -112,11 +112,31 @@ const NO_BUYER: DraftBuyer = { gstin: "", name: "", address: "", stateCode: "" }
  * invoice (IGST when the GSTIN is from another state); without one, the name,
  * address and state make a consumer invoice (needed from ₹50,000 taxable value).
  */
-export function BuyerDialog({ open, current, defaults, onSave, onClose }: { open: boolean; current: DraftBuyer | null; defaults: { name: string }; onSave: (b: DraftBuyer | null) => void; onClose: () => void }) {
+export function BuyerDialog({
+  open,
+  current,
+  defaults,
+  customers = [],
+  onSave,
+  onClose,
+}: {
+  open: boolean;
+  current: DraftBuyer | null;
+  defaults: { name: string };
+  /** The till's saved customers: a GSTIN typed for one of them fills in the name (launch check, 27 October 2026). */
+  customers?: Pick<SnapCustomer, "name" | "gstin">[];
+  onSave: (b: DraftBuyer | null) => void;
+  onClose: () => void;
+}) {
   const [form, setForm] = useState<DraftBuyer>(() => current ?? { ...NO_BUYER, name: defaults.name });
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof DraftBuyer, v: string) => setForm((f) => ({ ...f, [k]: v }));
   const gstin = form.gstin.trim().toUpperCase();
+
+  function setGstin(value: string) {
+    const known = value.length === 15 ? customers.find((c) => c.gstin?.toUpperCase() === value) : undefined;
+    setForm((f) => ({ ...f, gstin: value, ...(known && !f.name.trim() ? { name: known.name } : {}) }));
+  }
 
   function save(e: FormEvent) {
     e.preventDefault();
@@ -134,7 +154,7 @@ export function BuyerDialog({ open, current, defaults, onSave, onClose }: { open
         <label className="till-pin-label" htmlFor="till-buyer-gstin">
           GSTIN
         </label>
-        <input id="till-buyer-gstin" className="input mono" autoComplete="off" maxLength={15} value={form.gstin} onChange={(e) => set("gstin", e.target.value.toUpperCase())} autoFocus />
+        <input id="till-buyer-gstin" className="input mono" autoComplete="off" maxLength={15} value={form.gstin} onChange={(e) => setGstin(e.target.value.toUpperCase().trim())} autoFocus />
         <label className="till-pin-label" htmlFor="till-buyer-name">
           Name
         </label>
@@ -148,7 +168,7 @@ export function BuyerDialog({ open, current, defaults, onSave, onClose }: { open
         </label>
         {gstin.length >= 2 ? (
           <p className="muted" id="till-buyer-state">
-            From the GSTIN: {gstin.slice(0, 2)}
+            From the GSTIN: {INDIAN_STATES[gstin.slice(0, 2)] ? `${INDIAN_STATES[gstin.slice(0, 2)]} (${gstin.slice(0, 2)})` : gstin.slice(0, 2)}
           </p>
         ) : (
           <StateSelect id="till-buyer-state" value={form.stateCode} onChange={(v) => set("stateCode", v)} emptyLabel="Not given" />

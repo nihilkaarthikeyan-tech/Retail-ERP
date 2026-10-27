@@ -4,11 +4,12 @@
 "use client";
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { FORM_PROBLEM_EVENT } from "@/lib/validation";
 
 export interface Toast {
   id: number;
   text: ReactNode;
-  kind: "success" | "info";
+  kind: "success" | "info" | "error";
 }
 
 interface ToastApi {
@@ -44,6 +45,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
+  // A form problem not tied to one field (see issuesToFieldErrors).
+  useEffect(() => {
+    // An open pop-up shows the problem itself (it would hide this note).
+    const onProblem = (e: Event) => {
+      if (!document.querySelector("dialog[open]")) show((e as CustomEvent<string>).detail, "error");
+    };
+    window.addEventListener(FORM_PROBLEM_EVENT, onProblem);
+    return () => window.removeEventListener(FORM_PROBLEM_EVENT, onProblem);
+  }, [show]);
+
   useEffect(() => {
     const all = timers.current;
     return () => {
@@ -59,7 +70,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind}`} role="status">
+          <div key={t.id} className={`toast toast-${t.kind}`} role={t.kind === "error" ? "alert" : "status"}>
             <span>{t.text}</span>
             <button type="button" className="toast-close" aria-label="Dismiss" onClick={() => dismiss(t.id)}>
               ×

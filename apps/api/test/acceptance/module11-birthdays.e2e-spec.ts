@@ -123,6 +123,27 @@ describe('11.19 birthdays and anniversaries in the customers import and export',
   });
 });
 
+// Found in the launch check of 27 October 2026: an 8-digit mobile and a mistyped GSTIN were imported.
+describe('an import row is checked like the customer screen', () => {
+  it('a wrong mobile or GSTIN fails that row with the reason; the good row is added', async () => {
+    const r = await importSheet(
+      [
+        ['Name', 'Mobile', 'Customer group code', 'GSTIN'],
+        ['Kavitha S', '9840090001', 'RETAIL', ''],
+        ['Revathi R', '98400900', 'RETAIL', ''],
+        ['Anand Stores', '9840090003', 'RETAIL', '33AAACM1234B1ZQ'],
+      ],
+      'add',
+      [1, 3],
+    );
+    expect(r.status).toMatchObject({ added: 1, failed: 2 });
+    const failed = JSON.stringify(r.status.failedRows);
+    expect(failed).toMatch(/Mobile: Mobile number must be 10 digits/);
+    expect(failed).toMatch(/GSTIN: The GSTIN has a typing mistake/);
+    expect(await prisma.customer.count({ where: { mobile: '98400900' } })).toBe(0);
+  });
+});
+
 describe('11.19 birthdays and anniversaries of a customer added at the till', () => {
   let tillId: string;
   let tillToken: string;

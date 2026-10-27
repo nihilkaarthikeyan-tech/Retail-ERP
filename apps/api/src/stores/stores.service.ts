@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { CreateStoreInput, CurrentUser, UpdateStoreInput } from 'shared';
+import { type CreateStoreInput, type CurrentUser, INDIAN_STATES, type UpdateStoreInput } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
@@ -48,6 +48,7 @@ export class StoresService {
     }
     const company = await db.company.findUniqueOrThrow({ where: { id: companyId } });
     const registration = await this.registrationFor(db, companyId, input.gstRegistrationId);
+    await this.assertSameState(db, companyId, input.stateCode ?? registration?.stateCode ?? company.stateCode, registration);
     const created = await db.store.create({
       data: {
         companyId,
@@ -85,6 +86,11 @@ export class StoresService {
         input.gstRegistrationId !== undefined
           ? await this.registrationFor(tx, before.companyId, input.gstRegistrationId)
           : undefined;
+      const stateCode = input.stateCode ?? before.stateCode;
+      if (input.stateCode !== undefined || registration !== undefined) {
+        const reg = registration !== undefined ? registration : before.gstRegistrationId ? await this.registrationFor(tx, before.companyId, before.gstRegistrationId) : null;
+        await this.assertSameState(tx, before.companyId, stateCode, reg);
+      }
       const after = await tx.store.update({
         where: { id },
         data: {
@@ -96,6 +102,23 @@ export class StoresService {
       await this.audit.recordUpdate(tx, actor, 'store', id, before, after);
       return after;
     });
+  }
+
+  /**
+   * A GSTIN belongs to one state (its first two digits), and a store reports under the
+   * registration of the state it is in (blueprint 13: "Stores in several states: separate
+   * registrations"). Found in the launch check of 27 October 2026: a Chennai store could be put
+   * under a Karnataka GSTIN. No registration means the company default one.
+   */
+  private async assertSameState(db: Db, companyId: string, stateCode: string | null, registration: { gstin: string; stateCode: string } | null) {
+    const reg =
+      registration ??
+      (await db.gstRegistration.findFirst({ where: { companyId, active: true }, orderBy: [{ isDefault: 'desc' }, { gstin: 'asc' }], select: { gstin: true, stateCode: true } }));
+    if (!reg || !stateCode || reg.stateCode === stateCode) return;
+    const name = (code: string) => INDIAN_STATES[code] ?? code;
+    throw new BadRequestException(
+      `This store is in ${name(stateCode)}, but GSTIN ${reg.gstin} is for ${name(reg.stateCode)}. Choose the GSTIN for ${name(stateCode)}, or add one under Company.`,
+    );
   }
 
   private async registrationFor(db: Db, companyId: string, gstRegistrationId: string | null | undefined) {

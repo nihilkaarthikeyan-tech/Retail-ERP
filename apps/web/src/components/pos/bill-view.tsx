@@ -126,7 +126,7 @@ export function BillView({ bill, onChanged }: { bill: PosBillDto; onChanged: () 
             Reprint
           </Button>
         ) : null}
-        {rights.sell && !cancelled ? (
+        {rights.sell && !cancelled && bill.shiftOpen !== false ? (
           <Button variant="danger" onClick={() => setCancelling(true)}>
             Cancel bill
           </Button>
@@ -134,6 +134,9 @@ export function BillView({ bill, onChanged }: { bill: PosBillDto; onChanged: () 
       </div>
       <Alert kind="error">{error}</Alert>
       {cancelled ? <Alert kind="info">Cancelled: {bill.cancelReason ?? "no reason given"}.</Alert> : null}
+      {!cancelled && bill.shiftOpen === false && bill.kind === "sale" ? (
+        <p className="muted">The shift of this bill is closed, so it can no longer be cancelled. To take goods back or refund, make a return at the till.</p>
+      ) : null}
       {bill.checkFlags.length ? (
         <Alert kind="info">
           To check:

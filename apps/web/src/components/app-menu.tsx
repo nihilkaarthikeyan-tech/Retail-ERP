@@ -6,7 +6,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import type { CurrentUser, ModuleKey } from "shared";
 import { Icon } from "@/components/icons";
 import { areaOf, isActive, type MenuEntry, visibleMenu } from "@/lib/menu";
-import { getCollapsed, getCounts, getServerCollapsed, getServerCounts, mostUsed, subscribeMenuStore, toggleCollapsed } from "@/lib/menu-usage";
+import { getCounts, getOpened, getServerCounts, getServerOpened, mostUsed, subscribeMenuStore, toggleOpened } from "@/lib/menu-usage";
 import { useModules } from "@/lib/modules";
 
 interface AppMenuProps {
@@ -40,15 +40,16 @@ function Entry({ entry, pathname }: { entry: MenuEntry; pathname: string }) {
 
 /**
  * Left-hand menu: only the pages the user has rights for (and whose module is
- * on). Each group folds shut with a click (remembered on this computer), the
- * group of the current page never folds, and the five screens this person
- * opens most sit at the top (owner, 23 October 2026).
+ * on), and the five screens this person opens most at the top (owner, 23 October
+ * 2026). Groups start folded to one line each, so an owner does not face 84 links
+ * at once; the group of the current page is always open, and a group the person
+ * opens stays open on this computer (owner, 27 October 2026, decision L11).
  */
 export function AppMenu({ user, pathname, modules }: AppMenuProps) {
   const loaded = useModules().modules;
   const entries = useMemo(() => visibleMenu(user, modules ?? loaded), [user, modules, loaded]);
   const groups = groupBySection(entries);
-  const collapsed = useSyncExternalStore(subscribeMenuStore, getCollapsed, getServerCollapsed);
+  const opened = useSyncExternalStore(subscribeMenuStore, getOpened, getServerOpened);
   const counts = useSyncExternalStore(subscribeMenuStore, getCounts, getServerCounts);
   const favourites = useMemo(() => {
     const top = mostUsed(
@@ -75,13 +76,27 @@ export function AppMenu({ user, pathname, modules }: AppMenuProps) {
         const classes = ["shell-nav-group", `area-${area}`, area === "admin" ? "shell-nav-group-admin" : ""];
         const section = group.section;
         const holdsCurrent = group.entries.some((e) => isActive(e, pathname));
-        const open = !section || holdsCurrent || !collapsed.includes(section);
+        const open = !section || holdsCurrent || opened.includes(section);
         const id = `menu-group-${i}`;
         return (
           <div key={section ?? `top-${i}`} className={classes.filter(Boolean).join(" ")}>
             {section ? (
-              <button type="button" className="shell-nav-heading" aria-expanded={open} aria-controls={id} onClick={() => toggleCollapsed(section)}>
+              <button
+                type="button"
+                className="shell-nav-heading"
+                aria-expanded={open}
+                aria-controls={id}
+                disabled={holdsCurrent}
+                title={holdsCurrent ? "The screen you are on is in this group" : undefined}
+                onClick={() => toggleOpened(section)}
+              >
                 {section}
+                {open ? null : (
+                  <span className="shell-nav-count">
+                    {group.entries.length}
+                    <span className="sr-only"> screens</span>
+                  </span>
+                )}
                 <span className="shell-nav-chevron" aria-hidden="true" />
               </button>
             ) : null}

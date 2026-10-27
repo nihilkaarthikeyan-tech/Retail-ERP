@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
+import { rupees } from "@/lib/purchasing";
 import Link from "next/link";
 import { useState } from "react";
 import { hasPermission } from "shared";
@@ -62,8 +63,8 @@ export default function StockDocumentsPage() {
     },
     ...(withValues
       ? [
-          { key: "in", header: "Value in", align: "right", render: (d: StockDocHeaderDto) => (d.status === "draft" ? "—" : (d.totalValueIn ?? "—")) },
-          { key: "out", header: "Value out", align: "right", render: (d: StockDocHeaderDto) => (d.status === "draft" ? "—" : (d.totalValueOut ?? "—")) },
+          { key: "in", header: "Value in", align: "right", render: (d: StockDocHeaderDto) => (d.status === "draft" ? "—" : rupees(d.totalValueIn)) },
+          { key: "out", header: "Value out", align: "right", render: (d: StockDocHeaderDto) => (d.status === "draft" ? "—" : rupees(d.totalValueOut)) },
         ] satisfies Column<StockDocHeaderDto>[]
       : []),
   ];

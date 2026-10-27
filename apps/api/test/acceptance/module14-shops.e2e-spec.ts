@@ -31,7 +31,7 @@ const OTHER = {
   ...SETUP_INPUT,
   admin: { firstName: 'Ravi', lastName: 'K', email: 'ravi@other-shop.test', password: PASSWORD },
   company: { legalName: 'Ravi Textiles', stateCode: '29', city: 'Bengaluru' },
-  gstRegistration: { gstin: '29AAACR1234A1ZE' },
+  gstRegistration: { gstin: '29AAACR1234A1ZZ' },
 };
 
 interface Made {

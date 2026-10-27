@@ -1,8 +1,10 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Till reports (blueprint 09 "Reports"; decision 66; plan 06 §1 item 12).
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { type CurrentUser, Decimal, type PosReportQuery, type SalespersonReportQuery } from 'shared';
 import type { Prisma } from '../generated/prisma/client.js';
+import { AuditService } from '../audit/audit.service.js';
+import type { Actor } from '../common/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PosCommon } from './pos-common.service.js';
 
@@ -20,6 +22,7 @@ export class PosReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly common: PosCommon,
+    private readonly audit: AuditService,
   ) {}
 
   private async where(q: PosReportQuery, user: CurrentUser): Promise<Prisma.PosBillWhereInput> {
@@ -54,7 +57,8 @@ export class PosReportsService {
       cashierId: b.cashierId,
       customerId: b.customerId,
       total: b.total.toFixed(2),
-      payments: b.payments.map((p) => `${p.paymentMethod.name} ${p.amount.toFixed(2)}`).join(', '),
+      // As handed over, with the change given back (launch check, 27 October 2026: "Cash 2000.00" on a ₹1,597 bill).
+      payments: b.payments.map((p) => `${p.paymentMethod.name} ${p.amount.toFixed(2)}`).join(', ') + (D(b.changeAmount).isZero() ? '' : `, change given ${b.changeAmount.toFixed(2)}`),
       offline: b.offline,
       flags: b.checkFlags,
     }));
@@ -62,12 +66,18 @@ export class PosReportsService {
 
   /** Amount by payment method per day. */
   async payments(q: PosReportQuery, user: CurrentUser) {
-    const pays = await this.prisma.posPayment.findMany({ where: { bill: await this.where(q, user) }, include: { paymentMethod: { select: { code: true, name: true, kind: true } }, bill: { select: { businessDate: true } } } });
+    const pays = await this.prisma.posPayment.findMany({ where: { bill: await this.where(q, user) }, include: { paymentMethod: { select: { code: true, name: true, kind: true } }, bill: { select: { id: true, businessDate: true, changeAmount: true } } } });
     const groups = new Map<string, { date: string; method: string; kind: string; amount: Decimal; count: number }>();
+    // The change given back comes out of the bill's (first) cash payment, as at the shift close (decision 41).
+    const changeTaken = new Set<string>();
     for (const p of pays) {
       const key = `${iso(p.bill.businessDate)}|${p.paymentMethod.code}`;
       const g = groups.get(key) ?? { date: iso(p.bill.businessDate)!, method: p.paymentMethod.name, kind: p.paymentMethod.kind, amount: new Decimal(0), count: 0 };
       g.amount = g.amount.add(D(p.amount));
+      if (p.paymentMethod.kind === 'cash' && !changeTaken.has(p.bill.id)) {
+        g.amount = g.amount.sub(D(p.bill.changeAmount));
+        changeTaken.add(p.bill.id);
+      }
       g.count++;
       groups.set(key, g);
     }
@@ -170,9 +180,17 @@ export class PosReportsService {
     return rows.map((r) => ({ id: r.id, till: code.get(r.tillId), clientId: r.clientId, kind: r.kind, error: r.error, payload: r.payload, createdAt: r.createdAt, resolvedAt: r.resolvedAt, resolution: r.resolution }));
   }
 
-  async resolveSyncProblem(id: string, resolution: string, userId: string) {
-    const r = await this.prisma.posSyncProblem.update({ where: { id }, data: { resolvedAt: new Date(), resolvedById: userId, resolution } });
-    return { id: r.id, resolvedAt: r.resolvedAt };
+  /** Code audit, 27 October 2026: only for a till in one of the person's stores, and kept in the history. */
+  async resolveSyncProblem(id: string, resolution: string, actor: Actor, user: CurrentUser) {
+    const company = await this.common.currentCompany();
+    const problem = await this.prisma.posSyncProblem.findFirst({ where: { id, companyId: company.id } });
+    const till = problem && (await this.prisma.till.findFirst({ where: { id: problem.tillId, ...(user.allStores ? {} : { storeId: { in: user.stores.map((s) => s.id) } }) }, select: { id: true } }));
+    if (!problem || !till) throw new NotFoundException('Till problem not found');
+    return this.prisma.$transaction(async (tx) => {
+      const r = await tx.posSyncProblem.update({ where: { id }, data: { resolvedAt: new Date(), resolvedById: actor.userId, resolution } });
+      await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_sync_problem', entityId: id, changes: { resolvedAt: { old: null, new: r.resolvedAt } }, reason: resolution });
+      return { id: r.id, resolvedAt: r.resolvedAt };
+    });
   }
 
   /** Closed and open shifts with their closing figures. */

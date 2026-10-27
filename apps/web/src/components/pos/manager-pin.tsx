@@ -14,7 +14,8 @@ export interface ManagerPinValue {
   pin: string;
 }
 
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "back"] as const;
+// The same layout as the till's number pads, 7-8-9 on top (launch check, 27 October 2026).
+const KEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "clear", "0", "back"] as const;
 
 /** Manager picker and PIN pad; the parent asks for the approval with `requestApproval`. */
 export function ManagerPinFields({ tillId, value, onChange, idPrefix = "mgr" }: { tillId: string; value: ManagerPinValue; onChange: (v: ManagerPinValue) => void; idPrefix?: string }) {

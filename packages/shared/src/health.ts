@@ -7,11 +7,9 @@ export interface HealthStatus {
     version: string;
     time: string;
   };
+  /** Only whether it is up: the details are not for anyone who asks (code audit, 27 October 2026). */
   database: {
     connected: boolean;
-    serverVersion?: string;
-    serverTime?: string;
-    error?: string;
   };
 }
 

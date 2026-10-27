@@ -30,7 +30,7 @@ let n = 0;
 const today = () => businessDate();
 const period = () => today().slice(0, 7);
 const withCheck = (first14: string) => `${first14}${gstinCheckCharacter(first14)}`;
-const MAIN_GSTIN = '33AAACR1234A1ZV';
+const MAIN_GSTIN = '33AAACR1234A1ZA';
 /** A Karnataka (29) buyer and a Tamil Nadu (33) buyer, with correct check characters. */
 const KA_GSTIN = withCheck('29AABCK1234A1Z');
 const TN_GSTIN = withCheck('33AABCT1234A1Z');

@@ -247,3 +247,36 @@ export const SYSTEM_ROLE_NAMES: Record<SystemRoleCode, string> = {
   stock_receiving: 'Stock / Receiving',
   viewer_auditor: 'Viewer / Auditor',
 };
+
+/**
+ * The rights grouped the way a shop thinks of its work, for the role editor (found in the
+ * launch check of 27 October 2026: 82 rights in one list, each headed by its code).
+ * A right is placed by the first part of its key.
+ */
+export const PERMISSION_AREAS: { name: string; prefixes: string[] }[] = [
+  { name: 'Company, staff and data', prefixes: ['company', 'stores', 'financial_years', 'numbering', 'users', 'roles', 'audit', 'sessions', 'golive', 'data', 'import', 'export'] },
+  { name: 'Items and prices', prefixes: ['catalogue', 'prices', 'buying_prices', 'cost_price', 'labels', 'print'] },
+  { name: 'Customers and suppliers', prefixes: ['customers', 'suppliers', 'payment_terms', 'loyalty', 'giftcards'] },
+  { name: 'Stock', prefixes: ['stock'] },
+  { name: 'Purchases', prefixes: ['purchase'] },
+  { name: 'Billing counter', prefixes: ['pos', 'offers', 'gst_rates', 'sales_staff', 'deliveries', 'orders', 'alterations'] },
+  { name: 'Accounts', prefixes: ['accounts', 'journals', 'payments', 'cash', 'books', 'expenses', 'tally'] },
+  { name: 'GST', prefixes: ['gst', 'einvoice', 'eway'] },
+  { name: 'Reports', prefixes: ['reports'] },
+];
+
+/** The area a right belongs to ("Other" for one not placed yet). */
+export function permissionArea(key: string): string {
+  const prefix = key.split('.')[0];
+  return PERMISSION_AREAS.find((a) => a.prefixes.includes(prefix))?.name ?? 'Other';
+}
+
+/** What each system role is for, in one line (shown on Roles and when giving roles). */
+export const SYSTEM_ROLE_DESCRIPTIONS: Record<SystemRoleCode, string> = {
+  owner_admin: 'Everything, including staff, rights and going live.',
+  accountant: 'Accounts, payments, supplier bills and GST returns; sees items, stock and customers.',
+  store_manager: 'Runs a store: the till and manager approvals, stock, purchasing and customers.',
+  cashier: 'Bills at the till: sales, returns, the customer and the shift.',
+  stock_receiving: 'Receives goods and counts and moves stock.',
+  viewer_auditor: 'Looks at items, stock, sales, accounts and GST, and exports lists; changes nothing.',
+};

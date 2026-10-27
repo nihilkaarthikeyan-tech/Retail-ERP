@@ -97,7 +97,7 @@ interface ProfitAndLossDto {
 }
 
 interface BsFamily {
-  rows: { accountId: string; number: string | null; name: string; amount: string }[];
+  rows: { accountId: string; number: string | null; name: string; kind?: string | null; amount: string }[];
   total: string;
 }
 
@@ -428,10 +428,34 @@ function CashBook({ f, accountId, book }: { f: Filters; accountId: string; book:
 }
 
 /** The cash account a user would look at first: the cash in hand of one of their stores. */
-function firstCashAccount(accounts: AccountDto[], storeIds: string[] | null): string {
+/** The cash in hand of the person's default store, else of their first store. */
+function firstCashAccount(accounts: AccountDto[], storeIds: string[] | null, defaultStoreId: string | null = null): string {
   const cash = accounts.filter((a) => !a.isGroup && a.kind === "cash");
   const mine = (a: AccountDto) => !a.storeId || !storeIds || storeIds.includes(a.storeId);
-  return (cash.find((a) => a.systemKey?.startsWith("cash_in_hand:") && mine(a)) ?? cash.find(mine) ?? cash[0])?.id ?? "";
+  const inHand = (a: AccountDto) => !!a.systemKey?.startsWith("cash_in_hand:");
+  return (cash.find((a) => inHand(a) && !!defaultStoreId && a.storeId === defaultStoreId) ?? cash.find((a) => inHand(a) && mine(a)) ?? cash.find(mine) ?? cash[0])?.id ?? "";
+}
+
+// Launch check, 27 October 2026: the cash book opened on a store with no cash yet. The cash
+// account last chosen is remembered in this browser, per person.
+const CASH_KEY = (userId: string) => `retail-erp-cash-book:${userId}`;
+
+function rememberedCashAccount(userId: string | undefined): string | null {
+  if (!userId) return null;
+  try {
+    return localStorage.getItem(CASH_KEY(userId));
+  } catch {
+    return null;
+  }
+}
+
+function rememberCashAccount(userId: string | undefined, accountId: string): void {
+  if (!userId) return;
+  try {
+    localStorage.setItem(CASH_KEY(userId), accountId);
+  } catch {
+    // Private windows may refuse; the default choice is used next time.
+  }
 }
 
 function TrialBalance({ f }: { f: Filters }) {
@@ -534,9 +558,17 @@ function BalanceSheet({ f }: { f: Filters }) {
           { key: "profit", label: "Profit not yet closed into capital", amount: d.profitNotClosed },
           { key: "total-lc", label: "Total liabilities and capital", amount: d.totalLiabilitiesAndCapital, strong: true },
         ];
+        // Launch check, 27 October 2026: a minus "Temporary opening" alarmed the owner; it is expected until the opening balances are in.
+        const temporary = [d.assets, d.liabilities, d.equity].some((s) => s.rows.some((r) => r.kind === "temporary_opening"));
         return (
           <>
             <p>{d.balanced ? <Badge kind="ok">Assets equal liabilities and capital</Badge> : <Badge kind="off">Does not balance: tell the Accountant</Badge>}</p>
+            {temporary ? (
+              <Alert kind="info">
+                &ldquo;Temporary opening&rdquo; holds the other side of the balances brought in from before you started (opening stock, money owed). It is expected and goes to zero once all opening balances are entered under{" "}
+                <Link href="/accounts/opening">Opening balances</Link>.
+              </Alert>
+            ) : null}
             <ReportTable name="balance-sheet" columns={columns} rows={rows} rowKey={(r) => r.key} empty="Nothing to show." />
           </>
         );
@@ -753,7 +785,11 @@ export function AccountsReports() {
   const accounts = chart.data?.accounts ?? [];
   const cashAccounts = accounts.filter((a) => !a.isGroup && a.kind === "cash");
   const bankAccounts = accounts.filter((a) => !a.isGroup && a.kind === "bank");
-  const cashAccountId = f.cashAccountId || firstCashAccount(accounts, user && !user.allStores && !user.isOwnerAdmin ? user.stores.map((s) => s.id) : null);
+  const remembered = rememberedCashAccount(user?.id);
+  const cashAccountId =
+    f.cashAccountId ||
+    (remembered && cashAccounts.some((a) => a.id === remembered) ? remembered : "") ||
+    firstCashAccount(accounts, user && !user.allStores && !user.isOwnerAdmin ? user.stores.map((s) => s.id) : null, user?.stores.find((s) => s.isDefault)?.id ?? null);
   const bankAccountId = f.bankAccountId || (bankAccounts[0]?.id ?? "");
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((x) => ({ ...x, [k]: v }));
 
@@ -786,7 +822,7 @@ export function AccountsReports() {
                 <option value="supplier">Suppliers</option>
               </SelectInput>
             ) : null}
-            {show.has("party") ? <PartyPicker id="acr-party" label={f.partyType === "customer" ? "Customer" : "Supplier"} kind={f.partyType} value={party} onChange={(p) => set("party", p)} /> : null}
+            {show.has("party") ? <PartyPicker id="acr-party" label={f.partyType === "customer" ? "Customer" : "Supplier"} kind={f.partyType} value={party} onChange={(p) => set("party", p)} hint="Type part of the code, name or mobile, then pick from the list." /> : null}
             {show.has("store") ? (
               <SelectInput id="acr-store" label="Store" value={f.storeId} onChange={(e) => set("storeId", e.target.value)}>
                 <option value="">All my stores</option>
@@ -798,7 +834,10 @@ export function AccountsReports() {
               </SelectInput>
             ) : null}
             {show.has("cashAccount") ? (
-              <SelectInput id="acr-cash-account" label="Cash account" value={cashAccountId} onChange={(e) => set("cashAccountId", e.target.value)} hint="Each store's cash in hand, or its till drawer.">
+              <SelectInput id="acr-cash-account" label="Cash account" value={cashAccountId} onChange={(e) => {
+                set("cashAccountId", e.target.value);
+                rememberCashAccount(user?.id, e.target.value);
+              }} hint="Each store's cash in hand, or its till drawer.">
                 {cashAccounts.length === 0 ? <option value="">No cash accounts yet</option> : null}
                 {cashAccounts.map((a) => (
                   <option key={a.id} value={a.id}>

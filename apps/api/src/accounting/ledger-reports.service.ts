@@ -258,7 +258,7 @@ export class LedgerReportsService {
     const sums = await this.prisma.ledgerLine.groupBy({ by: ['accountId'], where: { companyId: company.id, ...this.storeWhere(user, q.storeId), entryDate: { lte: fromIso(q.asOf) } }, _sum: { debit: true, credit: true } });
     const bal = new Map(sums.map((s) => [s.accountId, D(s._sum.debit ?? 0).sub(D(s._sum.credit ?? 0))]));
     const family = (f: 'asset' | 'liability' | 'equity') => {
-      const rows = list.filter((a) => a.family === f && !a.isGroup && !(bal.get(a.id) ?? ZERO).isZero()).map((a) => ({ accountId: a.id, number: a.number, name: a.name, amount: money(naturalBalance(f, (bal.get(a.id) ?? ZERO).toString(), '0')) }));
+      const rows = list.filter((a) => a.family === f && !a.isGroup && !(bal.get(a.id) ?? ZERO).isZero()).map((a) => ({ accountId: a.id, number: a.number, name: a.name, kind: a.kind, amount: money(naturalBalance(f, (bal.get(a.id) ?? ZERO).toString(), '0')) }));
       return { rows, total: money(rows.reduce((s, r) => s.add(D(r.amount)), ZERO)) };
     };
     const profit = list.filter((a) => a.family === 'income' || a.family === 'expense').reduce((s, a) => s.sub(bal.get(a.id) ?? ZERO), ZERO);

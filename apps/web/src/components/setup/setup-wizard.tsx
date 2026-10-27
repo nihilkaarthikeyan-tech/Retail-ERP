@@ -382,7 +382,7 @@ function GstStep({ forms, setForms, errors }: StepProps) {
             }}
             onBlur={() => setChecked(g.gstin.trim() ? (gstinProblem(g.gstin, isStateCode) ?? "ok") : null)}
             error={errors.gstin ?? (checked && checked !== "ok" ? checked : live)}
-            hint={checked === "ok" || (!live && g.gstin.trim().length === 15) ? "Looks right. Your accountant confirms it on the GST portal." : "15 letters and digits, e.g. 33ABCDE1234F1Z5. We check its last character for typing mistakes."}
+            hint={checked === "ok" || (!live && g.gstin.trim().length === 15) ? "Looks right. Your accountant confirms it on the GST portal." : "15 letters and digits, e.g. 33ABCDE1234F1Z7. We check its last character for typing mistakes."}
             required
             autoCapitalize="characters"
             className="mono"

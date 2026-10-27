@@ -327,7 +327,9 @@ describe('11.17 seasons and markdowns (C4, C5)', () => {
   it('previews a 30% markdown: old price, new price rounded to the rupee, never above MRP', async () => {
     const preview = (await owner.post('/markdowns/preview').send({ seasonId, rule: 'percent', value: '30', startDate: start() }).expect(200)).body;
     expect(preview).toMatchObject({ priceList: { id: sellList }, items: 9, toChange: 9, skipped: 0, cappedAtMrp: 0 });
-    expect(preview.lines[0]).toMatchObject({ code: 'SHIRT-BLU-L', mrp: '1099.00', oldPrice: '799.00', newPrice: '559.00', skipped: null });
+    // Launch check, 27 October 2026: a style's sizes in the order of their list, not by code.
+    expect(preview.lines.map((l: { code: string }) => l.code)).toEqual(['SHIRT-RED-S', 'SHIRT-RED-M', 'SHIRT-RED-L', 'SHIRT-RED-XL', 'SHIRT-BLU-S', 'SHIRT-BLU-M', 'SHIRT-BLU-L', 'SHIRT-BLU-XL', 'SHIRT-GRN-S']);
+    expect(preview.lines.find((l: { code: string }) => l.code === 'SHIRT-BLU-L')).toMatchObject({ mrp: '1099.00', oldPrice: '799.00', newPrice: '559.00', skipped: null });
     // A fixed price above the MRP is brought down to it.
     const capped = (await owner.post('/markdowns/preview').send({ itemIds: [(await byCode('SHIRT-RED-M')).id], rule: 'price', value: '1500', startDate: start() }).expect(200)).body;
     expect(capped.lines[0]).toMatchObject({ newPrice: '1099.00', cappedAtMrp: true });

@@ -12,6 +12,7 @@ import {
   type PriceQuery,
   rateForLine,
   selectPrice,
+  type StylePriceInput,
   type UpdatePriceInput,
   type UpdatePriceListInput,
 } from 'shared';
@@ -113,6 +114,37 @@ export class PricingService {
       take: 500,
     });
     return rows.map(toPriceDto);
+  }
+
+  /** The same price on every variant of a style that has none in the list on that date (see stylePriceSchema). */
+  async createStylePrices(input: StylePriceInput, actor: Actor, user: CurrentUser) {
+    const list = await this.getList(this.prisma, input.priceListId, user);
+    if (!list.active) throw new BadRequestException('Price list is switched off');
+    const style = await this.prisma.item.findUnique({ where: { id: input.styleId } });
+    if (!style || !style.isParentStyle) throw new BadRequestException('Choose a style with sizes and colours');
+    const startDate = input.startDate ?? businessDate();
+    const on = fromDate(startDate);
+    const variants = await this.prisma.item.findMany({ where: { parentItemId: style.id, active: true }, orderBy: { code: 'asc' } });
+    if (!variants.length) throw new BadRequestException(`${style.code} has no sizes or colours yet; create them first`);
+    return this.prisma.$transaction(async (tx) => {
+      const added: string[] = [];
+      const kept: string[] = [];
+      for (const v of variants) {
+        const existing = await tx.price.findFirst({
+          where: { priceListId: list.id, itemId: v.id, unitId: v.baseUnitId, customerId: null, supplierId: null, batchId: null, packSize: null, startDate: { lte: on }, OR: [{ endDate: null }, { endDate: { gte: on } }] },
+        });
+        if (existing) {
+          kept.push(v.code);
+          continue;
+        }
+        const price = await tx.price.create({
+          data: { priceListId: list.id, itemId: v.id, unitId: v.baseUnitId, price: new Decimal(input.price), startDate: on, createdById: actor.userId, updatedById: actor.userId },
+        });
+        await this.audit.record(tx, actor, { action: 'create', entityType: 'price', entityId: price.id, changes: { item: v.code, list: list.code, price: input.price, startDate, style: style.code } });
+        added.push(v.code);
+      }
+      return { added, kept };
+    });
   }
 
   async createPrice(input: CreatePriceInput, actor: Actor, user: CurrentUser) {

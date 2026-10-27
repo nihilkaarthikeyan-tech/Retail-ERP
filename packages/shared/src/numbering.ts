@@ -67,3 +67,41 @@ export function formatNumber(filledPrefix: string, counter: number, counterLengt
   if (!Number.isInteger(counter) || counter < 1) throw new Error('Counter must be a positive integer');
   return filledPrefix + String(counter).padStart(counterLength, '0');
 }
+
+/**
+ * Every document kind the system numbers, with the name a shop uses for it (screen
+ * "Document numbering"). Found in the launch check of 27 October 2026: the screen showed
+ * code names such as stock_stock_in and asked the owner to type one. Till bills are
+ * numbered per till, under Tills.
+ */
+export const NUMBER_SERIES_KINDS: Record<string, string> = {
+  item: 'Items',
+  customer: 'Customers',
+  supplier: 'Suppliers',
+  purchase_order: 'Purchase orders',
+  goods_receipt: 'Goods receipts',
+  supplier_bill: 'Supplier bills',
+  purchase_return: 'Returns to supplier',
+  debit_note: 'Debit notes',
+  landed_charge: 'Freight and charges',
+  consignment_statement: 'Sale-or-return statements',
+  stock_count: 'Stock counts',
+  stock_move: 'Moves between locations',
+  stock_stock_in: 'Stock in',
+  stock_stock_out: 'Stock out',
+  stock_transfer_send: 'Transfers sent to another shop',
+  stock_transfer_receive: 'Transfers received',
+  journal: 'Journals',
+  receipt: 'Money received',
+  payment: 'Money paid',
+  transfer: 'Cash and bank transfers',
+  expense: 'Expenses',
+  customer_order: 'Customer orders',
+  alteration: 'Alterations',
+  gift_card_sale: 'Gift card sales',
+};
+
+/** The shop's name for a document kind, or the code itself for one not in the list. */
+export function numberSeriesKindName(kind: string): string {
+  return NUMBER_SERIES_KINDS[kind] ?? kind;
+}

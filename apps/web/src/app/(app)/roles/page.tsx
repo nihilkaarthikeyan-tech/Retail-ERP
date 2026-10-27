@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { createRoleSchema, PERMISSIONS, SYSTEM_ROLES, updateRoleSchema } from "shared";
+import { createRoleSchema, PERMISSION_AREAS, permissionArea, PERMISSIONS, SYSTEM_ROLE_DESCRIPTIONS, SYSTEM_ROLES, type SystemRoleCode, updateRoleSchema } from "shared";
 import { ActiveBadge, Alert, Badge, Button, CheckInput, DataTable, Dialog, TextInput, TextareaInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { blankToNull } from "@/lib/format";
@@ -19,6 +19,18 @@ interface RoleForm {
 }
 
 const emptyRole: RoleForm = { code: "", name: "", description: "", permissions: [], active: true };
+
+/** A role's code made from its name ("Floor supervisor" → floor_supervisor); the owner never types it. */
+function roleCodeFrom(name: string): string {
+  const code = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^[^a-z]+|_+$/g, "")
+    .slice(0, 40);
+  return code.length >= 3 ? code : `role_${code}`.slice(0, 40);
+}
+
+const roleDescription = (r: RoleDto) => r.description ?? (r.isSystem ? (SYSTEM_ROLE_DESCRIPTIONS[r.code as SystemRoleCode] ?? null) : null);
 
 export default function RolesPage() {
   const roles = useLoad(() => api.get<RoleDto[]>("/roles"));
@@ -47,7 +59,7 @@ export default function RolesPage() {
     setError(null);
     const parsed =
       editing === "new"
-        ? createRoleSchema.safeParse({ code: form.code, name: form.name, description: blankToNull(form.description), permissions: form.permissions })
+        ? createRoleSchema.safeParse({ code: roleCodeFrom(form.name), name: form.name, description: blankToNull(form.description), permissions: form.permissions })
         : updateRoleSchema.safeParse({
             name: form.name,
             description: blankToNull(form.description),
@@ -74,8 +86,7 @@ export default function RolesPage() {
 
   const columns: Column<RoleDto>[] = [
     { key: "name", header: "Role", render: (r) => <strong>{r.name}</strong> },
-    { key: "code", header: "Code", render: (r) => <span className="mono">{r.code}</span> },
-    { key: "desc", header: "Description", render: (r) => r.description ?? "—" },
+    { key: "desc", header: "What it is for", render: (r) => roleDescription(r) ?? "—" },
     {
       key: "perms",
       header: "Rights",
@@ -114,33 +125,37 @@ export default function RolesPage() {
       <Dialog open={editing !== null} title={editing === "new" ? "Add custom role" : `Edit role: ${form.name}`} onClose={() => setEditing(null)}>
         <form onSubmit={onSubmit} noValidate>
           <Alert kind="error">{error}</Alert>
-          {editing === "new" ? (
-            <TextInput id="role-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required hint="Lower-case letters, digits and underscores, e.g. floor_supervisor." className="mono" />
-          ) : null}
           <TextInput id="role-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} error={errors.name} required />
           <TextareaInput id="role-description" label="Description" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} error={errors.description} />
 
           <h3>Rights</h3>
           {isOwnerAdmin ? <p className="muted">Owner / Admin always has every right; the list cannot be changed.</p> : null}
           {errors.permissions ? <p className="field-error">{errors.permissions}</p> : null}
-          <div className="check-list">
-            {permissionList.map((p) => (
-              <CheckInput
-                key={p.key}
-                id={`perm-${p.key}`}
-                label={<span className="mono">{p.key}</span>}
-                description={p.description}
-                checked={isOwnerAdmin || form.permissions.includes(p.key)}
-                disabled={isOwnerAdmin}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    permissions: e.target.checked ? [...new Set([...f.permissions, p.key])] : f.permissions.filter((k) => k !== p.key),
-                  }))
-                }
-              />
-            ))}
-          </div>
+          {errors.code ? <p className="field-error">{errors.code}</p> : null}
+          {[...PERMISSION_AREAS.map((a) => a.name), "Other"].map((area) => {
+            const inArea = permissionList.filter((p) => permissionArea(p.key) === area);
+            if (!inArea.length) return null;
+            return (
+              <fieldset key={area} className="check-list">
+                <legend>{area}</legend>
+                {inArea.map((p) => (
+                  <CheckInput
+                    key={p.key}
+                    id={`perm-${p.key}`}
+                    label={p.description}
+                    checked={isOwnerAdmin || form.permissions.includes(p.key)}
+                    disabled={isOwnerAdmin}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        permissions: e.target.checked ? [...new Set([...f.permissions, p.key])] : f.permissions.filter((k) => k !== p.key),
+                      }))
+                    }
+                  />
+                ))}
+              </fieldset>
+            );
+          })}
 
           {editing !== "new" ? (
             <div style={{ marginTop: 12 }}>

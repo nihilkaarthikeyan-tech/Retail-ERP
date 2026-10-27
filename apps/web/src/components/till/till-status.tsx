@@ -19,8 +19,8 @@ export interface StatusInfo {
 }
 
 export function statusText(s: StatusInfo): { tone: "ok" | "warn" | "danger"; text: string } {
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-  if (s.problems > 0) return { tone: "danger", text: `${plural(s.problems, "bill", "bills")} could not be sent` };
+  // A problem can be a shift opening or a cash entry as well as a bill; the details list says which.
+  if (s.problems > 0) return { tone: "danger", text: `${s.problems} not sent: see why` };
   if (s.signedOut) return { tone: "warn", text: s.waiting ? `Signed out, ${s.waiting} waiting` : "Signed out" };
   if (!s.online) return { tone: "warn", text: `Offline, ${s.waiting} waiting` };
   if (s.waiting > 0) return { tone: "warn", text: `Sending, ${s.waiting} waiting` };
@@ -96,7 +96,7 @@ function QueueDialog({ engine, open, onClose, info }: { engine: TillEngine; open
                 <td>{i.label}</td>
                 <td>{dateTimeIn(i.createdAt)}</td>
                 <td>{i.status === "problem" ? `Could not be sent: ${i.error ?? ""}` : i.error ? `Waiting (last try: ${i.error})` : "Waiting"}</td>
-                <td>
+                <td className="row-actions">
                   {i.status === "problem" ? (
                     <Button
                       size="small"
@@ -109,6 +109,23 @@ function QueueDialog({ engine, open, onClose, info }: { engine: TillEngine; open
                       Try again
                     </Button>
                   ) : null}
+                  {/* A refused shift opening or cash entry can be done again by hand; it is not kept for ever
+                      (launch check, 27 October 2026). A bill is never removed here: it is a sale. */}
+                  {i.status === "problem" && i.kind !== "bill" ? (
+                    <Button
+                      size="small"
+                      variant="danger"
+                      onClick={async () => {
+                        if (!window.confirm(`Remove "${i.label}" from this till? It was refused and will not be sent.`)) return;
+                        await engine.queue.remove(i);
+                        await engine.tick(true);
+                        await engine.updateCounts();
+                        setVersion((v) => v + 1);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -117,7 +134,7 @@ function QueueDialog({ engine, open, onClose, info }: { engine: TillEngine; open
       ) : (
         <p className="muted">Nothing is waiting.</p>
       )}
-      {info.problems ? <p className="muted">A manager can see these under Billing counter → Till reports → Sync problems.</p> : null}
+      {info.problems ? <p className="muted">A bill that could not be sent is also listed for a manager under Billing counter → Till reports → Sync problems.</p> : null}
       <div className="actions">
         <Button variant="primary" busy={busy} onClick={() => void sendNow()}>
           Send now

@@ -239,7 +239,7 @@ export class PosController {
   @Get('reports/sync-problems') @RequirePermission('pos.reports') syncProblems(@ReqUser() user: AuthUser, @Query('all') all?: string) {
     return this.reports.syncProblems(user, all === 'true');
   }
-  @Post('sync-problems/:id/resolve') @HttpCode(200) @RequirePermission('pos.shift.manage') resolve(@Param('id', id()) problemId: string, @Body(zod(reasonSchema)) input: ReasonInput, @ReqUser() user: AuthUser) {
-    return this.reports.resolveSyncProblem(problemId, input.reason, user.id);
+  @Post('sync-problems/:id/resolve') @HttpCode(200) @RequirePermission('pos.shift.manage') resolve(@Param('id', id()) problemId: string, @Body(zod(reasonSchema)) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.reports.resolveSyncProblem(problemId, input.reason, actor, user);
   }
 }

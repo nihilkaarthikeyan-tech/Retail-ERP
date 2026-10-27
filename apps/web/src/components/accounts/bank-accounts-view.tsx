@@ -52,7 +52,7 @@ function BankDialog({ bank, accounts, linked, onClose, onSaved }: { bank: BankAc
         const details = { bankName: form.bankName, accountNumber: form.accountNumber, ifsc: blankToNull(form.ifsc), branch: blankToNull(form.branch), isDefault: form.isDefault };
         const parsed = bankAccountSchema.omit({ accountId: true }).safeParse(details);
         const errs = issuesToFieldErrors(parsed);
-        if (form.ledger === "existing" && !form.accountId) errs.accountId = "Choose the bank account in the chart";
+        if (form.ledger === "existing" && !form.accountId) errs.accountId = "Choose the bank account in your list of accounts";
         if (form.ledger === "new" && !form.ledgerName.trim()) errs.ledgerName = "Give the account a name, for example HDFC current account";
         if (form.ledger === "new" && !folder) errs.ledgerName = "The Bank accounts folder is missing from the chart";
         setErrors(errs);
@@ -82,12 +82,12 @@ function BankDialog({ bank, accounts, linked, onClose, onSaved }: { bank: BankAc
         <Alert kind="error">{error}</Alert>
         {!bank ? (
           <fieldset className="card">
-            <legend>Account in the chart</legend>
-            <p className="muted">Every bank account has its own account in the chart, under Bank accounts, where its money is recorded.</p>
-            <RadioInput id="bank-ledger-existing" name="bank-ledger" label="Use a bank account already in the chart" checked={form.ledger === "existing"} disabled={free.length === 0} onChange={() => set("ledger", "existing")} />
-            <RadioInput id="bank-ledger-new" name="bank-ledger" label="Make a new one in the chart now" checked={form.ledger === "new"} onChange={() => set("ledger", "new")} />
+            <legend>In your list of accounts</legend>
+            <p className="muted">Every bank account has its own line in your list of accounts (the chart of accounts), under Bank accounts, where its money is recorded.</p>
+            <RadioInput id="bank-ledger-existing" name="bank-ledger" label="Use one already in your list of accounts" checked={form.ledger === "existing"} disabled={free.length === 0} onChange={() => set("ledger", "existing")} />
+            <RadioInput id="bank-ledger-new" name="bank-ledger" label="Add a new one to the list now" checked={form.ledger === "new"} onChange={() => set("ledger", "new")} />
             {form.ledger === "existing" ? (
-              <SelectInput id="bank-account" label="Account in the chart" value={form.accountId} onChange={(e) => set("accountId", e.target.value)} error={errors.accountId} required>
+              <SelectInput id="bank-account" label="Account in your list" value={form.accountId} onChange={(e) => set("accountId", e.target.value)} error={errors.accountId} required>
                 <option value="">Choose</option>
                 {free.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -96,12 +96,12 @@ function BankDialog({ bank, accounts, linked, onClose, onSaved }: { bank: BankAc
                 ))}
               </SelectInput>
             ) : (
-              <TextInput id="bank-ledger-name" label="Name in the chart" value={form.ledgerName} onChange={(e) => set("ledgerName", e.target.value)} error={errors.ledgerName} maxLength={100} required hint="Added under the Bank accounts folder." />
+              <TextInput id="bank-ledger-name" label="Name in your list of accounts" value={form.ledgerName} onChange={(e) => set("ledgerName", e.target.value)} error={errors.ledgerName} maxLength={100} required hint="Added under the Bank accounts folder." />
             )}
           </fieldset>
         ) : (
           <p>
-            Account in the chart: <strong>{accountName(bank.account)}</strong>
+            In your list of accounts: <strong>{accountName(bank.account)}</strong>
           </p>
         )}
         <div className="form-grid">
@@ -156,7 +156,7 @@ export function BankAccounts() {
     { key: "number", header: "Account number", render: (b) => <span className="mono">{b.maskedNumber}</span> },
     { key: "ifsc", header: "IFSC", render: (b) => <span className="mono">{b.ifsc ?? "—"}</span> },
     { key: "branch", header: "Branch", render: (b) => b.branch ?? "—" },
-    { key: "ledger", header: "Account in the chart", render: (b) => accountName(b.account) },
+    { key: "ledger", header: "In your list of accounts", render: (b) => accountName(b.account) },
     { key: "active", header: "Status", render: (b) => <ActiveBadge active={b.active} /> },
     ...(canManage
       ? ([

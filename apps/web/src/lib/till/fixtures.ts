@@ -66,7 +66,7 @@ export function sampleSnapshot(over: Partial<TillSnapshot> = {}): StoredSnapshot
       autoPrint: true,
       receiptFooter: "Thank you",
       store: { id: "f0000000-0000-4000-8000-000000000003", code: "MAIN", name: "Main Store", address: "1 Market Road, Chennai", phone: null, stateCode: "33" },
-      company: { legalName: "Sample Retail Pvt Ltd", stateCode: "33", gstin: "33AAAAA0000A1Z5" },
+      company: { legalName: "Sample Retail Pvt Ltd", stateCode: "33", gstin: "33AAAAA0000A1Z9" },
       paymentMethods: [
         { id: CASH, code: "CASH", name: "Cash", kind: "cash", allowRefund: true, needsReference: false, isDefault: true, active: true },
         { id: CARD, code: "CARD", name: "Card", kind: "card", allowRefund: true, needsReference: true, isDefault: false, active: true },

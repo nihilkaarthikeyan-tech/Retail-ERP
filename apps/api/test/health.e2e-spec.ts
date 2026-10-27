@@ -20,6 +20,7 @@ describe('GET /health (e2e)', () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.database.connected).toBe(true);
-    expect(res.body.database.serverVersion).toMatch(/^\d+/);
+    // Code audit, 27 October 2026: anyone may ask, so nothing about the database server is told.
+    expect(res.body.database).toEqual({ connected: true });
   });
 });

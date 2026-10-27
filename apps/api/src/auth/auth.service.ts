@@ -82,12 +82,11 @@ export class AuthService {
 
     const settings = await this.securitySettings();
     if (!(await verifyPassword(input.password, user.passwordHash))) {
-      const failedLoginCount = user.failedLoginCount + 1;
+      // Counted in the database itself (code audit, 27 October 2026): guesses sent all at
+      // once must not each read "no failures yet" and so never reach the lock.
+      const { failedLoginCount } = await this.prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: { increment: 1 } }, select: { failedLoginCount: true } });
       const lockedUntil = lockoutUntil(failedLoginCount, settings.lockoutAttempts, settings.lockoutSeconds, now);
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { failedLoginCount: lockedUntil ? 0 : failedLoginCount, lockedUntil },
-      });
+      if (lockedUntil) await this.prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0, lockedUntil } });
       await this.audit.recordNow(actor, {
         action: 'login_failed',
         entityType: 'user',

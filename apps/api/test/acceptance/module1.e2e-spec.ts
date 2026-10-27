@@ -86,7 +86,7 @@ describe('1.1 First-time setup', () => {
 
     const stores = (await owner.get('/stores').expect(200)).body;
     expect(stores).toHaveLength(1);
-    expect(stores[0]).toMatchObject({ code: 'MAIN', active: true, gstRegistration: { gstin: '33AAACR1234A1ZV' } });
+    expect(stores[0]).toMatchObject({ code: 'MAIN', active: true, gstRegistration: { gstin: '33AAACR1234A1ZA' } });
 
     const again = await request(app.getHttpServer()).post('/setup').send(SETUP_INPUT).expect(409);
     expect(again.body.message).toMatch(/already exists/);
@@ -183,6 +183,13 @@ describe('1.3 Wrong password lockout', () => {
     // Fifteen minutes pass.
     await prisma.user.update({ where: { email: 'priya@rademics.test' }, data: { lockedUntil: new Date(Date.now() - 1000) } });
     await login(app, 'priya@rademics.test', 'Temp-pass-1234');
+  });
+
+  // Code audit, 27 October 2026: guesses sent all at once each read "no failures yet".
+  it('still locks when ten wrong passwords arrive at the same moment', async () => {
+    await Promise.all(Array.from({ length: 10 }, () => request(app.getHttpServer()).post('/auth/login').send({ email: 'priya@rademics.test', password: 'wrong' })));
+    const locked = await request(app.getHttpServer()).post('/auth/login').send({ email: 'priya@rademics.test', password: 'Temp-pass-1234' }).expect(401);
+    expect(locked.body.message).toMatch(/locked/i);
   });
 });
 
@@ -500,5 +507,56 @@ describe('1.10 Audit and change are saved together', () => {
 
     expect((await prisma.store.findUniqueOrThrow({ where: { id: store.id } })).name).toBe('Main Store');
     expect(await prisma.auditLog.count()).toBe(rowsBefore);
+  });
+});
+
+// Found in the launch check of 27 October 2026: a Chennai store could be put under a Karnataka GSTIN.
+describe('1.x a store reports under the GSTIN of its own state', () => {
+  it('refuses a GSTIN of another state, on adding and on changing, and accepts the matching one', async () => {
+    owner = await setUpCompany(app, prisma);
+    const company = await prisma.company.findFirstOrThrow();
+    const ka = await prisma.gstRegistration.create({ data: { companyId: company.id, gstin: '29AAACR1234A1ZZ', stateCode: '29' } });
+    const wrong = await owner.post('/stores').send({ code: 'ANNA', name: 'Anna Nagar', stateCode: '33', gstRegistrationId: ka.id }).expect(400);
+    expect(wrong.body.message).toContain('This store is in Tamil Nadu, but GSTIN 29AAACR1234A1ZZ is for Karnataka');
+    // No GSTIN chosen: the company default (Tamil Nadu) must match too.
+    await owner.post('/stores').send({ code: 'BLR', name: 'Bengaluru', stateCode: '29' }).expect(400);
+    await owner.post('/stores').send({ code: 'BLR', name: 'Bengaluru', stateCode: '29', gstRegistrationId: ka.id }).expect(201);
+    const anna = (await owner.post('/stores').send({ code: 'ANNA', name: 'Anna Nagar', stateCode: '33' }).expect(201)).body;
+    await owner.patch(`/stores/${anna.id}`).send({ gstRegistrationId: ka.id }).expect(400);
+    await owner.patch(`/stores/${anna.id}`).send({ stateCode: '29' }).expect(400);
+    await owner.patch(`/stores/${anna.id}`).send({ name: 'Anna Nagar West' }).expect(200);
+  });
+});
+
+// Code audit, 27 October 2026: someone trusted with "users.manage" or "roles.manage" could make
+// themselves Owner, take over the Owner's login, or give rights they do not have.
+describe('1.5b Nobody can give more than they have', () => {
+  it('a user manager cannot give the Owner role, reset an Owner, or give rights they lack', async () => {
+    owner = await setUpCompany(app, prisma);
+    const hr = (await owner.post('/roles').send({ code: 'user_admin', name: 'User admin', permissions: ['users.view', 'users.manage', 'roles.manage'] }).expect(201)).body as { id: string };
+    const hrUser = await createUser(owner, { firstName: 'Hema', email: 'hema@rademics.test', password: 'Temp-pass-1234', roles: [SYSTEM_ROLES.CASHIER], allStores: true });
+    await prisma.userRole.deleteMany({ where: { userId: hrUser.id } });
+    await prisma.userRole.create({ data: { userId: hrUser.id, roleId: hr.id } });
+    const hema = await loginAndChange('hema@rademics.test', 'Temp-pass-1234', 'Hema-own-pass-9');
+    const ownerRole = await roleId(prisma, SYSTEM_ROLES.OWNER_ADMIN);
+    const ownerUser = await prisma.user.findFirstOrThrow({ where: { email: OWNER.email } });
+
+    // Making herself, or a new person, Owner.
+    await hema.patch(`/users/${hrUser.id}`).send({ roleIds: [ownerRole] }).expect(403);
+    await hema.post('/users').send({ firstName: 'X', email: 'x@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [ownerRole], allStores: true }).expect(403);
+    // Taking over the Owner's login.
+    await hema.post(`/users/${ownerUser.id}/reset-password`).send({ temporaryPassword: 'Taken-over-1234' }).expect(403);
+    await hema.patch(`/users/${ownerUser.id}`).send({ email: 'hema2@rademics.test' }).expect(403);
+    // Giving her own role, or a new one, rights she does not have.
+    await hema.patch(`/roles/${hr.id}`).send({ permissions: ['users.view', 'users.manage', 'roles.manage', 'prices.manage'] }).expect(403);
+    await hema.post('/roles').send({ code: 'super', name: 'Super', permissions: ['company.manage'] }).expect(403);
+
+    expect(await prisma.userRole.count({ where: { roleId: ownerRole } })).toBe(1);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: ownerUser.id } })).email).toBe(OWNER.email);
+    await login(app, OWNER.email, OWNER.password); // the owner's own password still works
+
+    // What she does hold, she may still give.
+    await hema.post('/users').send({ firstName: 'Ravi', email: 'ravi@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [hr.id], allStores: true }).expect(201);
+    await hema.post('/roles').send({ code: 'helper', name: 'Helper', permissions: ['users.view'] }).expect(201);
   });
 });

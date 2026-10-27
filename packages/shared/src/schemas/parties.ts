@@ -3,10 +3,10 @@
 // contacts, payment terms and party settings.
 import { z } from 'zod';
 import { businessDate } from '../business-date.js';
-import { GSTIN_RE, PAN_RE } from '../company.js';
+import { PAN_RE } from '../company.js';
 import { dayMonthYearProblem, EARLIEST_CUSTOMER_YEAR, isDayMonth } from '../customer-dates.js';
 import { isIsoDate } from '../financial-year.js';
-import { TAX_SITUATIONS } from '../gst-core.js';
+import { gstinProblem, TAX_SITUATIONS } from '../gst-core.js';
 import { isStateCode } from '../india.js';
 import { DUE_BASES } from '../payment-terms.js';
 import { itemCode, nonNegativeDecimalString } from './catalogue.js';
@@ -16,7 +16,15 @@ const optionalText = (max: number) => z.string().trim().max(max).optional().null
 const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
 const email = z.string().trim().toLowerCase().email().max(254);
 const mobile = z.string().trim().regex(/^[0-9]{10}$/, 'Mobile number must be 10 digits');
-const gstin = z.string().trim().toUpperCase().regex(GSTIN_RE, 'Not a valid GSTIN');
+// Customers' and suppliers' GSTINs get the full check, check character included (see schemas/index.ts).
+const gstin = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .superRefine((v, ctx) => {
+    const problem = gstinProblem(v, isStateCode);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  });
 const pan = z.string().trim().toUpperCase().regex(PAN_RE, 'Not a valid PAN');
 const stateCode = z.string().refine(isStateCode, 'Unknown GST state code');
 /** Plan 08 G3: empty = worked out from the GSTIN. */

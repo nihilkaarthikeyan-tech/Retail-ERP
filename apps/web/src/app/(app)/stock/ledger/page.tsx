@@ -8,11 +8,34 @@ import { useStockLocations } from "@/components/stock/use-stock-refs";
 import { Alert, Badge, DataTable, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, query } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { rupees } from "@/lib/purchasing";
 import { indianTime, isNegative, KIND_LABELS, locationLabel, showQuantity, storesFromLocations } from "@/lib/stock";
 import type { ItemDto, StockLedgerRow } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 
 const LIMIT = 200;
+
+/**
+ * Every kind of movement in plain words, and where its document is. Found in the launch check
+ * of 27 October 2026: a return showed as "purchase_return", and goods receipts, till bills and
+ * freight linked to the stock documents page.
+ */
+const MOVEMENT_LABELS: Record<string, string> = {
+  ...KIND_LABELS,
+  goods_receipt: "Goods receipt",
+  purchase_return: "Return to supplier",
+  landed_charge: "Freight and charges",
+  pos_sale: "Till sale",
+  pos_return: "Till return",
+};
+
+function movementHref(d: { id: string; kind: string }): string {
+  if (d.kind === "goods_receipt" || d.kind === "purchase_return") return `/purchases/receipts/${d.id}`;
+  if (d.kind === "landed_charge") return `/purchases/charges/${d.id}`;
+  if (d.kind === "pos_sale" || d.kind === "pos_return") return `/pos/bills/${d.id}`;
+  return `/stock/documents/${d.id}`;
+}
+
 
 export default function StockHistoryPage() {
   const locations = useStockLocations();
@@ -42,10 +65,10 @@ export default function StockHistoryPage() {
       render: (r) =>
         r.document ? (
           <>
-            <Link href={`/stock/documents/${r.document.id}`} className="mono">
+            <Link href={movementHref(r.document)} className="mono">
               {r.document.number}
             </Link>
-            <span className="muted"> {KIND_LABELS[r.document.kind] ?? r.document.kind}</span>
+            <span className="muted"> {MOVEMENT_LABELS[r.document.kind] ?? r.document.kind}</span>
           </>
         ) : (
           "—"
@@ -76,10 +99,10 @@ export default function StockHistoryPage() {
     { key: "after", header: "Quantity after", align: "right", render: (r) => <span className={isNegative(r.quantityAfter) ? "num-negative" : undefined}>{showQuantity(r.quantityAfter)}</span> },
     ...(withCost
       ? [
-          { key: "cost", header: "Cost per unit", align: "right", render: (r: StockLedgerRow) => r.unitCost ?? "—" },
-          { key: "value", header: "Value change", align: "right", render: (r: StockLedgerRow) => r.valueChange ?? "—" },
-          { key: "costAfter", header: "Cost after", align: "right", render: (r: StockLedgerRow) => r.unitCostAfter ?? "—" },
-          { key: "valueAfter", header: "Value after", align: "right", render: (r: StockLedgerRow) => r.valueAfter ?? "—" },
+          { key: "cost", header: "Cost per unit", align: "right", render: (r: StockLedgerRow) => rupees(r.unitCost) },
+          { key: "value", header: "Value change", align: "right", render: (r: StockLedgerRow) => rupees(r.valueChange) },
+          { key: "costAfter", header: "Cost after", align: "right", render: (r: StockLedgerRow) => rupees(r.unitCostAfter) },
+          { key: "valueAfter", header: "Value after", align: "right", render: (r: StockLedgerRow) => rupees(r.valueAfter) },
         ] satisfies Column<StockLedgerRow>[]
       : []),
     {

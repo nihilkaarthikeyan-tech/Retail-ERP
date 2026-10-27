@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
+import { rupees } from "@/lib/purchasing";
 import { useState } from "react";
 import { hasPermission } from "shared";
 import { Alert, CheckInput, DataTable, SelectInput, TextInput, type Column } from "@/components/ui";
@@ -51,8 +52,8 @@ export function StockBalanceTable({ result, loading }: { result: StockBalanceRes
     },
     ...(withCost
       ? [
-          { key: "cost", header: "Cost per unit", align: "right", render: (r: StockBalanceRow) => r.unitCost ?? "—" },
-          { key: "value", header: "Value", align: "right", render: (r: StockBalanceRow) => r.value ?? "—" },
+          { key: "cost", header: "Cost per unit", align: "right", render: (r: StockBalanceRow) => rupees(r.unitCost) },
+          { key: "value", header: "Value", align: "right", render: (r: StockBalanceRow) => rupees(r.value) },
         ] satisfies Column<StockBalanceRow>[]
       : []),
   ];
@@ -61,7 +62,7 @@ export function StockBalanceTable({ result, loading }: { result: StockBalanceRes
       <DataTable columns={columns} rows={rows} rowKey={(r) => `${r.item.id}-${r.location.id}`} loading={loading} empty="No stock matches." />
       {result?.totals.value !== undefined ? (
         <p>
-          <strong>Total value: ₹{result.totals.value}</strong>
+          <strong>Total value: {rupees(result.totals.value)}</strong>
         </p>
       ) : null}
     </>

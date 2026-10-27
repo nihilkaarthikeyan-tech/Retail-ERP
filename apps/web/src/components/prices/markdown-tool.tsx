@@ -10,11 +10,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { hasPermission, type MarkdownInput, markdownSchema } from "shared";
 import { ItemPicker } from "@/components/prices/item-picker";
-import { Alert, Badge, Button, DataTable, RadioInput, SelectInput, TextInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, CheckInput, DataTable, Field, RadioInput, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups } from "@/lib/catalogue";
 import { formatDate } from "@/lib/format";
+import { forPicking, pickLabel } from "@/lib/pick";
 import { rupees } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
 import type { MarkdownDto, MarkdownLineDto, MarkdownPreviewDto, SeasonDto } from "@/lib/styles-seasons";
@@ -34,7 +35,7 @@ interface Choice {
   remark: string;
 }
 
-const selected = (e: { target: HTMLSelectElement }) => [...e.target.selectedOptions].map((o) => o.value).filter(Boolean);
+const toggled = (list: string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((x) => x !== id));
 
 export function MarkdownTool() {
   const { user } = useAuth();
@@ -152,22 +153,21 @@ export function MarkdownTool() {
                   </option>
                 ))}
               </SelectInput>
-              <SelectInput id="md-groups" label="Groups" multiple size={5} value={c.itemGroupIds} onChange={(e) => change({ itemGroupIds: selected(e) })} hint="Hold Ctrl to choose more than one; a group includes its sub-groups.">
-                {groupOptions.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.label}
-                  </option>
-                ))}
-              </SelectInput>
-              <SelectInput id="md-brands" label="Brands" multiple size={5} value={c.brandIds} onChange={(e) => change({ brandIds: selected(e) })} hint="Hold Ctrl to choose more than one.">
-                {(brands.data ?? [])
-                  .filter((b) => b.active)
-                  .map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
+              {/* Launch check, 27 October 2026: tick boxes, not "Hold Ctrl", which most people do not know and a phone cannot do. */}
+              <Field id="md-groups" label="Groups" hint="Tick any number; a group includes its sub-groups. None ticked: any group.">
+                <div id="md-groups" className="check-list check-list-short">
+                  {groupOptions.map((g) => (
+                    <CheckInput key={g.id} id={`md-group-${g.id}`} label={g.label} checked={c.itemGroupIds.includes(g.id)} onChange={(e) => change({ itemGroupIds: toggled(c.itemGroupIds, g.id, e.target.checked) })} />
                   ))}
-              </SelectInput>
+                </div>
+              </Field>
+              <Field id="md-brands" label="Brands" hint="Tick any number. None ticked: any brand.">
+                <div id="md-brands" className="check-list check-list-short">
+                  {forPicking(brands.data ?? [], c.brandIds).map((b) => (
+                    <CheckInput key={b.id} id={`md-brand-${b.id}`} label={pickLabel(b.name, b)} checked={c.brandIds.includes(b.id)} onChange={(e) => change({ brandIds: toggled(c.brandIds, b.id, e.target.checked) })} />
+                  ))}
+                </div>
+              </Field>
               <div>
                 <ItemPicker id="md-item" label="Add an item or style" value={null} excludeStyles={false} onChange={(i) => i && !c.items.some((x) => x.id === i.id) && change({ items: [...c.items, i] })} />
                 {c.items.length ? (

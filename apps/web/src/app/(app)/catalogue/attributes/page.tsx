@@ -34,6 +34,14 @@ function numberOrNull(text: string): number | null {
   return t === "" ? null : Number(t);
 }
 
+/** The list with one entry moved from one place to another. */
+function move<T>(list: T[], from: number, to: number): T[] {
+  const next = [...list];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
 export default function AttributesPage() {
   const { user } = useAuth();
   const canManage = hasPermission(user, "catalogue.manage");
@@ -158,7 +166,7 @@ export default function AttributesPage() {
           {form.kind === "list" ? (
             <>
               <h3>Values</h3>
-              {editing !== "new" ? <p className="muted">Values used by existing variants cannot be renamed or removed.</p> : null}
+              {editing !== "new" ? <p className="muted">Values used by existing variants cannot be renamed or removed. The arrows set the order sizes and colours appear in.</p> : null}
               {errors.values ? <p className="field-error">{errors.values}</p> : null}
               <div className="table-wrap">
                 <table className="table">
@@ -186,7 +194,14 @@ export default function AttributesPage() {
                           <input id={`attr-short-${i}`} className="input mono" value={v.shortCode} onChange={(e) => setValue(i, { shortCode: e.target.value })} autoComplete="off" />
                           {errors[`values.${i}.shortCode`] ? <p className="field-error">{errors[`values.${i}.shortCode`]}</p> : null}
                         </td>
-                        <td>
+                        <td className="row-actions">
+                          {/* The order here is the order of sizes in the grid, on the till and in reports. */}
+                          <Button size="small" disabled={i === 0} onClick={() => setForm((f) => ({ ...f, values: move(f.values, i, i - 1) }))} aria-label={`Move value ${i + 1} up`}>
+                            ↑
+                          </Button>
+                          <Button size="small" disabled={i === form.values.length - 1} onClick={() => setForm((f) => ({ ...f, values: move(f.values, i, i + 1) }))} aria-label={`Move value ${i + 1} down`}>
+                            ↓
+                          </Button>
                           <Button size="small" variant="danger" onClick={() => setForm((f) => ({ ...f, values: f.values.filter((_, j) => j !== i) }))} aria-label={`Remove value ${i + 1}`}>
                             Remove
                           </Button>

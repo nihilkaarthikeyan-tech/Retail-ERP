@@ -29,9 +29,21 @@ describe("BuyerDialog", () => {
     expect(screen.getByText(/typing mistake/)).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: KA } });
-    expect(screen.getByText("From the GSTIN: 29")).toBeTruthy();
+    expect(screen.getByText("From the GSTIN: Karnataka (29)")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save buyer" }));
     expect(onSave).toHaveBeenCalledWith({ gstin: KA, name: "Kaveri Traders", address: "12 MG Road, Bengaluru", stateCode: "29" });
+  });
+
+  // Launch check, 27 October 2026.
+  it("a GSTIN of a saved customer fills in the name, but never over one already typed", () => {
+    const customers = [{ name: "Kaveri Traders", gstin: KA }];
+    render(<BuyerDialog open current={null} defaults={{ name: "" }} customers={customers} onSave={() => undefined} onClose={() => undefined} />);
+    fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: KA.toLowerCase() } });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Kaveri Traders");
+    cleanup();
+    render(<BuyerDialog open current={null} defaults={{ name: "Ravi" }} customers={customers} onSave={() => undefined} onClose={() => undefined} />);
+    fireEvent.change(screen.getByLabelText("GSTIN"), { target: { value: KA } });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Ravi");
   });
 
   it("a business invoice needs the name and address", () => {

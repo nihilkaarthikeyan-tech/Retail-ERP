@@ -6,6 +6,7 @@ import { AuthService, userAccessInclude, type UserWithAccess } from '../auth/aut
 import { hashPassword } from '../auth/password.js';
 import type { Actor } from '../common/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { assertCanGiveRoles, assertCanTouchUser, callerRights } from './delegation.js';
 
 @Injectable()
 export class UsersService {
@@ -27,6 +28,7 @@ export class UsersService {
   }
 
   async create(input: CreateUserInput, actor: Actor) {
+    await assertCanGiveRoles(this.prisma, await callerRights(this.prisma, actor.userId), input.roleIds);
     if (await this.prisma.user.findUnique({ where: { email: input.email } })) {
       throw new ConflictException(`A user with email ${input.email} already exists`);
     }
@@ -71,6 +73,9 @@ export class UsersService {
   async update(id: string, input: UpdateUserInput, actor: Actor) {
     const before = await this.prisma.user.findUnique({ where: { id }, include: userAccessInclude });
     if (!before) throw new NotFoundException('User not found');
+    const caller = await callerRights(this.prisma, actor.userId);
+    await assertCanTouchUser(this.prisma, caller, id);
+    if (input.roleIds) await assertCanGiveRoles(this.prisma, caller, input.roleIds.filter((r) => !before.roles.some((b) => b.roleId === r)));
     if (input.active === false && id === actor.userId) {
       throw new BadRequestException('You cannot switch off your own account');
     }
@@ -112,6 +117,8 @@ export class UsersService {
           lastName: input.lastName,
           mobile: input.mobile,
           active: input.active,
+          // A new email is not confirmed yet (code audit: the old confirmation carried over).
+          ...(input.email && input.email !== before.email ? { emailVerifiedAt: null } : {}),
           updatedById: actor.userId,
           ...(access
             ? {
@@ -136,6 +143,7 @@ export class UsersService {
   async resetPassword(id: string, input: ResetPasswordInput, actor: Actor) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
+    await assertCanTouchUser(this.prisma, await callerRights(this.prisma, actor.userId), id);
     await this.auth.assertPasswordAllowed(input.temporaryPassword);
     const passwordHash = await hashPassword(input.temporaryPassword);
     await this.prisma.$transaction(async (tx) => {
@@ -150,6 +158,7 @@ export class UsersService {
 
   async endSessions(id: string, actor: Actor) {
     if (!(await this.prisma.user.findUnique({ where: { id } }))) throw new NotFoundException('User not found');
+    await assertCanTouchUser(this.prisma, await callerRights(this.prisma, actor.userId), id);
     return this.prisma.$transaction((tx) => this.auth.endAllSessions(tx, id, actor));
   }
 

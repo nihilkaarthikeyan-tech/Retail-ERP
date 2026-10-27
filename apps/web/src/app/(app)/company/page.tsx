@@ -88,7 +88,7 @@ function CompanyDetailsForm({ company: c, canManage, onSaved }: { company: Compa
         <dt>Home currency</dt>
         <dd>{c.homeCurrency}</dd>
         <dt>Financial year starts</dt>
-        <dd>month {c.fiscalYearStartMonth}</dd>
+        <dd>{new Date(2000, c.fiscalYearStartMonth - 1, 1).toLocaleString("en-IN", { month: "long" })}</dd>
       </dl>
       <h2>Details</h2>
       <Alert kind="error">{error}</Alert>

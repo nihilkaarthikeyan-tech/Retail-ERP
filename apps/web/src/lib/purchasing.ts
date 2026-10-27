@@ -243,6 +243,8 @@ export interface ReorderSuggestionDto {
   store: Ref | null;
   item: { id: string; code: string; name: string; baseUnitId: string } | null;
   supplier: Ref | null;
+  /** "usual" when set on the item; "last" when it is the supplier it was last bought from. */
+  supplierSource?: "usual" | "last" | null;
   onHand: string;
   onOrder: string;
   reorderLevel: string;
@@ -369,7 +371,9 @@ export function purchaseRights(user: CurrentUser | null) {
 
 /** Rows to CSV text (opens in Excel); every value is quoted. Decision 65: fixed reports with export. */
 export function toCsv(headers: string[], rows: (string | number | null | undefined)[][]): string {
-  const cell = (v: string | number | null | undefined) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  // Code audit, 27 October 2026: text starting with = + - @ would run as a formula in Excel.
+  const safe = (s: string) => (/^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s) ? `'${s}` : s);
+  const cell = (v: string | number | null | undefined) => `"${(typeof v === "string" ? safe(v) : String(v ?? "")).replace(/"/g, '""')}"`;
   return [headers.map(cell).join(","), ...rows.map((r) => r.map(cell).join(","))].join("\r\n");
 }
 

@@ -85,7 +85,7 @@ describe("GST at the till (plan 08)", () => {
     const tx = buildTransaction({ ...d, payments: [{ methodId: CASH, amount: "1050", reference: "" }] }, bill, snapshot().till.paymentMethods, options(true));
     expect(tx.buyer).toEqual({ gstin: KA_GSTIN, name: "Kaveri Traders", address: "12 MG Road, Bengaluru" });
     const [receipt] = localReceipts(bill, { sale: `${PREFIX}000042` }, { soldAt: "2026-10-18T05:00:00.000Z", till: snapshot().till, payments: tx.payments, change: bill.net.sub(bill.net), extras: { buyer } });
-    expect(receipt.gst).toMatchObject({ title: "Tax invoice", invoiceKind: "business", sellerGstin: "33AAAAA0000A1Z5", buyer: { gstin: KA_GSTIN, name: "Kaveri Traders", state: { code: "29", name: "Karnataka" } }, placeOfSupply: { code: "29", name: "Karnataka" } });
+    expect(receipt.gst).toMatchObject({ title: "Tax invoice", invoiceKind: "business", sellerGstin: "33AAAAA0000A1Z9", buyer: { gstin: KA_GSTIN, name: "Kaveri Traders", state: { code: "29", name: "Karnataka" } }, placeOfSupply: { code: "29", name: "Karnataka" } });
     expect(receipt.lines[0].hsn).toBe("6205");
   });
 

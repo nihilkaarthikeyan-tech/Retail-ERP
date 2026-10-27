@@ -23,11 +23,11 @@ export interface MenuEntry {
 export type MenuArea = "sales" | "stock" | "purchase" | "accounts" | "admin";
 
 const SECTION_AREA: Record<string, MenuArea> = {
-  Catalogue: "sales",
-  Parties: "accounts",
+  Items: "sales",
+  "Customers and suppliers": "accounts",
   Purchases: "purchase",
   "Billing counter": "sales",
-  Inventory: "stock",
+  Stock: "stock",
   Accounts: "accounts",
   Reports: "sales",
   "Printing and data": "admin",
@@ -41,46 +41,8 @@ export function areaOf(section: string | undefined): MenuArea {
 
 export const MENU: MenuEntry[] = [
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
-  // Module 2
-  { href: "/items", label: "Items", permissions: ["catalogue.view"], section: "Catalogue", icon: "box" },
-  { href: "/catalogue/item-groups", label: "Item groups", permissions: ["catalogue.view"], section: "Catalogue", icon: "folder" },
-  { href: "/catalogue/brands", label: "Brands", permissions: ["catalogue.view"], section: "Catalogue", icon: "tag" },
-  { href: "/catalogue/units", label: "Units", permissions: ["catalogue.view"], section: "Catalogue", icon: "ruler" },
-  { href: "/catalogue/attributes", label: "Attributes", permissions: ["catalogue.view"], section: "Catalogue", icon: "sliders", module: "variants" },
-  { href: "/catalogue/hsn-codes", label: "HSN codes", permissions: ["catalogue.view"], section: "Catalogue", icon: "receipt" },
-  // Plan 11 C4, C5
-  { href: "/catalogue/seasons", label: "Seasons", permissions: ["catalogue.view"], section: "Catalogue", icon: "calendar", module: "seasons" },
-  { href: "/price-lists", label: "Price lists", permissions: ["prices.view"], section: "Catalogue", icon: "list" },
-  { href: "/prices", label: "Prices", permissions: ["prices.view"], section: "Catalogue", icon: "rupee" },
-  { href: "/markdowns", label: "Markdowns", permissions: ["prices.view"], section: "Catalogue", icon: "percent", module: "seasons" },
-  // Module 3
-  { href: "/customers", label: "Customers", permissions: ["customers.view"], section: "Parties", icon: "users" },
-  { href: "/customers/birthdays", label: "Birthdays this week", permissions: ["customers.view"], section: "Parties", icon: "calendar" },
-  { href: "/suppliers", label: "Suppliers", permissions: ["suppliers.view"], section: "Parties", icon: "truck" },
-  { href: "/customer-groups", label: "Customer groups", permissions: ["customers.view"], section: "Parties", icon: "folder" },
-  { href: "/supplier-groups", label: "Supplier groups", permissions: ["suppliers.view"], section: "Parties", icon: "folder" },
-  { href: "/payment-terms", label: "Payment terms", permissions: ["customers.view"], section: "Parties", icon: "calendar" },
-  // Module 4
-  { href: "/stock", label: "Stock on hand", permissions: ["stock.view"], section: "Inventory", exact: true, icon: "layers" },
-  { href: "/stock/documents", label: "Stock documents", permissions: ["stock.view"], section: "Inventory", icon: "file" },
-  { href: "/stock/transfers", label: "In transit", permissions: ["stock.view"], section: "Inventory", icon: "transfer", module: "transfers" },
-  { href: "/stock/ledger", label: "Stock history", permissions: ["stock.view"], section: "Inventory", icon: "history" },
-  { href: "/stock/batches", label: "Batches", permissions: ["stock.view"], section: "Inventory", icon: "clock", module: "batches" },
-  { href: "/stock/exceptions", label: "Negative stock", permissions: ["stock.view"], section: "Inventory", icon: "alert" },
-  { href: "/stock/locations", label: "Locations", permissions: ["stock.view"], section: "Inventory", icon: "pin" },
-  { href: "/stock/reorder-levels", label: "Reorder levels", permissions: ["stock.view"], section: "Inventory", icon: "refresh" },
-  // Module 5
-  { href: "/purchases/orders", label: "Purchase orders", permissions: ["purchase.view"], section: "Purchases", icon: "file", module: "purchase_orders" },
-  { href: "/purchases/receipts", label: "Goods receipts", permissions: ["purchase.view"], section: "Purchases", icon: "truck" },
-  { href: "/purchases/bills", label: "Supplier bills", permissions: ["purchase.view"], section: "Purchases", icon: "receipt" },
-  { href: "/purchases/charges", label: "Freight and charges", permissions: ["purchase.view"], section: "Purchases", icon: "rupee" },
-  // Plan 11 part 2: supplier sale-or-return
-  { href: "/purchases/consignment", label: "Sale or return", permissions: ["purchase.view"], section: "Purchases", icon: "layers", module: "consignment" },
-  { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
-  { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
-  // Plan 08 §3: GST on purchases.
-  { href: "/purchases/tax-register", label: "Purchase tax register", permissions: ["gst.input_credit"], section: "Purchases", icon: "receipt" },
-  { href: "/purchases/input-credit", label: "Input credit matching", permissions: ["gst.input_credit"], section: "Purchases", icon: "upload" },
+  // Owner, 27 October 2026: groups in the order a shop works through its day, billing first,
+  // set-up last; plain names (Items, Stock, Customers and suppliers).
   // Module 6
   { href: "/till", label: "Open the till", permissions: ["pos.sell"], section: "Billing counter", icon: "receipt" },
   { href: "/pos/bills", label: "Till bills", permissions: ["pos.sell", "pos.reports"], section: "Billing counter", icon: "list" },
@@ -98,6 +60,46 @@ export const MENU: MenuEntry[] = [
   { href: "/pos/payment-methods", label: "Payment methods", permissions: ["pos.setup"], section: "Billing counter", icon: "rupee" },
   { href: "/pos/gst-rates", label: "GST rates", permissions: ["gst_rates.manage"], section: "Billing counter", icon: "percent" },
   { href: "/pos/my-pin", label: "My till PIN", permissions: ["pos.sell", "pos.approve"], section: "Billing counter", icon: "key" },
+  // Module 2
+  { href: "/items", label: "Items", permissions: ["catalogue.view"], section: "Items", icon: "box" },
+  { href: "/catalogue/item-groups", label: "Item groups", permissions: ["catalogue.view"], section: "Items", icon: "folder" },
+  { href: "/catalogue/brands", label: "Brands", permissions: ["catalogue.view"], section: "Items", icon: "tag" },
+  { href: "/catalogue/units", label: "Units", permissions: ["catalogue.view"], section: "Items", icon: "ruler" },
+  { href: "/catalogue/attributes", label: "Attributes", permissions: ["catalogue.view"], section: "Items", icon: "sliders", module: "variants" },
+  { href: "/catalogue/hsn-codes", label: "HSN codes", permissions: ["catalogue.view"], section: "Items", icon: "receipt" },
+  // Plan 11 C4, C5
+  { href: "/catalogue/seasons", label: "Seasons", permissions: ["catalogue.view"], section: "Items", icon: "calendar", module: "seasons" },
+  { href: "/price-lists", label: "Price lists", permissions: ["prices.view"], section: "Items", icon: "list" },
+  { href: "/prices", label: "Prices", permissions: ["prices.view"], section: "Items", icon: "rupee" },
+  { href: "/markdowns", label: "Markdowns", permissions: ["prices.view"], section: "Items", icon: "percent", module: "seasons" },
+  // Module 4
+  { href: "/stock", label: "Stock on hand", permissions: ["stock.view"], section: "Stock", exact: true, icon: "layers" },
+  { href: "/stock/documents", label: "Stock documents", permissions: ["stock.view"], section: "Stock", icon: "file" },
+  { href: "/stock/transfers", label: "In transit", permissions: ["stock.view"], section: "Stock", icon: "transfer", module: "transfers" },
+  { href: "/stock/ledger", label: "Stock history", permissions: ["stock.view"], section: "Stock", icon: "history" },
+  { href: "/stock/batches", label: "Batches", permissions: ["stock.view"], section: "Stock", icon: "clock", module: "batches" },
+  { href: "/stock/exceptions", label: "Negative stock", permissions: ["stock.view"], section: "Stock", icon: "alert" },
+  { href: "/stock/locations", label: "Locations", permissions: ["stock.view"], section: "Stock", icon: "pin" },
+  { href: "/stock/reorder-levels", label: "Reorder levels", permissions: ["stock.view"], section: "Stock", icon: "refresh" },
+  // Module 5
+  { href: "/purchases/orders", label: "Purchase orders", permissions: ["purchase.view"], section: "Purchases", icon: "file", module: "purchase_orders" },
+  { href: "/purchases/receipts", label: "Goods receipts", permissions: ["purchase.view"], section: "Purchases", icon: "truck" },
+  { href: "/purchases/bills", label: "Supplier bills", permissions: ["purchase.view"], section: "Purchases", icon: "receipt" },
+  { href: "/purchases/charges", label: "Freight and charges", permissions: ["purchase.view"], section: "Purchases", icon: "rupee" },
+  // Plan 11 part 2: supplier sale-or-return
+  { href: "/purchases/consignment", label: "Sale or return", permissions: ["purchase.view"], section: "Purchases", icon: "layers", module: "consignment" },
+  { href: "/purchases/reorder", label: "Reorder suggestions", permissions: ["purchase.view"], section: "Purchases", icon: "refresh" },
+  { href: "/purchases/reports", label: "Purchase reports", permissions: ["purchase.view"], section: "Purchases", icon: "list" },
+  // Plan 08 §3: GST on purchases.
+  { href: "/purchases/tax-register", label: "Purchase tax register", permissions: ["gst.input_credit"], section: "Purchases", icon: "receipt" },
+  { href: "/purchases/input-credit", label: "Input credit matching", permissions: ["gst.input_credit"], section: "Purchases", icon: "upload" },
+  // Module 3
+  { href: "/customers", label: "Customers", permissions: ["customers.view"], section: "Customers and suppliers", icon: "users" },
+  { href: "/customers/birthdays", label: "Birthdays this week", permissions: ["customers.view"], section: "Customers and suppliers", icon: "calendar" },
+  { href: "/suppliers", label: "Suppliers", permissions: ["suppliers.view"], section: "Customers and suppliers", icon: "truck" },
+  { href: "/customer-groups", label: "Customer groups", permissions: ["customers.view"], section: "Customers and suppliers", icon: "folder" },
+  { href: "/supplier-groups", label: "Supplier groups", permissions: ["suppliers.view"], section: "Customers and suppliers", icon: "folder" },
+  { href: "/payment-terms", label: "Payment terms", permissions: ["customers.view"], section: "Customers and suppliers", icon: "calendar" },
   // Module 7
   { href: "/accounts", label: "Chart of accounts", permissions: ["accounts.view", "accounts.manage"], section: "Accounts", exact: true, icon: "book" },
   { href: "/accounts/journals", label: "Journals", permissions: ["accounts.view", "journals.post", "cash.deposit"], section: "Accounts", icon: "file" },

@@ -4,8 +4,7 @@ import {
   type CreateGstRegistrationInput,
   gstinStateCode,
   type UpdateCompanyInput,
-  type UpdateGstRegistrationInput,
-} from 'shared';
+  type UpdateGstRegistrationInput, stateWithCode } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Company } from '../generated/prisma/client.js';
@@ -64,7 +63,7 @@ export class CompanyService {
     }
     const stateCode = gstinStateCode(input.gstin);
     if (input.stateCode && input.stateCode !== stateCode) {
-      throw new BadRequestException(`GSTIN ${input.gstin} belongs to state code ${stateCode}`);
+      throw new BadRequestException(`GSTIN ${input.gstin} is for ${stateWithCode(stateCode)}, not ${stateWithCode(input.stateCode)}`);
     }
     const count = await db.gstRegistration.count({ where: { companyId, active: true } });
     const isDefault = input.isDefault ?? count === 0;
@@ -100,7 +99,7 @@ export class CompanyService {
     const before = await this.prisma.gstRegistration.findFirst({ where: { id, companyId: company.id } });
     if (!before) throw new NotFoundException('GST registration not found');
     if (input.stateCode && input.stateCode !== before.stateCode) {
-      throw new BadRequestException(`GSTIN ${before.gstin} belongs to state code ${before.stateCode}`);
+      throw new BadRequestException(`GSTIN ${before.gstin} is for ${stateWithCode(before.stateCode)}`);
     }
     if (input.active === false) {
       if (before.isDefault) {

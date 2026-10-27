@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { businessDate, type CreateSupplierInput, type CurrentUser, gstinStateCode, hasPermission, panFromGstin, type SupplierHoldInput, type SupplierQuery, type UpdateSupplierInput } from 'shared';
+import { businessDate, type CreateSupplierInput, type CurrentUser, gstinStateCode, hasPermission, panFromGstin, type SupplierHoldInput, type SupplierQuery, type UpdateSupplierInput, stateWithCode } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
@@ -209,7 +209,7 @@ export class SuppliersService {
   private checkTax(gstin: string | null, pan: string | null, stateCode: string | null) {
     if (!gstin) return { stateCode, pan };
     const fromGstin = gstinStateCode(gstin);
-    if (stateCode && stateCode !== fromGstin) throw new BadRequestException(`GSTIN ${gstin} belongs to state code ${fromGstin}, not ${stateCode}`);
+    if (stateCode && stateCode !== fromGstin) throw new BadRequestException(`GSTIN ${gstin} is for ${stateWithCode(fromGstin)}, not ${stateWithCode(stateCode)}`);
     const panInGstin = panFromGstin(gstin);
     if (pan && pan !== panInGstin) throw new BadRequestException(`PAN ${pan} does not match the PAN inside GSTIN ${gstin}`);
     return { stateCode: fromGstin, pan: pan ?? panInGstin };

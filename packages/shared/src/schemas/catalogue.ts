@@ -280,6 +280,20 @@ export const createPriceSchema = z
   .refine((p) => !(p.customerId && p.supplierId), { message: 'A price is for a customer or a supplier, not both' });
 export type CreatePriceInput = z.infer<typeof createPriceSchema>;
 
+/**
+ * One price for every size and colour of a style (found in the launch check of 27 October
+ * 2026: a style's 30 variants had to be priced one by one). Each variant still gets its own
+ * price (blueprint 04: prices are on variants, not on the style); variants that already have
+ * a price in the list on that date are left as they are.
+ */
+export const stylePriceSchema = z.object({
+  styleId: z.string().uuid(),
+  priceListId: z.string().uuid(),
+  price: nonNegativeDecimalString,
+  startDate: isoDate.optional(),
+});
+export type StylePriceInput = z.infer<typeof stylePriceSchema>;
+
 export const updatePriceSchema = z.object({ price: nonNegativeDecimalString, endDate: isoDate.nullable() }).partial();
 export type UpdatePriceInput = z.infer<typeof updatePriceSchema>;
 

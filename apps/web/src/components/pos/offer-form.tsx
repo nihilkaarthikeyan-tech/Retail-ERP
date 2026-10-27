@@ -14,6 +14,7 @@ import { showQuantity, storesFromLocations } from "@/lib/stock";
 import type { BrandDto, ItemDto, ItemGroupNode, PartyGroupNode, PartyRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { forPicking, pickLabel } from "@/lib/pick";
 import { type CouponDto, OFFER_KIND_LABELS, OFFER_TARGET_LABELS, type OfferDto, type OfferKind, type OfferTarget } from "./pos-shared";
 
 interface OfferFormState {
@@ -278,8 +279,8 @@ export function OfferForm({ offer, today, onSaved, onCancel }: { offer: OfferDto
       ) : form.appliesTo === "brands" ? (
         <Field id="offer-targets" label="Brands" error={errors.targetIds}>
           <div id="offer-targets" className="check-list">
-            {(brands.data ?? []).map((b) => (
-              <CheckInput key={b.id} id={`offer-brand-${b.id}`} label={b.name} checked={form.targetIds.includes(b.id)} onChange={(e) => set("targetIds", toggle(form.targetIds, b.id, e.target.checked))} />
+            {forPicking(brands.data ?? [], form.targetIds).map((b) => (
+              <CheckInput key={b.id} id={`offer-brand-${b.id}`} label={pickLabel(b.name, b)} checked={form.targetIds.includes(b.id)} onChange={(e) => set("targetIds", toggle(form.targetIds, b.id, e.target.checked))} />
             ))}
           </div>
         </Field>

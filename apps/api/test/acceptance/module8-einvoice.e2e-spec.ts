@@ -51,7 +51,7 @@ async function fresh() {
   MAIN = await storeId(prisma, 'MAIN');
   const company = await prisma.company.findFirstOrThrow();
   // Seller addresses (the e-invoice needs address, town and PIN code).
-  await prisma.gstRegistration.updateMany({ where: { gstin: '33AAACR1234A1ZV' }, data: { addressLine1: '1 Anna Salai', city: 'Chennai', pincode: '600002' } });
+  await prisma.gstRegistration.updateMany({ where: { gstin: '33AAACR1234A1ZA' }, data: { addressLine1: '1 Anna Salai', city: 'Chennai', pincode: '600002' } });
   await prisma.store.update({ where: { id: MAIN }, data: { addressLine1: '1 Anna Salai', city: 'Chennai', pincode: '600002', stateCode: '33' } });
   const ka = await prisma.gstRegistration.create({ data: { companyId: company.id, gstin: OWN_KA_GSTIN, stateCode: '29', addressLine1: '12 MG Road', city: 'Bengaluru', pincode: '560001' } });
   await owner.post('/stores').send({ code: 'BLR', name: 'Bengaluru', addressLine1: '12 MG Road', city: 'Bengaluru', pincode: '560001', stateCode: '29', gstRegistrationId: ka.id }).expect(201);
@@ -116,7 +116,7 @@ describe('8.10 e-invoice and e-way bill files', () => {
     const res = (await owner.post('/gst/e-invoices/export').send({}).expect(200)).body;
     expect(res.count).toBe(1);
     expect(res.skipped).toEqual([]);
-    expect(res.fileName).toMatch(/^e-invoices-33AAACR1234A1ZV-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(res.fileName).toMatch(/^e-invoices-33AAACR1234A1ZA-\d{4}-\d{2}-\d{2}\.json$/);
     const file = JSON.parse(res.content);
     expect(Array.isArray(file)).toBe(true);
     const inv = file[0];
@@ -124,7 +124,7 @@ describe('8.10 e-invoice and e-way bill files', () => {
     expect(inv.TranDtls).toMatchObject({ TaxSch: 'GST', SupTyp: 'B2B' });
     expect(inv.DocDtls).toMatchObject({ Typ: 'INV', No: bill.number });
     expect(inv.DocDtls.Dt).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
-    expect(inv.SellerDtls).toMatchObject({ Gstin: '33AAACR1234A1ZV', LglNm: 'Rademics Retail Pvt Ltd', Addr1: '1 Anna Salai', Loc: 'Chennai', Pin: 600002, Stcd: '33' });
+    expect(inv.SellerDtls).toMatchObject({ Gstin: '33AAACR1234A1ZA', LglNm: 'Rademics Retail Pvt Ltd', Addr1: '1 Anna Salai', Loc: 'Chennai', Pin: 600002, Stcd: '33' });
     expect(inv.BuyerDtls).toMatchObject({ Gstin: BUYER_GSTIN, LglNm: 'Kaveri Traders', Pos: '29', Stcd: '29', Pin: 560025, Loc: 'Bengaluru' });
     expect(inv.ItemList).toHaveLength(1);
     expect(inv.ItemList[0]).toMatchObject({ SlNo: '1', IsServc: 'N', HsnCd: '62052000', Qty: 1, Unit: 'PCS', AssAmt: 1000, GstRt: 5, IgstAmt: 50, CgstAmt: 0, SgstAmt: 0, TotItemVal: 1050 });
@@ -134,7 +134,7 @@ describe('8.10 e-invoice and e-way bill files', () => {
   });
 
   it('importing the portal’s response attaches the IRN and signed QR, which then print', async () => {
-    const qr = jwt({ data: JSON.stringify({ SellerGstin: '33AAACR1234A1ZV', BuyerGstin: BUYER_GSTIN, DocNo: bill.number, DocTyp: 'INV', TotInvVal: 1050, ItemCnt: 1, MainHsnCode: '62052000', Irn: IRN }), iss: 'NIC' });
+    const qr = jwt({ data: JSON.stringify({ SellerGstin: '33AAACR1234A1ZA', BuyerGstin: BUYER_GSTIN, DocNo: bill.number, DocTyp: 'INV', TotInvVal: 1050, ItemCnt: 1, MainHsnCode: '62052000', Irn: IRN }), iss: 'NIC' });
     const answer = JSON.stringify([{ AckNo: 112610000000123, AckDt: '2026-10-18 15:18:00', Irn: IRN, SignedInvoice: 'x.y.z', SignedQRCode: qr, Status: 'ACT' }]);
     const summary = (await owner.post('/gst/e-invoices/import').attach('file', Buffer.from(answer), 'irn-result.json').expect(200)).body;
     expect(summary).toMatchObject({ registered: 1, failed: 0, unmatched: [] });
@@ -225,12 +225,12 @@ describe('8.10 e-invoice and e-way bill files', () => {
     expect(file.version).toBe('1.0.0621');
     expect(file.billLists).toHaveLength(1);
     expect(file.billLists[0]).toMatchObject({
-      userGstin: '33AAACR1234A1ZV',
+      userGstin: '33AAACR1234A1ZA',
       supplyType: 'O',
       subSupplyType: 1,
       docType: 'INV',
       docNo: 'TS-2627-000001',
-      fromGstin: '33AAACR1234A1ZV',
+      fromGstin: '33AAACR1234A1ZA',
       fromPincode: 600002,
       fromStateCode: 33,
       toGstin: OWN_KA_GSTIN,

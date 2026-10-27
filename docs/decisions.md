@@ -44,6 +44,26 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | Bank statement formats | 53 |
 | Old software to import from | 77 |
 | Final list of launch integrations | 79 |
+| Points from the launch check of 27 October 2026 | L1–L10 and L12 below (L11 decided) |
+
+### Waiting for the owner: points from the launch check (27 October 2026)
+
+Found while testing every screen and auditing the code before launch (`docs/launch-check.md`, problem numbers in brackets). Nothing below is built until the owner records a decision here. Each has a recommendation.
+
+| No. | Topic | The question | Recommendation |
+| --- | --- | --- | --- |
+| L1 | HSN codes (27) | The HSN list starts empty, but the GST return's HSN summary needs a description per code. Fill in the common codes of each shop type at set-up, with the official CBIC descriptions? | Yes: fewer typing mistakes on GST returns |
+| L2 | Sizes (28) | The clothing template has no "Free size" (dupattas, sarees, some kurtis) and no XS. Add them? | Yes |
+| L3 | Markdowns (32) | A markdown made by mistake cannot be withdrawn or ended early; each new price is ended by hand. Add "Withdraw" (before it starts) and "End now"? | Yes |
+| L4 | Purchase order GST (33) | An item never bought before starts at 0% GST on a purchase order. Start from the GST rate list (per HSN) instead? | Yes |
+| L5 | Freight on goods returned to a supplier (34) | A returned piece leaves stock at full cost including its freight share, but the supplier's debit note clears only the goods, so a few rupees stay in "Goods received not billed" for ever. (a) The freight share goes back to "Freight inward", or (b) the piece leaves at the supplier's rate and the freight stays in the remaining stock? Ask the accountant if unsure. | (a) |
+| L6 | Starting discount limit (49) | Every item starts with a 0% maximum discount, so a new shop cannot give any typed discount until it sets one per item. Let each shop-type template set a starting maximum (for example 10%)? | Yes, 10% for clothing and fancy shops |
+| L7 | GST price band for clothing (61) | The till decides the ₹2,500 clothing band on the price including GST; the official rule may be on the value before GST. Which one? Answer from the official CBIC notification. | Check the notification; most readings use the value before GST |
+| L8 | CGST and SGST paise (62) | Each line gives its odd paisa to CGST, so a long bill can show CGST a few paise above SGST. Split per bill and rate instead, so they are always equal? | Yes: e-invoice and GSTR-1 usually expect them equal |
+| L9 | Rounding at the till (63) | A till day's accounts entry may be up to ₹0.50 out, and the difference goes to Rounding without notice, which could hide a mistake. Tighten to 1 paisa per bill, or keep ₹0.50 per day? | Tighten to 1 paisa per bill |
+| L10 | Cash accounts of a new store (36) | A new store gets its cash accounts only at its first till shift, so its cash cannot be chosen on a payment before that. Make them when the store is added? | Yes |
+| L11 | The menu on the left (88) | Every screen the person may use is listed: for an owner, 84 links in 9 sections, all open. Keep it, or fold the sections? | **Decided 27 October 2026: fold** (built). "Most used" and the section of the screen you are on stay open; the rest fold to one line each with the number of screens; a section you open stays open on that computer; quick search (Ctrl+K) still finds every screen and report tab |
+| L12 | Batch numbers for cosmetics (89) | Every new batch item starts with "Number batches automatically" ticked. Cosmetics shops usually record the batch number printed on the pack (for recalls). Should the cosmetics template start with it off? | Yes: off for cosmetics, on for the rest |
 
 ---
 
@@ -263,3 +283,4 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | 2026-10-23 | — | Owner asked for "Download all my data": the Owner downloads one zip with a CSV file per list of their own shop (row-level security keeps it to that shop); passwords, PINs and sessions left out; recorded in the history. Changes no money, stock or tax, so no separate plan | Owners trust a system more when they can take their data with them any time |
 | 2026-10-23 | — | The product's look is "F" (owner's choice after comparing six directions and real retail software sites): white pages, black type, one blue for actions, thin lines, pill buttons, Geist type; dark mode in soft charcoal with white main buttons; the same look on the landing page, login, sign-up and inside. Marketing pages show a made-up sample shop, never real names or test data. Six ease-of-use improvements built the same day (quick search, folding menu with most-used screens, "Needs your attention", short saved notes, helpful empty lists, one page header) | Earlier designs looked machine-made and untrustworthy to the owner; this one reads as a real product |
 | 2026-10-26 | — | Owner asked for "Forgot password?" and email confirmation: one-time emailed links (password 30 minutes, confirm 7 days, three an hour at most, only a hash kept); a reset ends every session and is followed by a "your password was changed" email; the reset page never tells whether an email has an account; existing users count as confirmed; contact-form messages are emailed to editor.publicationmart@gmail.com; mail is sent from no-reply@rademics.ai (Gmail until its password is set) | A shop owner locked out has no other way back in; the standard for any login |
+| 2026-10-27 | L11 | The menu on the left starts folded: "Most used" and the section of the current screen stay open, every other section is one line with its number of screens, and a section the person opens stays open on that computer | An owner saw 84 links in 9 open sections; most shopkeepers use a handful of screens |

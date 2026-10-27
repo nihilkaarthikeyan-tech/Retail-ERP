@@ -14,6 +14,7 @@ import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { inTransaction } from '../prisma/in-transaction.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { assertCanGiveRights, callerRights } from '../users/delegation.js';
 
 const roleInclude = { permissions: { select: { permissionKey: true } } } satisfies Prisma.RoleInclude;
 type RoleRow = Prisma.RoleGetPayload<{ include: typeof roleInclude }>;
@@ -62,8 +63,9 @@ export class RolesService {
   }
 
   async create(input: CreateRoleInput, actor: Actor) {
+    assertCanGiveRights(await callerRights(this.prisma, actor.userId), input.permissions);
     if (await this.prisma.role.findFirst({ where: { code: input.code } })) {
-      throw new ConflictException(`A role with code "${input.code}" already exists`);
+      throw new ConflictException(`There is already a role called "${input.name}" (or one very like it). Choose another name.`);
     }
     const role = await this.prisma.$transaction(async (tx) => {
       const created = await tx.role.create({
@@ -96,6 +98,10 @@ export class RolesService {
     }
     if (before.code === SYSTEM_ROLES.OWNER_ADMIN && input.permissions) {
       throw new BadRequestException('The Owner/Admin role always has every right');
+    }
+    if (input.permissions) {
+      const had = new Set(before.permissions.map((p) => p.permissionKey));
+      assertCanGiveRights(await callerRights(this.prisma, actor.userId), input.permissions.filter((k) => !had.has(k)));
     }
     const role = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.role.update({

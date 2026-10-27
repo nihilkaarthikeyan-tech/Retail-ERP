@@ -21,6 +21,7 @@ import { tillModuleOn, withoutSwitchedOff } from "@/lib/till/modules";
 import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
 import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
 import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillCustomerPoints, TillOrder } from "@/lib/till/types";
+import { formatDate } from "@/lib/format";
 import { BillOptionsDialog, CustomerDialog, HelperDialog, ParkedDialog } from "./bill-dialogs";
 import { NumPad } from "./num-pad";
 import { PayDialog } from "./pay-dialog";
@@ -95,6 +96,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   /** Plan 13: one id per gift card sale, so a retry is saved once. */
   const [giftSaleId, setGiftSaleId] = useState<string>("");
   const searchRef = useRef<HTMLInputElement>(null);
+  /** The text the latest catalogue was fetched for, so a scan is retried once only. */
+  const refetched = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,10 +194,26 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     const text = search.trim();
     if (!text) return;
     const hit = scan(snapshot, text);
-    if (hit) return addItem(hit.item, hit.unitId, hit.barcode);
+    if (hit) {
+      refetched.current = null;
+      return addItem(hit.item, hit.unitId, hit.barcode);
+    }
     const found = searchItems(snapshot, text, 12);
-    if (found.length === 1) return addItem(found[0], found[0].baseUnitId, null);
-    if (!found.length) setScanError(`Nothing found for "${text}"`);
+    if (found.length === 1) {
+      refetched.current = null;
+      return addItem(found[0], found[0].baseUnitId, null);
+    }
+    if (found.length) return;
+    // An item or barcode added in the back office reaches the till's copy within 15 minutes; while
+    // online, fetch it now and scan once more (with the bill as it is then) rather than say
+    // "Nothing found" to a waiting customer (launch check, 27 October 2026).
+    if (online && refetched.current !== text) {
+      refetched.current = text;
+      void engine.refresh().then(() => setTimeout(() => searchRef.current?.form?.requestSubmit(), 0));
+      return;
+    }
+    refetched.current = null;
+    setScanError(`Nothing found for "${text}"`);
   }
 
   function applyPad() {
@@ -251,6 +270,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (d) {
       setDraft(d);
       setRestored(false);
+      // Launch check, 27 October 2026: with no line chosen, + and − did nothing after a recall.
+      setSelected(d.lines.at(-1)?.key ?? null);
     }
     setDialog(null);
   }
@@ -508,7 +529,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               </Button>
             </div>
           ) : null}
-          {shiftOld ? <Alert kind="error">This shift is from {state.shift?.businessDate}. Close it and open a new one before billing.</Alert> : null}
+          {shiftOld ? <Alert kind="error">This shift is from {formatDate(state.shift?.businessDate)}. Close it and open a new one before billing.</Alert> : null}
           {notice ? <Alert kind="info">{notice}</Alert> : null}
           {priceChanged ? (
             <div className="alert alert-error" role="alert">
@@ -1070,6 +1091,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           open
           current={draft.buyer ?? null}
           defaults={{ name: draft.customer?.name ?? "" }}
+          customers={snapshot.customers}
           onSave={(b) => {
             change({ ...draft, buyer: b, payments: [] });
             setDialog(null);

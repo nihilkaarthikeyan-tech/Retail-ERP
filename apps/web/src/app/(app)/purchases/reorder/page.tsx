@@ -135,7 +135,19 @@ export default function ReorderSuggestionsPage() {
           "—"
         ),
     },
-    { key: "supplier", header: "Usual supplier", render: (r) => r.supplier?.name ?? <span className="muted">None set</span> },
+    {
+      key: "supplier",
+      header: "Supplier",
+      render: (r) =>
+        r.supplier ? (
+          <>
+            {r.supplier.name}
+            {r.supplierSource === "last" ? <span className="muted"> (last bought from)</span> : null}
+          </>
+        ) : (
+          <span className="muted">None yet</span>
+        ),
+    },
     { key: "onHand", header: "In stock", align: "right", render: (r) => showQuantity(r.onHand) },
     { key: "onOrder", header: "On order", align: "right", render: (r) => showQuantity(r.onOrder) },
     { key: "level", header: "Reorder level", align: "right", render: (r) => showQuantity(r.reorderLevel) },
@@ -158,6 +170,10 @@ export default function ReorderSuggestionsPage() {
       <p className="muted">
         Items that have fallen below their reorder level in each store, with how many to buy
         {canMakeOrders ? "; tick the ones you want and the system makes draft purchase orders, one per supplier and store." : "."}
+      </p>
+      {/* Launch check, 27 October 2026: say why a quantity is on order, and where the supplier comes from. */}
+      <p className="muted">
+        <strong>On order</strong> is what suppliers have still to send: ordered and not yet received, including pieces sent back on a return, which the supplier is expected to replace. The supplier is the item&apos;s usual one, or the one it was last bought from.
       </p>
       <div className="filter-row">
         <SelectInput id="reorder-store" label="Store" value={storeId} onChange={(e) => setStoreId(e.target.value)}>

@@ -137,7 +137,7 @@ export class EInvoicesService {
     const now = new Date();
     return rows.map((r) => {
       const b = bills.get(r.documentId);
-      const documentDate = isoDay(b?.businessDate) ?? isoDay(r.createdAt)!;
+      const documentDate = isoDay(b?.businessDate) ?? businessDate(r.createdAt);
       return {
         id: r.id,
         documentType: r.documentType,

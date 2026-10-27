@@ -18,6 +18,7 @@ export * from './import-cells.js';
 export * from './india.js';
 export * from './loyalty.js';
 export * from './markdowns.js';
+export * from './messages.js';
 export * from './numbering.js';
 export * from './payment-terms.js';
 export * from './permissions.js';

@@ -1,8 +1,12 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CurrentUser } from "shared";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppMenu } from "./app-menu";
+import { openEveryMenuGroup } from "@/lib/menu-test-helpers";
+
+// These tests are about who sees which screen, not about folding (decision L11).
+beforeEach(openEveryMenuGroup);
 
 function user(overrides: Partial<CurrentUser>): CurrentUser {
   return {
@@ -57,7 +61,7 @@ describe("AppMenu", () => {
 
   it("shows the catalogue section only to users with catalogue or price rights", () => {
     render(<AppMenu user={user({ permissions: ["catalogue.view"] })} pathname="/" />);
-    expect(screen.getByText("Catalogue")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Items/ })).toBeTruthy();
     for (const label of ["Items", "Item groups", "Brands", "Units", "Attributes", "HSN codes"]) {
       expect(screen.getByRole("link", { name: label })).toBeTruthy();
     }
@@ -73,7 +77,7 @@ describe("AppMenu", () => {
     cleanup();
 
     render(<AppMenu user={user({})} pathname="/" />);
-    expect(screen.queryByText("Catalogue")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Items/ })).toBeNull();
   });
 
   it("has one Settings entry instead of a settings entry per area (plan 12 §5)", () => {
@@ -95,7 +99,7 @@ describe("AppMenu", () => {
 
   it("shows the Parties entries only with the matching rights", () => {
     render(<AppMenu user={user({ permissions: ["customers.view"] })} pathname="/" />);
-    expect(screen.getByText("Parties")).toBeTruthy();
+    expect(screen.getByText("Customers and suppliers")).toBeTruthy();
     for (const label of ["Customers", "Customer groups", "Payment terms"]) {
       expect(screen.getByRole("link", { name: label })).toBeTruthy();
     }
@@ -119,13 +123,13 @@ describe("AppMenu", () => {
     cleanup();
 
     render(<AppMenu user={user({ permissions: ["catalogue.view"] })} pathname="/" />);
-    expect(screen.queryByText("Parties")).toBeNull();
+    expect(screen.queryByText("Customers and suppliers")).toBeNull();
   });
 
   it("shows the Inventory entries only with stock.view, and Settings only with stock.lock", () => {
     const inventory = ["Stock on hand", "Stock documents", "In transit", "Stock history", "Batches", "Negative stock", "Locations", "Reorder levels"];
     render(<AppMenu user={user({ permissions: ["stock.view"] })} pathname="/stock/documents/abc" />);
-    expect(screen.getByText("Inventory")).toBeTruthy();
+    expect(screen.getByText("Stock")).toBeTruthy();
     for (const label of inventory) expect(screen.getByRole("link", { name: label })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
     expect(screen.getByRole("link", { name: "Stock documents" }).getAttribute("aria-current")).toBe("page");
@@ -133,7 +137,7 @@ describe("AppMenu", () => {
     cleanup();
 
     render(<AppMenu user={user({ permissions: ["catalogue.view", "customers.view"] })} pathname="/" />);
-    expect(screen.queryByText("Inventory")).toBeNull();
+    expect(screen.queryByText("Stock")).toBeNull();
     for (const label of [...inventory, "Settings"]) expect(screen.queryByRole("link", { name: label })).toBeNull();
     cleanup();
 

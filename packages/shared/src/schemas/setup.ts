@@ -29,7 +29,7 @@ export type SignupInput = z.infer<typeof signupSchema>;
 /** Plan 14, POST /leads: the landing page's "Contact us / book a demo" form. */
 export const leadSchema = z.object({
   name: trimmed(80),
-  phone: z.string().trim().regex(/^[0-9+\- ]{8,16}$/, 'Enter a phone number'),
+  phone: z.string().trim().regex(/^[0-9+\- ]{8,16}$/, 'Enter your phone number with at least 8 digits, for example 98400 12345'),
   email: email.optional().nullable(),
   shopName: optionalText(160),
   shopType: z.enum(SHOP_TYPE_KEYS as [ShopTypeKey, ...ShopTypeKey[]]).optional().nullable(),

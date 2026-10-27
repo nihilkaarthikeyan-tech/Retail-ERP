@@ -103,3 +103,11 @@ Full list with reasons: `docs/coverage-check.md`.
 - Company server set-up, backups and restore test.
 - Loading real items, customers, suppliers and opening stock (Excel import is ready).
 - Staff training, and setting the go-live date (clears trial data).
+
+## 6. Platform admin (Rademics' own screen), from 27 October 2026
+
+Today `/admin` lists the shops (owner, users, bills, last active, trial end), switches a shop off or on with a reason, and shows the contact-form messages. Ideas to add before many shops, each with a short plan first (details in `docs/audit-plan.md` §5): extend or end a trial and mark a shop as paying; shop health at a glance; several admins with two-step sign-in and a history of what they did; a support view of a shop only with its consent; messages to all shops; data export or deletion requests.
+
+## 7. Production audit
+
+Planned section by section, one 5-hour window each: `docs/audit-plan.md`.

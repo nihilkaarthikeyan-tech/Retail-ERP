@@ -20,27 +20,23 @@ describe("SystemStatus", () => {
     mockFetch(200, {
       status: "ok",
       api: { version: "0.0.1", time: "2026-10-14T10:00:00.000Z" },
-      database: {
-        connected: true,
-        serverVersion: "17.6",
-        serverTime: "2026-10-14T10:00:00.000Z",
-      },
+      database: { connected: true },
     });
     render(<SystemStatus />);
 
     expect(await screen.findByText(/Connected \(version 0\.0\.1\)/)).toBeTruthy();
-    expect(screen.getByText(/PostgreSQL 17\.6/)).toBeTruthy();
+    expect(screen.getByText("Connected")).toBeTruthy();
   });
 
-  it("shows the database error when the API cannot reach it", async () => {
+  it("says the database is not connected, without its details (they are in the server log)", async () => {
     mockFetch(503, {
       status: "error",
       api: { version: "0.0.1", time: "2026-10-14T10:00:00.000Z" },
-      database: { connected: false, error: "connection refused" },
+      database: { connected: false },
     });
     render(<SystemStatus />);
 
-    expect(await screen.findByText(/Not connected: connection refused/)).toBeTruthy();
+    expect(await screen.findByText(/Not connected\. The details are in the server log/)).toBeTruthy();
   });
 
   it("shows the API as not reachable when the request fails", async () => {

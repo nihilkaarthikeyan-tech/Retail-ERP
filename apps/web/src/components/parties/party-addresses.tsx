@@ -159,7 +159,7 @@ export function PartyAddresses({ basePath, addresses, readOnly, withGstin = true
             errors={errors}
             withoutGstin={!withGstin}
             stateRequired
-            gstinHint="For a business customer billed at this address (decision 21). Optional."
+            gstinHint="For a business customer billed at this address. Optional."
           />
           <TextInput id="addr-phone" label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} error={errors.phone} autoComplete="off" />
           <TextInput id="addr-email" label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={errors.email} autoComplete="off" />

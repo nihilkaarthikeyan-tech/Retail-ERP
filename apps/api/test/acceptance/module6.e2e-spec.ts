@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { addDays, businessDate } from 'shared';
+import { addDays, businessDate, Decimal } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
@@ -112,6 +112,7 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
   it('6.1 a sale of ₹372.00 with ₹128.00 change; stock leaves at once', async () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: basmati.id, quantity: '2' }, { itemId: surf.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '500' }])).expect(201)).body;
     first = res.sale;
+    expect(res.sale.shiftOpen).toBe(true);
     expect(res.sale).toMatchObject({ total: '372.00', taxableAmount: '340.43', cgst: '15.79', sgst: '15.78', changeAmount: '128.00', gstProvisional: false, costValue: '275.00' });
     expect(res.sale.lines.map((l: Record<string, string>) => [l.taxableAmount, l.cgst, l.sgst, l.costValue])).toEqual([
       ['228.57', '5.72', '5.71', '180.00'],
@@ -166,6 +167,8 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
     expect(closed.closing).toMatchObject({ salesTotal: '522.00', returnsTotal: '-252.00' });
     expect(closed.closing.summary).toMatchObject({ cost_of_goods_sold: '200.00', cash_in_till: '398.00', change_given: '-128.00' });
     expect((await T(owner.post('/pos/bills')).send(sale([{ itemId: basmati.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '120' }])).expect(400)).body.message).toMatch(/Open a shift/);
+    // Launch check, 27 October 2026: the bill says its shift is closed, so the screen offers no Cancel.
+    expect((await owner.get(`/pos/bills/${first.id}`).expect(200)).body.shiftOpen).toBe(false);
   });
 });
 
@@ -222,6 +225,17 @@ describe('6.4 selling beyond stock, 6.6 card and UPI, 6.7 never saved twice', ()
     expect((await T(owner.post('/pos/bills')).send(foreign).expect(400)).body.message).toMatch(/not in this till’s series/);
     // Without the registered computer's token nothing is accepted.
     await owner.post('/pos/bills').send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }])).expect(401);
+  });
+
+  // Found in the launch check of 27 October 2026: the reports counted the note handed over, not the cash kept.
+  it('till reports count cash after the change given back, like the shift close', async () => {
+    await T(owner.post('/pos/bills')).send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '1000' }])).expect(201);
+    const shift = (await owner.get(`/pos/till/${tillId}/shift`).expect(200)).body;
+    const expectedCash = new Decimal(shift.expected.find((e: { paymentMethodId: string }) => e.paymentMethodId === pm.CASH).expected).sub('2000');
+    const report = (await owner.get(`/pos/reports/payments?from=${today()}&to=${today()}`).expect(200)).body as { method: string; amount: string }[];
+    expect(report.find((r) => r.method === 'Cash')!.amount).toBe(expectedCash.toFixed(2));
+    const register = (await owner.get(`/pos/reports/register?from=${today()}&to=${today()}`).expect(200)).body as { payments: string }[];
+    expect(register.at(-1)!.payments).toMatch(/Cash 1000\.00, change given 101\.00/);
   });
 });
 

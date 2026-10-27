@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { createStoreSchema, updateStoreSchema } from "shared";
+import { createStoreSchema, suggestCode, updateStoreSchema } from "shared";
 import { AddressFields, addressFrom, addressPayload, type AddressValues, emptyAddress } from "@/components/address-fields";
 import { Alert, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -85,8 +85,21 @@ export function StoreForm({ store, registrations, readOnly, onSaved, onCancel }:
     <form onSubmit={onSubmit} noValidate>
       <Alert kind="error">{error}</Alert>
       <div className="form-grid">
-        <TextInput id="store-code" label="Store code" value={form.code} onChange={set("code")} error={errors.code} required disabled={!!store || readOnly} hint={store ? "The code cannot change once set." : "2–10 letters or digits."} />
-        <TextInput id="store-name" label="Name" value={form.name} onChange={set("name")} error={errors.name} required disabled={readOnly} />
+        <TextInput
+          id="store-name"
+          label="Name"
+          value={form.name}
+          onChange={(e) => {
+            const name = e.target.value;
+            // The code follows the name until the person types their own.
+            const follows = !store && form.code === suggestCode(form.name, 10);
+            setForm({ ...form, name, ...(follows ? { code: suggestCode(name, 10) } : {}) });
+          }}
+          error={errors.name}
+          required
+          disabled={readOnly}
+        />
+        <TextInput id="store-code" label="Store code" value={form.code} onChange={set("code")} error={errors.code} required disabled={!!store || readOnly} hint={store ? "The code cannot change once set." : "Filled in from the name; change it if you like. 2–10 letters or digits."} />
         <AddressFields idPrefix="store" values={form.address} onChange={(address) => setForm((f) => ({ ...f, address }))} errors={errors} stateDisabled={readOnly} />
         <TextInput id="store-phone" label="Phone" type="tel" value={form.phone} onChange={set("phone")} error={errors.phone} disabled={readOnly} />
         <TextInput id="store-email" label="Email" type="email" value={form.email} onChange={set("email")} error={errors.email} disabled={readOnly} />

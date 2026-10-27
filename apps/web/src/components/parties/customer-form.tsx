@@ -234,7 +234,7 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
           )}
           {!walkIn ? (
             <div className="span-2">
-              <PartyPicker id="cus-linkedSupplier" label="Linked supplier" kind="supplier" value={form.linkedSupplier} onChange={(p) => setForm((f) => ({ ...f, linkedSupplier: p }))} error={errors.linkedSupplierId} disabled={readOnly} hint="When this customer is also one of our suppliers (decision 25). Balances stay separate." />
+              <PartyPicker id="cus-linkedSupplier" label="Linked supplier" kind="supplier" value={form.linkedSupplier} onChange={(p) => setForm((f) => ({ ...f, linkedSupplier: p }))} error={errors.linkedSupplierId} disabled={readOnly} hint="When this customer is also one of our suppliers. Balances stay separate." />
             </div>
           ) : null}
         </div>

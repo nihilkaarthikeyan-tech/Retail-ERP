@@ -15,6 +15,7 @@ import { flattenGroups, itemKindLabel, showMoney } from "@/lib/catalogue";
 import type { SeasonDto } from "@/lib/styles-seasons";
 import type { BrandDto, ItemDto, ItemGroupNode, ItemPage } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
+import { forFilter, pickLabel } from "@/lib/pick";
 
 const PAGE_SIZE = 50;
 
@@ -97,9 +98,9 @@ export function ItemsList() {
         </SelectInput>
         <SelectInput id="items-brand" label="Brand" value={filters.brandId} onChange={(e) => setFilter("brandId", e.target.value)}>
           <option value="">All brands</option>
-          {(brands.data ?? []).map((b) => (
+          {forFilter(brands.data ?? []).map((b) => (
             <option key={b.id} value={b.id}>
-              {b.name}
+              {pickLabel(b.name, b)}
             </option>
           ))}
         </SelectInput>

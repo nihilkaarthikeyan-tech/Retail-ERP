@@ -110,16 +110,19 @@ describe("Pay screen: points and gift cards", () => {
     fireEvent.click(screen.getByRole("button", { name: "Gift card" }));
     const box = screen.getByLabelText("Gift card number");
     fireEvent.change(box, { target: { value: "6123 4567 8901 2345" } });
-    fireEvent.submit(box.closest("form")!);
+    fireEvent.keyDown(box, { key: "Enter" });
     expect(screen.getByRole("alert").textContent).toBe("That gift card number is not right; check the digits");
     expect(check).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: "6123 4567 8901 2344" } });
     await act(async () => {
-      fireEvent.submit(box.closest("form")!);
+      fireEvent.keyDown(box, { key: "Enter" });
     });
     expect(check).toHaveBeenCalledWith(CARD_NO);
     expect(screen.getByTestId("gift-card-balance").textContent).toContain("₹1,000.00 left");
     expect((screen.getByLabelText("Amount from the card") as HTMLInputElement).value).toBe("500.00");
+    // Found in the launch check of 27 October 2026: these rows were forms inside the payment form,
+    // and "Check" reloaded the till.
+    expect(document.querySelectorAll("form form")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Use card" }));
     expect(onCards).toHaveBeenCalledWith([{ number: CARD_NO, masked: "**** 2344", amount: "500.00", balance: "1000.00" }]);
   });
@@ -131,7 +134,7 @@ describe("Pay screen: points and gift cards", () => {
     const box = screen.getByLabelText("Gift card number");
     fireEvent.change(box, { target: { value: CARD_NO } });
     await act(async () => {
-      fireEvent.submit(box.closest("form")!);
+      fireEvent.keyDown(box, { key: "Enter" });
     });
     expect(screen.getByRole("alert").textContent).toBe("This gift card is blocked");
     expect(screen.queryByRole("button", { name: "Use card" })).toBeNull();

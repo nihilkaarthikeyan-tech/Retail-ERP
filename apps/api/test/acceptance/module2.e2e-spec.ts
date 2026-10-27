@@ -142,6 +142,21 @@ describe('2.3 A style with sizes and colours', () => {
     const res = await owner.post(`/items/${shirt.id}/variants`).send({ values: { [colourId]: ['Green'], [sizeId]: ['S'] } }).expect(400);
     expect(res.body.message).toMatch(/Green/);
   });
+
+  // Found in the launch check of 27 October 2026: a style's variants had to be priced one by one.
+  it('one price for every size and colour: each variant gets its own price, one already priced is left alone', async () => {
+    const res = (await owner.post('/prices/style').send({ styleId: shirt.id, priceListId: sellingListId, price: '549' }).expect(201)).body;
+    expect(res.kept).toEqual(['SHIRT-RED-M']);
+    expect(res.added).toHaveLength(5);
+    const redM = (await prisma.item.findFirstOrThrow({ where: { code: 'SHIRT-RED-M' } })).id;
+    const blueL = (await prisma.item.findFirstOrThrow({ where: { code: 'SHIRT-BLU-L' } })).id;
+    expect((await owner.get(`/prices/lookup?itemId=${redM}`).expect(200)).body.price).toBe('499');
+    expect((await owner.get(`/prices/lookup?itemId=${blueL}`).expect(200)).body.price).toBe('549');
+    // Asked again: nothing new.
+    expect((await owner.post('/prices/style').send({ styleId: shirt.id, priceListId: sellingListId, price: '549' }).expect(201)).body.added).toEqual([]);
+    // Only a style is accepted.
+    await owner.post('/prices/style').send({ styleId: blueL, priceListId: sellingListId, price: '549' }).expect(400);
+  });
 });
 
 describe('2.4 Fractions only for weight, length and volume', () => {

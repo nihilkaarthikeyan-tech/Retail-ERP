@@ -106,6 +106,9 @@ describe("api client", () => {
     // A real explanation from the server is kept as it is.
     mockFetch(409, { statusCode: 409, message: "This bill is already cancelled" });
     expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toBe("This bill is already cancelled");
+    // Dates in a message are shown the Indian way (launch check, 27 October 2026).
+    mockFetch(400, { statusCode: 400, message: "This year overlaps 2026-04-01 to 2027-03-31" });
+    expect(((await api.get("/x").catch((e: unknown) => e)) as ApiError).message).toBe("This year overlaps 01 Apr 2026 to 31 Mar 2027");
   });
 });
 

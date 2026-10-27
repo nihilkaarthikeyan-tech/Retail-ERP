@@ -1,5 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import type { HealthStatus } from "shared";
+import { formatDate } from "./format";
 
 /** Base URL of the API, as seen from the browser. Fixed at build time. */
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -30,7 +31,8 @@ export class ApiError extends Error {
   readonly body: unknown;
 
   constructor(statusCode: number, message: string, errors: FieldIssue[] = [], code?: string, body?: unknown) {
-    super(message);
+    // Launch check, 27 October 2026: the server writes dates as 2026-04-01; people read 01 Apr 2026.
+    super(message.replace(/\b\d{4}-\d{2}-\d{2}\b/g, (d) => formatDate(d)));
     this.name = "ApiError";
     this.statusCode = statusCode;
     this.errors = errors;

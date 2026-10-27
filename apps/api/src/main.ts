@@ -1,4 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
@@ -28,6 +29,6 @@ async function bootstrap() {
   app.enableShutdownHooks();
   const port = Number(process.env.API_PORT ?? 4000);
   await app.listen(port);
-  console.log(`API listening on http://localhost:${port}`);
+  new Logger('Main').log(`API listening on port ${port}`);
 }
 await bootstrap();

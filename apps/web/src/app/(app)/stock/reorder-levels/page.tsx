@@ -123,7 +123,7 @@ export default function ReorderLevelsPage() {
           </Button>
         ) : null}
       </div>
-      <p className="muted">Per item and store. They are used by purchasing to suggest what to order; nothing is ordered automatically yet.</p>
+      <p className="muted">Per item and store. When stock falls to the level, the item appears in Reorder suggestions, ready to put on a purchase order. You stay in control: nothing is ordered without you.</p>
       <div className="filter-row">
         <SelectInput id="reorder-store" label="Store" value={storeId} onChange={(e) => setChosenStore(e.target.value)}>
           {stores.length === 0 ? <option value="">No stores</option> : null}

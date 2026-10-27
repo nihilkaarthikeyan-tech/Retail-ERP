@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { createBrandSchema, hasPermission, updateBrandSchema } from "shared";
+import { createBrandSchema, hasPermission, suggestCode, updateBrandSchema } from "shared";
 import { ActiveBadge, Alert, Button, CheckInput, DataTable, Dialog, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -92,10 +92,23 @@ export default function BrandsPage() {
       <Dialog open={editing !== null} title={editing === "new" ? "Add brand" : `Edit brand: ${form.name}`} onClose={() => setEditing(null)}>
         <form onSubmit={onSubmit} noValidate>
           <Alert kind="error">{error}</Alert>
+          <TextInput
+            id="brand-name"
+            label="Name"
+            value={form.name}
+            onChange={(e) => {
+              const name = e.target.value;
+              // The code follows the name until the person types their own.
+              const follows = editing === "new" && form.code === suggestCode(form.name, 20, "-");
+              setForm({ ...form, name, ...(follows ? { code: suggestCode(name, 20, "-") } : {}) });
+            }}
+            error={errors.name}
+            required
+            autoComplete="off"
+          />
           {editing === "new" ? (
-            <TextInput id="brand-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required className="mono" hint="Letters, digits, - . and /; cannot be changed later." autoComplete="off" />
+            <TextInput id="brand-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required className="mono" hint="Filled in from the name; change it if you like. Letters, digits, - . and /; cannot be changed later." autoComplete="off" />
           ) : null}
-          <TextInput id="brand-name" label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} error={errors.name} required autoComplete="off" />
           {editing !== "new" ? <CheckInput id="brand-active" label="Active" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> : null}
           <div className="actions">
             <Button type="submit" variant="primary" busy={busy}>

@@ -72,9 +72,9 @@ describe("GstinStateFields", () => {
     const state = screen.getByLabelText(/^State/) as HTMLSelectElement;
     expect(state.disabled).toBe(false);
 
-    fireEvent.change(screen.getByLabelText(/^GSTIN/), { target: { value: "29aaacr1234a1zd" } });
+    fireEvent.change(screen.getByLabelText(/^GSTIN/), { target: { value: "29aaacr1234a1zz" } });
 
-    expect((screen.getByLabelText(/^GSTIN/) as HTMLInputElement).value).toBe("29AAACR1234A1ZD");
+    expect((screen.getByLabelText(/^GSTIN/) as HTMLInputElement).value).toBe("29AAACR1234A1ZZ");
     expect(state.value).toBe("29");
     expect(state.disabled).toBe(true);
   });

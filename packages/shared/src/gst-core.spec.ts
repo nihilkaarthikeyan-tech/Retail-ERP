@@ -91,7 +91,7 @@ describe('place of supply and tax situation (G1, G3)', () => {
   });
   it('a buyer GSTIN of another state: business invoice with IGST', () => {
     expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5' })).toMatchObject({ invoiceKind: 'business', placeOfSupply: '29', interState: true });
-    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1Z5' })).toMatchObject({ invoiceKind: 'business', placeOfSupply: '33', interState: false });
+    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG' })).toMatchObject({ invoiceKind: 'business', placeOfSupply: '33', interState: false });
   });
   it('a delivery address in another state: IGST', () => {
     expect(resolveSupply({ ...regular, deliveryState: '32' })).toMatchObject({ invoiceKind: 'consumer', placeOfSupply: '32', interState: true });
@@ -101,7 +101,7 @@ describe('place of supply and tax situation (G1, G3)', () => {
     expect(resolveSupply({ ...regular, buyerState: '29' })).toMatchObject({ placeOfSupply: '29', interState: true });
   });
   it('SEZ is always IGST; exempt pays no tax; composition is a bill of supply', () => {
-    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1Z5', taxSituation: 'sez' })).toMatchObject({ interState: true, situation: 'sez' });
+    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG', taxSituation: 'sez' })).toMatchObject({ interState: true, situation: 'sez' });
     expect(resolveSupply({ ...regular, taxSituation: 'exempt' })).toMatchObject({ noTax: true });
     expect(resolveSupply({ ...regular, scheme: 'composition', buyerGstin: '29AABCK1234A1Z5' })).toMatchObject({ invoiceKind: 'bill_of_supply', noTax: true });
     expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5', taxSituation: 'unregistered' })).toMatchObject({ invoiceKind: 'consumer', placeOfSupply: '33' });

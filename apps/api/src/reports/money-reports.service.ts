@@ -80,14 +80,25 @@ export class MoneyReportsService {
     for (const e of entries) {
       const cash = e.lines.filter((l) => cashIds.has(l.accountId)).reduce((s, l) => s.add(D(l.debit)).sub(D(l.credit)), ZERO);
       if (cash.isZero()) continue;
-      // The other side, weighted by size; a cash line of an account outside the user's view counts as "other".
-      const others = e.lines.filter((l) => !cashIds.has(l.accountId));
-      const weight = others.reduce((s, l) => s.add(D(l.debit)).add(D(l.credit)), ZERO);
+      // The other side: each account's net in the entry, only those on the opposite side to the cash,
+      // weighted by size. A till shift's one entry also holds pairs that are not cash at all (stock
+      // against cost of goods, points owed against points expense); they are left out. Found in the
+      // launch check of 27 October 2026: cost of goods and stock showed as cash coming in.
+      const net = new Map<string, Decimal>();
+      for (const l of e.lines) if (!cashIds.has(l.accountId)) net.set(l.accountId, (net.get(l.accountId) ?? ZERO).add(D(l.debit)).sub(D(l.credit)));
+      const keyOf = (id: string) => byId.get(id)?.systemKey ?? null;
+      const keys = new Set([...net.keys()].map(keyOf));
+      const pairs = [['stock', 'cost_of_goods_sold'], ['loyalty_liability', 'loyalty_expense']].filter(([a, b]) => keys.has(a) && keys.has(b)).flat();
+      const opposite = [...net.entries()].filter(([id, v]) => !v.isZero() && !pairs.includes(keyOf(id) ?? '') && v.isNegative() === cash.isPositive());
+      // Nothing on the other side (rare): share over every account, so the totals still add up.
+      const others = opposite.length ? opposite : [...net.entries()].filter(([, v]) => !v.isZero());
+      const weight = others.reduce((sum, [, v]) => sum.add(v.abs()), ZERO);
+      if (weight.isZero()) continue;
       let left = cash;
-      for (const [i, l] of others.entries()) {
-        const share = i === others.length - 1 ? left : cash.mul(D(l.debit).add(D(l.credit))).div(weight).toDecimalPlaces(2);
+      for (const [i, [id, v]] of others.entries()) {
+        const share = i === others.length - 1 ? left : cash.mul(v.abs()).div(weight).toDecimalPlaces(2);
         left = left.sub(share);
-        const a = byId.get(l.accountId)!;
+        const a = byId.get(id)!;
         const m = sections[sectionOf(a)];
         m.set(a.id, (m.get(a.id) ?? ZERO).add(share));
       }

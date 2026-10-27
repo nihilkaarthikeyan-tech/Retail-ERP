@@ -56,20 +56,20 @@ describe('periods and portal formats', () => {
 describe('parseGstr2b', () => {
   const file = {
     data: {
-      gstin: '33AAACR1234A1ZV',
+      gstin: '33AAACR1234A1ZA',
       rtnprd: '092026',
       docdata: {
-        b2b: [{ ctin: '33aahcs1234j1zx', trdnm: 'Sri Ganesh', inv: [{ inum: 'SGT/1', dt: '10-09-2026', val: 2100, pos: '33', rev: 'N', itcavl: 'Y', txval: 2000, cgst: 50, sgst: 50, igst: 0, cess: 0 }] }],
-        cdnr: [{ ctin: '29AAACM5678C1ZK', nt: [{ ntnum: 'CN-4', typ: 'C', dt: '12-09-2026', val: 105, rev: 'Y', itcavl: 'Y', txval: 100, igst: 5 }] }],
+        b2b: [{ ctin: '33aahcs1234j1zj', trdnm: 'Sri Ganesh', inv: [{ inum: 'SGT/1', dt: '10-09-2026', val: 2100, pos: '33', rev: 'N', itcavl: 'Y', txval: 2000, cgst: 50, sgst: 50, igst: 0, cess: 0 }] }],
+        cdnr: [{ ctin: '29AAACM5678C1ZC', nt: [{ ntnum: 'CN-4', typ: 'C', dt: '12-09-2026', val: 105, rev: 'Y', itcavl: 'Y', txval: 100, igst: 5 }] }],
       },
     },
   };
 
   it('reads invoices and credit notes', () => {
     const s = parseGstr2b(file);
-    expect(s).toMatchObject({ gstin: '33AAACR1234A1ZV', period: '2026-09' });
+    expect(s).toMatchObject({ gstin: '33AAACR1234A1ZA', period: '2026-09' });
     expect(s.documents).toHaveLength(2);
-    expect(s.documents[0]).toMatchObject({ section: 'b2b', kind: 'invoice', supplierGstin: '33AAHCS1234J1ZX', number: 'SGT/1', date: '2026-09-10', reverseCharge: false, itcAvailable: 'Y' });
+    expect(s.documents[0]).toMatchObject({ section: 'b2b', kind: 'invoice', supplierGstin: '33AAHCS1234J1ZJ', number: 'SGT/1', date: '2026-09-10', reverseCharge: false, itcAvailable: 'Y' });
     expect(s.documents[0].taxable.toFixed(2)).toBe('2000.00');
     expect(s.documents[1]).toMatchObject({ section: 'cdnr', kind: 'credit_note', number: 'CN-4', reverseCharge: true });
     expect(s.documents[1].igst.toFixed(2)).toBe('5.00');
@@ -84,9 +84,9 @@ describe('parseGstr2b', () => {
   it('matches a supplier credit note with our debit note (minus amounts in our books)', () => {
     const s = parseGstr2b(file);
     const rows = matchInward(s.documents, [
-      { id: 'b1', ourNumber: 'PB-1', supplierGstin: '33AAHCS1234J1ZX', supplierName: 'Sri Ganesh', kind: 'invoice', number: 'sgt-001', date: '2026-09-10', taxable: '2000.40', igst: '0', cgst: '50', sgst: '50', reverseCharge: false, inPeriod: true },
-      { id: 'd1', ourNumber: 'DN-1', supplierGstin: '29AAACM5678C1ZK', supplierName: 'Mysore', kind: 'note', number: 'CN/4', date: '2026-09-12', taxable: '-100', igst: '-5', cgst: '0', sgst: '0', reverseCharge: false, inPeriod: true },
-      { id: 'b2', ourNumber: 'PB-2', supplierGstin: '33AAHCS1234J1ZX', supplierName: 'Sri Ganesh', kind: 'invoice', number: 'SGT/7', date: '2026-08-01', taxable: '10', igst: '0', cgst: '0', sgst: '0', reverseCharge: false, inPeriod: false },
+      { id: 'b1', ourNumber: 'PB-1', supplierGstin: '33AAHCS1234J1ZJ', supplierName: 'Sri Ganesh', kind: 'invoice', number: 'sgt-001', date: '2026-09-10', taxable: '2000.40', igst: '0', cgst: '50', sgst: '50', reverseCharge: false, inPeriod: true },
+      { id: 'd1', ourNumber: 'DN-1', supplierGstin: '29AAACM5678C1ZC', supplierName: 'Mysore', kind: 'note', number: 'CN/4', date: '2026-09-12', taxable: '-100', igst: '-5', cgst: '0', sgst: '0', reverseCharge: false, inPeriod: true },
+      { id: 'b2', ourNumber: 'PB-2', supplierGstin: '33AAHCS1234J1ZJ', supplierName: 'Sri Ganesh', kind: 'invoice', number: 'SGT/7', date: '2026-08-01', taxable: '10', igst: '0', cgst: '0', sgst: '0', reverseCharge: false, inPeriod: false },
     ]);
     // Within the ₹1 tolerance → matched; the note differs only in the reverse-charge flag; last month's bill is not "only in books".
     expect(rows.map((r) => [r.number, r.status])).toEqual([

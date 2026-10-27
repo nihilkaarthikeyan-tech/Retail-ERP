@@ -80,11 +80,11 @@ describe('3.2 A business customer with a GSTIN in another state', () => {
       .send({
         name: 'Bengaluru Traders',
         customerGroupId: groups.WHOLESALE,
-        gstin: '29AAACR1234A1ZD',
-        address: { addressLine1: '12 MG Road', city: 'Bengaluru', stateCode: '29', gstin: '29AAACR1234A1ZD', pincode: '560001' },
+        gstin: '29AAACR1234A1ZZ',
+        address: { addressLine1: '12 MG Road', city: 'Bengaluru', stateCode: '29', gstin: '29AAACR1234A1ZZ', pincode: '560001' },
       })
       .expect(201);
-    expect(res.body).toMatchObject({ isBusiness: true, stateCode: '29', gstin: '29AAACR1234A1ZD' });
+    expect(res.body).toMatchObject({ isBusiness: true, stateCode: '29', gstin: '29AAACR1234A1ZZ' });
 
     const customers = app.get(CustomersService);
     const row = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.id } });
@@ -93,8 +93,8 @@ describe('3.2 A business customer with a GSTIN in another state', () => {
     const local = await prisma.customer.findFirstOrThrow({ where: { code: 'CUS-000001' } });
     expect(await customers.gstTreatmentFor(prisma, local)).toBe('unregistered');
 
-    const mismatch = await owner.post('/customers').send({ name: 'Wrong state', gstin: '29AAACR1234A1ZD', stateCode: '33' }).expect(400);
-    expect(mismatch.body.message).toMatch(/belongs to state code 29/);
+    const mismatch = await owner.post('/customers').send({ name: 'Wrong state', gstin: '29AAACR1234A1ZZ', stateCode: '33' }).expect(400);
+    expect(mismatch.body.message).toMatch(/is for Karnataka \(29\), not Tamil Nadu \(33\)/);
   });
 });
 
@@ -156,7 +156,7 @@ describe('3.5 Blocked versus switched off', () => {
 describe('3.6 Supplier holds', () => {
   it('a payments-only hold refuses payments but not bills, and lifts itself after the end date', async () => {
     const suppliers = app.get(SuppliersService);
-    const s = (await owner.post('/suppliers').send({ name: 'Metro Distributors', supplierGroupId: supplierGroups.DISTRIBUTORS, gstin: '33AAACM1234B1ZQ' }).expect(201)).body;
+    const s = (await owner.post('/suppliers').send({ name: 'Metro Distributors', supplierGroupId: supplierGroups.DISTRIBUTORS, gstin: '33AAACM1234B1ZD' }).expect(201)).body;
     expect(s.code).toBe('SUP-000001');
     expect(s.pan).toBe('AAACM1234B');
     expect(s.paymentTerms.code).toBe('CASH');

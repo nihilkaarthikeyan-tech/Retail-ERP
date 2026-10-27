@@ -42,14 +42,7 @@ export function SystemStatus() {
       <dt>API ({API_URL})</dt>
       <dd className="ok">Connected (version {api.version})</dd>
       <dt>Database</dt>
-      {database.connected ? (
-        <dd className="ok">
-          Connected (PostgreSQL {database.serverVersion}, server time{" "}
-          {database.serverTime})
-        </dd>
-      ) : (
-        <dd className="error">Not connected: {database.error}</dd>
-      )}
+      {database.connected ? <dd className="ok">Connected</dd> : <dd className="error">Not connected. The details are in the server log.</dd>}
     </dl>
   );
 }

@@ -5,6 +5,7 @@
 // matching report, so they always agree (scenario 9.9).
 import { Injectable } from '@nestjs/common';
 import { addDays, businessDate, changePercent, type CurrentUser, Decimal, grossMarginPercent, hasPermission, previousPeriod } from 'shared';
+import type { Prisma } from '../generated/prisma/client.js';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -121,12 +122,19 @@ export class DashboardsService {
     const days = new Map<string, Decimal>();
     for (let i = 29; i >= 0; i--) days.set(addDays(today, -i), ZERO);
     for (const l of monthLines) days.set(iso(l.businessDate)!, (days.get(iso(l.businessDate)!) ?? ZERO).add(D(l.taxableAmount)));
-    const payments = await this.prisma.posPayment.groupBy({
-      by: ['paymentMethodId'],
-      where: { bill: { companyId: company.id, status: 'completed', businessDate: fromIso(today), ...(scope.ids ? { till: { storeId: { in: scope.ids } } } : {}) } },
-      _sum: { amount: true },
-    });
-    const methods = new Map((await this.prisma.paymentMethod.findMany({ where: { companyId: company.id }, select: { id: true, name: true } })).map((m) => [m.id, m.name]));
+    const billsToday: Prisma.PosBillWhereInput = { companyId: company.id, status: 'completed', businessDate: fromIso(today), ...(scope.ids ? { till: { storeId: { in: scope.ids } } } : {}) };
+    const payments = await this.prisma.posPayment.groupBy({ by: ['paymentMethodId'], where: { bill: billsToday }, _sum: { amount: true } });
+    const methodRows = await this.prisma.paymentMethod.findMany({ where: { companyId: company.id }, select: { id: true, name: true, kind: true } });
+    const methods = new Map(methodRows.map((m) => [m.id, m.name]));
+    // Payments are stored as handed over; the change given back comes out of the cash
+    // method the bill was paid with, as at the shift close (decision 41).
+    const received = new Map(payments.map((p) => [p.paymentMethodId, D(p._sum?.amount)]));
+    const cashIds = new Set(methodRows.filter((m) => m.kind === 'cash').map((m) => m.id));
+    const withChange = await this.prisma.posBill.findMany({ where: { ...billsToday, changeAmount: { gt: 0 } }, select: { changeAmount: true, payments: { select: { paymentMethodId: true } } } });
+    for (const b of withChange) {
+      const cashId = b.payments.find((p) => cashIds.has(p.paymentMethodId))?.paymentMethodId;
+      if (cashId && received.has(cashId)) received.set(cashId, received.get(cashId)!.sub(D(b.changeAmount)));
+    }
     const top = new Map<string, Decimal>();
     for (const l of weekLines) top.set(l.itemId, (top.get(l.itemId) ?? ZERO).add(D(l.basicQuantity)));
     const topIds = [...top.entries()].sort((a, b) => b[1].cmp(a[1])).slice(0, 10);
@@ -139,7 +147,7 @@ export class DashboardsService {
       charts: {
         salesByHour: [...hours.entries()].sort((a, b) => a[0] - b[0]).map(([hour, v]) => ({ label: `${String(hour).padStart(2, '0')}:00`, value: money(v) })),
         salesLast30Days: [...days.entries()].map(([date, v]) => ({ label: date, value: money(v) })),
-        paymentMix: payments.map((p) => ({ label: methods.get(p.paymentMethodId) ?? p.paymentMethodId, value: money(D(p._sum.amount)) })),
+        paymentMix: [...received.entries()].map(([id, v]) => ({ label: methods.get(id) ?? id, value: money(v) })),
         topItemsThisWeek: topIds.map(([id, v]) => ({ label: items.get(id)?.name ?? id, value: qty(v) })),
       },
     };

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { GSTIN_RE, PAN_RE } from '../company.js';
 import { isIsoDate } from '../financial-year.js';
+import { gstinProblem } from '../gst-core.js';
 import { isStateCode } from '../india.js';
 import { NUMBER_PATTERN_TOKENS } from '../numbering.js';
 import { isPermissionKey } from '../permissions.js';
@@ -19,7 +20,19 @@ export const mobile = z
   .regex(/^[0-9]{10}$/, 'Mobile number must be 10 digits')
   .optional()
   .nullable();
-export const gstin = z.string().trim().toUpperCase().regex(GSTIN_RE, 'Not a valid GSTIN');
+/**
+ * A GSTIN with its check character (plan 08 G4), everywhere one is typed: the company's own,
+ * customers', suppliers'. Found in the launch check of 27 October 2026: only the set-up guide and
+ * the till checked the last character, so a typing mistake elsewhere reached the GST return.
+ */
+export const gstin = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .superRefine((v, ctx) => {
+    const problem = gstinProblem(v, isStateCode);
+    if (problem) ctx.addIssue({ code: 'custom', message: problem });
+  });
 export const pan = z.string().trim().toUpperCase().regex(PAN_RE, 'Not a valid PAN');
 export const shortCode = z
   .string()

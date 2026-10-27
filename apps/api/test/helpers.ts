@@ -64,7 +64,7 @@ export const SETUP_INPUT: SetupInput = {
     stateCode: '33',
     city: 'Chennai',
   },
-  gstRegistration: { gstin: '33AAACR1234A1ZV' },
+  gstRegistration: { gstin: '33AAACR1234A1ZA' },
   financialYear: { startDate: '2026-04-01', endDate: '2027-03-31' },
   store: { code: 'MAIN', name: 'Main Store' },
 };

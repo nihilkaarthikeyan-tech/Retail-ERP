@@ -3,11 +3,15 @@
 // the warnings before switching off, and applies a shop type after a preview.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type CurrentUser, MODULE_KEYS, type ModuleKey, type ModuleSwitchResult, type ShopTypeResult } from "shared";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppMenu } from "@/components/app-menu";
 import { AuthProvider } from "@/lib/auth-context";
 import { ModulesProvider } from "@/lib/modules";
 import { MyModulesScreen } from "./my-modules";
+import { openEveryMenuGroup } from "@/lib/menu-test-helpers";
+
+// These tests are about who sees which screen, not about folding (decision L11).
+beforeEach(openEveryMenuGroup);
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),

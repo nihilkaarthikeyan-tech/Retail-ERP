@@ -90,6 +90,9 @@ export function ResetPasswordForm() {
     const issues = issuesToFieldErrors(parsed);
     if (password !== repeat) issues.repeat = "The two passwords are not the same.";
     setFieldErrors(issues);
+    // Launch check, 27 October 2026: a link cut short (copied from the email in part) failed
+    // here with no message at all, because the link is not a box on the page.
+    if (issues.token) setError("This link has expired or has already been used.");
     if (!parsed.success || password !== repeat) return;
     setBusy(true);
     try {

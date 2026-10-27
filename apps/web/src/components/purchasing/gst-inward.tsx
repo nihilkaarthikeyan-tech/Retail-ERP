@@ -12,6 +12,7 @@ import { rupees } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
 import type { GstRegistrationDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
+import { forFilter, pickLabel } from "@/lib/pick";
 
 const stateLabel = (code: string | null) => (code ? `${INDIAN_STATES[code] ?? code} (${code})` : "—");
 
@@ -19,9 +20,9 @@ const stateLabel = (code: string | null) => (code ? `${INDIAN_STATES[code] ?? co
 function RegistrationSelect({ value, onChange, registrations }: { value: string; onChange: (id: string) => void; registrations: GstRegistrationDto[] }) {
   return (
     <SelectInput id="gst-registration" label="GSTIN" value={value} onChange={(e) => onChange(e.target.value)}>
-      {registrations.map((r) => (
+      {forFilter(registrations).map((r) => (
         <option key={r.id} value={r.id}>
-          {r.gstin} — {stateLabel(r.stateCode)}
+          {pickLabel(`${r.gstin} — ${stateLabel(r.stateCode)}`, r)}
         </option>
       ))}
     </SelectInput>

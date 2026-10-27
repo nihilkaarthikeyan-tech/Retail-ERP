@@ -6,7 +6,7 @@
 // limit again when the bill is saved.
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useState } from "react";
 import { addDays, Decimal, formatGiftCardNumber, isValidGiftCardNumber, maskGiftCardNumber, maxRedeemable, normaliseGiftCardNumber, pointsValue, redeemProblem } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
@@ -39,6 +39,21 @@ interface PointsAndCardsProps {
 }
 
 /** The points and gift card part of the Pay screen (sales only). */
+
+/**
+ * These sit inside the payment form, and a form may not hold another form: the browser then
+ * submitted the page itself and the till reloaded (launch check, 27 October 2026). So each row
+ * is a group whose Enter key does what its button does.
+ */
+function onEnter(run: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  };
+}
+
 export function PointsAndCards({ loyalty, giftCardsOn, online, namedCustomer, customerPoints, billTotal, due, points, giftCards, onPoints, onGiftCards, checkCard }: PointsAndCardsProps) {
   const [open, setOpen] = useState<"points" | "card" | null>(null);
   const [typed, setTyped] = useState("");
@@ -53,7 +68,7 @@ export function PointsAndCards({ loyalty, giftCardsOn, online, namedCustomer, cu
   const pointsAvailable = customerPoints?.member ? customerPoints.available : 0;
   const most = loyalty ? maxRedeemable({ available: pointsAvailable, minRedeem: loyalty.minRedeem, maxSharePercent: loyalty.maxSharePercent, pointValue, billAmount: billTotal }) : 0;
 
-  function usePoints(e?: FormEvent) {
+  function spendPoints(e?: FormEvent) {
     e?.preventDefault();
     if (!loyalty) return;
     const n = Number(typed);
@@ -86,7 +101,7 @@ export function PointsAndCards({ loyalty, giftCardsOn, online, namedCustomer, cu
     }
   }
 
-  function useCard(e?: FormEvent) {
+  function applyCard(e?: FormEvent) {
     e?.preventDefault();
     if (!card) return;
     let a: Decimal;
@@ -123,36 +138,36 @@ export function PointsAndCards({ loyalty, giftCardsOn, online, namedCustomer, cu
       {loyalty && namedCustomer && online && customerPoints && !customerPoints.member ? <p className="muted">{customerPoints.reason ?? "This customer is not in the loyalty scheme"}</p> : null}
 
       {open === "points" && loyalty ? (
-        <form className="till-row" onSubmit={usePoints}>
+        <div className="till-row" role="group" aria-label="Pay with points" onKeyDown={onEnter(() => spendPoints())}>
           <p className="muted">
             {customerPoints ? `${customerPoints.available} points can be spent today (1 point = ₹${pointValue}). ` : ""}
             {most > 0 ? `Up to ${most} points on this bill; at least ${loyalty.minRedeem}.` : `At least ${loyalty.minRedeem} points, and at most ${loyalty.maxSharePercent}% of the bill.`}
           </p>
           <input className="input till-input-big" inputMode="numeric" aria-label="Points to spend" value={typed} onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))} autoFocus />
-          <Button type="submit" variant="primary">
+          <Button variant="primary" onClick={() => spendPoints()}>
             Use points
           </Button>
-        </form>
+        </div>
       ) : null}
 
       {open === "card" ? (
         <div>
-          <form className="till-row" onSubmit={(e) => void check(e)}>
+          <div className="till-row" role="group" aria-label="Check a gift card" onKeyDown={onEnter(() => void check())}>
             <input className="input till-input-big" inputMode="numeric" aria-label="Gift card number" placeholder="Scan or type the card number" value={cardNo} onChange={(e) => setCardNo(e.target.value)} autoFocus autoComplete="off" />
-            <Button type="submit" busy={busy}>
+            <Button busy={busy} onClick={() => void check()}>
               Check
             </Button>
-          </form>
+          </div>
           {card ? (
-            <form className="till-row" onSubmit={useCard}>
+            <div className="till-row" role="group" aria-label="Use the gift card" onKeyDown={onEnter(() => applyCard())}>
               <p data-testid="gift-card-balance">
                 Card {maskGiftCardNumber(card.number)}: {rupees(card.balance)} left, valid until {formatDate(addDays(card.expiresOn, -1))}
               </p>
               <input className="input till-input-big" inputMode="decimal" aria-label="Amount from the card" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
-              <Button type="submit" variant="primary">
+              <Button variant="primary" onClick={() => applyCard()}>
                 Use card
               </Button>
-            </form>
+            </div>
           ) : null}
         </div>
       ) : null}

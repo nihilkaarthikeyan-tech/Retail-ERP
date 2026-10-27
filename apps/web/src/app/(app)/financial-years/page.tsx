@@ -6,7 +6,7 @@ import { createFinancialYearSchema, financialYearName, hasPermission, isIsoDate,
 import { Alert, Badge, Button, CheckInput, DataTable, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { financialYearFor, formatDate } from "@/lib/format";
+import { financialYearFor, formatDate, todayIso } from "@/lib/format";
 import type { FinancialYearDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -57,6 +57,18 @@ export default function FinancialYearsPage() {
   }
 
   async function setStatus(year: FinancialYearDto, status: "open" | "locked") {
+    // Launch check, 27 October 2026: locking the current year by mistake stops all billing.
+    const today = todayIso();
+    const current = year.startDate <= today && today <= year.endDate;
+    if (
+      status === "locked" &&
+      !window.confirm(
+        current
+          ? `Lock ${year.name}? This is the current year: no bills, purchases or entries can be saved until it is opened again.`
+          : `Lock ${year.name}? Nothing dated in it can be saved or changed until it is opened again.`,
+      )
+    )
+      return;
     setRowError(null);
     setChanging(year.id);
     try {

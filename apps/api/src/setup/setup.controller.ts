@@ -21,8 +21,10 @@ export class SetupController {
     return this.setup.status();
   }
 
-  /** One-step setup: a complete shop in a single call (kept for the API and the tests). */
+  /** One-step setup: a complete shop in a single call (kept for the API and the tests).
+   *  Code audit, 27 October 2026: it creates a shop like sign-up, so it has sign-up's limit. */
   @Public()
+  @RateLimit('signup')
   @Post()
   run(@Body(new ZodValidationPipe(setupSchema)) input: SetupInput, @Req() req: Request) {
     return this.setup.run(input, clientIp(req));

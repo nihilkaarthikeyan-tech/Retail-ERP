@@ -11,6 +11,8 @@ import {
   priceLookupSchema,
   type PriceQuery,
   priceQuerySchema,
+  type StylePriceInput,
+  stylePriceSchema,
   type UpdatePriceInput,
   type UpdatePriceListInput,
   updatePriceListSchema,
@@ -64,6 +66,12 @@ export class PricingController {
   @RequirePermission('prices.manage')
   create(@Body(new ZodValidationPipe(createPriceSchema)) input: CreatePriceInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.pricing.createPrice(input, actor, user);
+  }
+
+  @Post('prices/style')
+  @RequirePermission('prices.manage')
+  createForStyle(@Body(new ZodValidationPipe(stylePriceSchema)) input: StylePriceInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.pricing.createStylePrices(input, actor, user);
   }
 
   @Patch('prices/:id')

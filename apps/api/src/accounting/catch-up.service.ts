@@ -72,14 +72,17 @@ export class CatchUpService implements OnApplicationBootstrap {
     }
     const shifts = await this.prisma.shift.findMany({ where: { status: 'closed', ledgerEntryId: null }, select: { id: true, closedAt: true } });
     for (const s of shifts) {
-      await this.prisma.$transaction(
+      const posted = await this.prisma.$transaction(
         async (tx) => {
           const entryId = await this.pos.postShift(tx, s.id, businessDate(s.closedAt ?? new Date()), null);
           await tx.shift.update({ where: { id: s.id }, data: { ledgerEntryId: entryId } });
+          return entryId !== null;
         },
         { timeout: 60_000 },
       );
-      count++;
+      // A shift with no bills and no cash has nothing to post; it is not counted (it was logged
+      // as "Posted 1 earlier documents" at every start; launch check, 27 October 2026).
+      if (posted) count++;
     }
 
     // Every other stock movement posts against its own account role.

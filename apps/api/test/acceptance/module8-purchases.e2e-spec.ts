@@ -28,7 +28,7 @@ const today = () => businessDate();
 const period = () => today().slice(0, 7);
 /** A GSTIN with its correct check character. */
 const gstin = (first14: string) => `${first14}${gstinCheckCharacter(first14)}`;
-const MAIN_GSTIN = '33AAACR1234A1ZV';
+const MAIN_GSTIN = '33AAACR1234A1ZA';
 const BLR_GSTIN = gstin('29AAACR1234A1Z');
 
 beforeAll(async () => {

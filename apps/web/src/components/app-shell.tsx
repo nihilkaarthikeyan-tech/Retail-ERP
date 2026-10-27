@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Suspense, useEffect, useState, type ReactNode } from "react";
+import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
 import { businessDate, type CurrentUser } from "shared";
 import { AppMenu } from "@/components/app-menu";
 import { ConfirmEmailBar } from "@/components/email-link-forms";
@@ -15,7 +15,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, fullName } from "@/lib/format";
 import { MENU } from "@/lib/menu";
-import { recordVisit } from "@/lib/menu-usage";
+import { recordVisit, setMenuUser } from "@/lib/menu-usage";
 import { BrandMark } from "@/components/brand-mark";
 
 function initials(user: CurrentUser): string {
@@ -26,6 +26,9 @@ function initials(user: CurrentUser): string {
 /** Reads the current path (runtime-only data, so it sits behind Suspense) and counts the visit for "Most used". */
 function CurrentMenu({ user }: { user: CurrentUser }) {
   const pathname = usePathname();
+  useEffect(() => {
+    setMenuUser(user.id);
+  }, [user.id]);
   useEffect(() => {
     if (MENU.some((e) => e.href === pathname)) recordVisit(pathname);
   }, [pathname]);
@@ -40,7 +43,7 @@ const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(n
  * user, logout). Sends visitors to /setup, /login or /change-password as needed.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, unreachable, reconnects, logout } = useAuth();
   const router = useRouter();
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -183,8 +186,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="shell-main">
         <main className="shell-content">
+          {unreachable ? (
+            <p className="confirm-bar" role="status">
+              Cannot reach the server just now. Trying again… Nothing you saved is lost.
+            </p>
+          ) : null}
           {ready ? <ConfirmEmailBar /> : null}
-          {children}
+          {/* The page loads its data again once the server is back. */}
+          <Fragment key={reconnects}>{children}</Fragment>
         </main>
       </div>
       {ready ? <QuickSearch user={user} open={searchOpen} onClose={() => setSearchOpen(false)} /> : null}

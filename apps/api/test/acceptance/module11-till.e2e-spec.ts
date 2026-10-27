@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { businessDate } from 'shared';
+import { businessDate, SYSTEM_ROLES } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
@@ -397,5 +397,40 @@ describe('11.14 salesperson (C1)', () => {
     const kept = (await T(owner.post('/pos/bills')).send(offline).expect(201)).body;
     expect(kept.sale.salesStaffId).toBe(arun.id);
     expect(kept.sale.checkFlags).toContain('sales_staff_changed');
+  });
+});
+
+// Found in the launch check of 27 October 2026: a barcode added after the till's first download never scanned.
+describe('the till hears of a new barcode', () => {
+  it('a barcode added after the till downloaded the catalogue comes in its next "changes since" download', async () => {
+    await freshCompany();
+    const g = await group('ETHNIC', 'Ethnic wear');
+    const kurta = await item('Cotton kurta', g, '6205', '1500');
+    const first = (await T(owner.get(`/pos/till/${tillId}/snapshot`)).expect(200)).body;
+    await new Promise((r) => setTimeout(r, 20));
+    await owner.post(`/items/${kurta.id}/barcodes`).send({ code: '8901234567890', type: 'EAN13' }).expect(201);
+    const delta = (await T(owner.get(`/pos/till/${tillId}/snapshot?since=${encodeURIComponent(first.serverTime)}`)).expect(200)).body;
+    const row = (delta.items as { id: string; barcodes: { code: string }[] }[]).find((i) => i.id === kurta.id);
+    expect(row?.barcodes.map((b) => b.code)).toEqual(['8901234567890']);
+  });
+});
+
+// Code audit, 27 October 2026: a manager of one shop could mark another shop's till problem as solved.
+describe('a till problem is solved only by someone at that shop', () => {
+  it("another store's manager is refused; the owner's answer is kept in the history", async () => {
+    await freshCompany();
+    const company = await prisma.company.findFirstOrThrow();
+    const anna = (await owner.post('/stores').send({ code: 'ANNA', name: 'Anna Nagar', stateCode: '33' }).expect(201)).body.id as string;
+    await owner.post('/users').send({ firstName: 'Meena', email: 'meena@rademics.test', temporaryPassword: 'Temp-pass-1234', roleIds: [await roleId(prisma, SYSTEM_ROLES.STORE_MANAGER)], storeIds: [anna], defaultStoreId: anna }).expect(201);
+    const meena = await login(app, 'meena@rademics.test', 'Temp-pass-1234');
+    await meena.post('/auth/change-password').send({ currentPassword: 'Temp-pass-1234', newPassword: 'Own-pass-12345' }).expect(204);
+    const problem = await prisma.posSyncProblem.create({ data: { companyId: company.id, tillId, clientId: randomUUID(), kind: 'bill', payload: {}, error: 'test' } });
+
+    await meena.post(`/pos/sync-problems/${problem.id}/resolve`).send({ reason: 'Not mine' }).expect(404);
+    expect((await prisma.posSyncProblem.findUniqueOrThrow({ where: { id: problem.id } })).resolvedAt).toBeNull();
+
+    await owner.post(`/pos/sync-problems/${problem.id}/resolve`).send({ reason: 'Bill entered again by hand' }).expect(200);
+    const history = await prisma.auditLog.findFirst({ where: { entityType: 'pos_sync_problem', entityId: problem.id } });
+    expect(history?.reason).toBe('Bill entered again by hand');
   });
 });

@@ -5,7 +5,7 @@
 // through the browser's Print / Save as PDF. Drafts are marked DRAFT and
 // cancelled documents CANCELLED; every print is recorded in the history.
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { amountInWords, BILL_OF_SUPPLY_DECLARATION, type CurrentUser, Decimal, gstDocumentTitle, hasPermission, hsnForPrint, INDIAN_STATES, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput } from 'shared';
+import { amountInWords, BILL_OF_SUPPLY_DECLARATION, businessDate, type CurrentUser, Decimal, gstDocumentTitle, hasPermission, hsnForPrint, INDIAN_STATES, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput } from 'shared';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
 import { AlterationsService } from '../orders/alterations.service.js';
 import { OrdersService } from '../orders/orders.service.js';
@@ -254,7 +254,7 @@ export class PrintService {
     return {
       ...this.base('customer_order', 'Customer order', lh),
       number: o.number,
-      date: iso(o.createdAt),
+      date: businessDate(o.createdAt), // Indian date of the order (launch check: UTC printed 31 March for 00:30 on 1 April)
       mark: o.status === 'cancelled' ? 'CANCELLED' : null,
       party: await this.partyBlock('customer', o.customerId),
       details: [['Expected on', o.expectedOn ?? ''], ['Status', o.status], ...(o.remarks ? [['Remarks', o.remarks] as [string, string]] : [])],
@@ -287,7 +287,7 @@ export class PrintService {
       ...this.base(kind, tag ? 'Alteration tag' : 'Alteration job', lh),
       paper: tag ? 'A5' : lh.paper,
       number: j.number,
-      date: iso(j.createdAt),
+      date: businessDate(j.createdAt),
       mark: j.status === 'cancelled' ? 'CANCELLED' : null,
       party: { label: 'Customer', name: j.name ?? '', code: null, address: [], gstin: null, phone: j.phone },
       details: [

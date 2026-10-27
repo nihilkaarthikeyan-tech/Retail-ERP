@@ -145,6 +145,8 @@ export interface PosBillDto {
   status: "completed" | "cancelled";
   till: { id: string; code: string; name: string };
   shiftId: string;
+  /** False once the shift is closed: then only a return can undo the bill. */
+  shiftOpen?: boolean;
   returnOfId: string | null;
   exchangeId: string | null;
   customerId: string | null;

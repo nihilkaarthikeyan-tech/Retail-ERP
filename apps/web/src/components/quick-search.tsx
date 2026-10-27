@@ -33,6 +33,43 @@ interface BillHit {
 const MIN = 2;
 
 /** The window itself; it mounts fresh each time it opens, so nothing needs resetting. */
+/**
+ * Tabs inside report screens, found by their own names (launch check, 27 October 2026: "cash book"
+ * found nothing, because it is a tab of Accounts reports). Shown only when the screen is.
+ */
+const SUB_SCREENS: { parent: string; label: string; tab: string }[] = [
+  ...[
+    ["general-ledger", "General ledger"],
+    ["day-book", "Day book"],
+    ["cash-book", "Cash book"],
+    ["bank-book", "Bank book"],
+    ["trial-balance", "Trial balance"],
+    ["profit-and-loss", "Profit and loss"],
+    ["balance-sheet", "Balance sheet"],
+    ["statement", "Customer / supplier statement"],
+    ["ageing", "Ageing"],
+    ["stock-vs-accounts", "Stock against accounts"],
+    ["book-health", "Book health"],
+  ].map(([tab, label]) => ({ parent: "/accounts/reports", tab, label })),
+  ...[
+    ["register", "Till register"],
+    ["payments", "Payments by method"],
+    ["hourly", "Hourly sales"],
+    ["by-cashier", "Sales per cashier"],
+    ["by-salesperson", "Sales by salesperson"],
+    ["shifts", "Shifts"],
+    ["offline-check", "Offline bills to check"],
+    ["sync-problems", "Sync problems"],
+  ].map(([tab, label]) => ({ parent: "/pos/reports", tab, label })),
+  ...[
+    ["order-follow-up", "Order follow-up"],
+    ["received-not-billed", "Goods received not billed"],
+    ["register", "Purchase register"],
+    ["by-supplier", "Purchases by supplier"],
+    ["by-item", "Purchases by item"],
+  ].map(([tab, label]) => ({ parent: "/purchases/reports", tab, label })),
+];
+
 function Panel({ user, onClose }: { user: CurrentUser; onClose: () => void }) {
   const router = useRouter();
   const modules = useModules().modules;
@@ -41,7 +78,14 @@ function Panel({ user, onClose }: { user: CurrentUser; onClose: () => void }) {
   const [active, setActive] = useState(0);
   const version = useRef(0);
 
-  const screens = useMemo(() => visibleMenu(user, modules), [user, modules]);
+  const screens = useMemo(() => {
+    const menu = visibleMenu(user, modules);
+    const tabs = SUB_SCREENS.flatMap((t) => {
+      const parent = menu.find((s) => s.href === t.parent);
+      return parent ? [{ ...parent, label: t.label, href: `${t.parent}?tab=${t.tab}`, section: parent.label }] : [];
+    });
+    return [...menu, ...tabs];
+  }, [user, modules]);
   const q = text.trim();
 
   // Items, customers and bills from the server, a moment after typing stops.

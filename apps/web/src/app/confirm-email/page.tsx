@@ -9,7 +9,7 @@ export default function ConfirmEmailPage() {
   return (
     <AuthLayout
       title="Confirm your email"
-      intro="One moment while we check your link."
+      intro="Confirming the email you log in with lets you get back in if you ever forget your password."
       footer={
         <>
           Need help? <Link href="/#contact">Talk to us</Link>

@@ -13,6 +13,7 @@ import { CatalogueSettingsService } from '../catalogue/catalogue-settings.servic
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { sortVariants } from '../items/items.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const date = (v: Date | null | undefined) => (v ? v.toISOString().slice(0, 10) : null);
@@ -193,7 +194,17 @@ export class MarkdownsService {
    * for its variants, and a variant takes its style's season when it has none.
    */
   private async chooseItems(input: MarkdownInput) {
-    const select = { id: true, code: true, name: true, mrp: true, active: true, canSell: true, baseUnitId: true } as const;
+    const select = {
+      id: true,
+      code: true,
+      name: true,
+      mrp: true,
+      active: true,
+      canSell: true,
+      baseUnitId: true,
+      variantValues: { select: { attributeId: true, value: true } },
+      parent: { select: { code: true, variantAttributes: { select: { attributeId: true }, orderBy: { sortOrder: 'asc' } } } },
+    } as const;
     const out = new Map<string, Prisma.ItemGetPayload<{ select: typeof select }>>();
     if (input.seasonId || input.itemGroupIds?.length || input.brandIds?.length) {
       const groups = input.itemGroupIds?.length ? await this.prisma.itemGroup.findMany({ where: { id: { in: input.itemGroupIds } }, select: { path: true } }) : [];
@@ -211,7 +222,19 @@ export class MarkdownsService {
       const picked = await this.prisma.item.findMany({ where: { OR: [{ id: { in: input.itemIds }, isParentStyle: false }, { parentItemId: { in: input.itemIds } }] }, select, orderBy: { code: 'asc' } });
       for (const i of picked) out.set(i.id, i);
     }
-    return [...out.values()].sort((a, b) => a.code.localeCompare(b.code));
+    // Launch check, 27 October 2026: a style's sizes in the order of their list (S, M, L), not by code.
+    const rows = [...out.values()];
+    const attributeIds = [...new Set(rows.flatMap((r) => r.variantValues.map((v) => v.attributeId)))];
+    const values = attributeIds.length ? await this.prisma.variantAttributeValue.findMany({ where: { attributeId: { in: attributeIds } }, select: { attributeId: true, value: true, sortOrder: true } }) : [];
+    const order = new Map(values.map((v) => [`${v.attributeId}|${v.value}`, v.sortOrder]));
+    const families = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const key = r.parent?.code ?? r.code;
+      families.set(key, [...(families.get(key) ?? []), r]);
+    }
+    return [...families.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .flatMap(([, family]) => (family[0].parent ? sortVariants(family, family[0].parent.variantAttributes.map((a) => a.attributeId), order) : family));
   }
 
   /** Each item's general selling price (per basic unit) on a date, leaving out one markdown's own prices. */

@@ -1449,6 +1449,13 @@ img.lp-shot.only-light,
   margin: 4px 0 0;
 }
 
+/* Something to sort out later that does not stop saving (an HSN code with no GST rate yet). */
+.field-warning {
+  color: var(--warn);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
 .check {
   display: flex;
   align-items: flex-start;
@@ -1834,11 +1841,15 @@ legend {
   margin: 0;
 }
 
+/* Lined up by the top (launch check, 27 October 2026): lined up by the bottom, a field with a
+   hint under it stood higher than its neighbours. Tick boxes and buttons skip the label's height
+   so they sit level with the boxes. */
 .filter-row {
+  --filter-label: 25px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
-  align-items: flex-end;
+  align-items: flex-start;
   margin-bottom: 12px;
 }
 
@@ -1847,8 +1858,14 @@ legend {
   min-width: 0;
 }
 
-.filter-row .check {
-  padding-bottom: 8px;
+.filter-row > .check {
+  margin-top: calc(var(--filter-label) + 4px);
+}
+
+.filter-row > button,
+.filter-row > .btn,
+.filter-row > a.btn {
+  margin-top: var(--filter-label);
 }
 
 .check-row {
@@ -4519,6 +4536,41 @@ button.shell-nav-heading:hover {
   color: var(--fg);
 }
 
+/* Folded groups are what people click (owner, 27 October 2026): a comfortable height, the
+   number of screens inside, and the chevron at the far right. */
+button.shell-nav-heading {
+  justify-content: flex-start;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+button.shell-nav-heading:hover:not(:disabled) {
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+}
+
+button.shell-nav-heading:disabled {
+  cursor: default;
+  color: var(--fg);
+}
+
+.shell-nav-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+button.shell-nav-heading .shell-nav-chevron {
+  margin-left: 10px;
+}
+
+button.shell-nav-heading .shell-nav-count + .shell-nav-chevron {
+  margin-left: 8px;
+}
+
+button.shell-nav-heading > .shell-nav-chevron:only-of-type {
+  margin-left: auto;
+}
+
 button.shell-nav-heading:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
@@ -4628,6 +4680,15 @@ button.shell-nav-heading[aria-expanded="false"] .shell-nav-chevron {
   height: 8px;
   border-radius: 50%;
   background: var(--ok);
+}
+
+.toast-error::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
 }
 
 .toast-close {
@@ -4849,4 +4910,9 @@ button.shell-nav-heading[aria-expanded="false"] .shell-nav-chevron {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 24px;
+}
+
+/* A shorter tick-box list inside a form grid (markdowns). */
+.check-list-short {
+  max-height: 168px;
 }

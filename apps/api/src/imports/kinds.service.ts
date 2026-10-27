@@ -3,7 +3,28 @@
 // Lookups are by the codes people see (item group code, unit code, store
 // code); writes go through the module services so their rules apply.
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { barcodeProblem, businessDate, Decimal, guessBarcodeType, type ImportKind, type ImportMode, numericValueProblem, variantValuesKey } from 'shared';
+import {
+  barcodeProblem,
+  businessDate,
+  createBrandSchema,
+  createCustomerSchema,
+  createItemGroupSchema,
+  createItemSchema,
+  createPriceSchema,
+  createSupplierSchema,
+  Decimal,
+  guessBarcodeType,
+  type ImportKind,
+  type ImportMode,
+  numericValueProblem,
+  updateBrandSchema,
+  updateCustomerSchema,
+  updateItemGroupSchema,
+  updateItemSchema,
+  updatePriceSchema,
+  updateSupplierSchema,
+  variantValuesKey,
+} from 'shared';
 import { ClosingService } from '../accounting/closing.service.js';
 import { MastersService } from '../catalogue/masters.service.js';
 import { InventoryMastersService } from '../inventory/inventory-masters.service.js';
@@ -13,7 +34,7 @@ import { CustomersService } from '../parties/customers.service.js';
 import { SuppliersService } from '../parties/suppliers.service.js';
 import { PricingService } from '../pricing/pricing.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { bool, type Field, type Importer, type ImportContext, type ParsedRow, type RowOutcome, str } from './importers.js';
+import { bool, checked, type Field, type Importer, type ImportContext, type ParsedRow, type RowOutcome, str } from './importers.js';
 
 type V = ParsedRow['values'];
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
@@ -93,11 +114,11 @@ export class ImportKindsService {
           if (str(v.name) && str(v.name) !== existing.name) change.name = str(v.name);
           if (str(v.hsn) !== undefined && str(v.hsn) !== existing.hsnCode) change.hsnCode = str(v.hsn);
           if (!Object.keys(change).length) return { outcome: 'unchanged', recordId: existing.id };
-          await this.masters.updateGroup(existing.id, change, ctx.actor);
+          await this.masters.updateGroup(existing.id, checked(updateItemGroupSchema, change), ctx.actor);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException(`Item group ${str(v.code)} does not exist`);
-        const created = await this.masters.createGroup({ code: str(v.code)!, name: str(v.name)!, parentId: (await this.group(str(v.parent))) ?? null, hsnCode: str(v.hsn) ?? null }, ctx.actor);
+        const created = await this.masters.createGroup(checked(createItemGroupSchema, { code: str(v.code)!, name: str(v.name)!, parentId: (await this.group(str(v.parent))) ?? null, hsnCode: str(v.hsn) ?? null }), ctx.actor);
         return { outcome: 'added', recordId: (created as { id: string }).id };
       },
     };
@@ -118,11 +139,11 @@ export class ImportKindsService {
         const existing = await this.prisma.brand.findFirst({ where: { code: str(v.code)! } });
         if (existing) {
           if (mode === 'add' || existing.name === str(v.name)) return { outcome: 'unchanged', recordId: existing.id, message: mode === 'add' ? 'Already there' : undefined };
-          await this.masters.updateBrand(existing.id, { name: str(v.name)! }, ctx.actor);
+          await this.masters.updateBrand(existing.id, checked(updateBrandSchema, { name: str(v.name)! }), ctx.actor);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException(`Brand ${str(v.code)} does not exist`);
-        const created = await this.masters.createBrand({ code: str(v.code)!, name: str(v.name)! }, ctx.actor);
+        const created = await this.masters.createBrand(checked(createBrandSchema, { code: str(v.code)!, name: str(v.name)! }), ctx.actor);
         return { outcome: 'added', recordId: (created as { id: string }).id };
       },
     };
@@ -234,7 +255,7 @@ export class ImportKindsService {
       if (seasonId && seasonId !== full.seasonId) change.seasonId = seasonId;
       let changed = false;
       if (Object.keys(change).length) {
-        await this.items.update(full.id, change, ctx.actor, ctx.user);
+        await this.items.update(full.id, checked(updateItemSchema, change), ctx.actor, ctx.user);
         changed = true;
       }
       changed = (await this.itemExtras(full.id, full.baseUnitId, v, ctx)) || changed;
@@ -245,7 +266,7 @@ export class ImportKindsService {
     const packUnitId = await this.unit(str(v.packUnit));
     if (packUnitId && !str(v.packSize)) throw new BadRequestException('Pack size is missing for the pack unit');
     const created = (await this.items.create(
-      {
+      checked(createItemSchema, {
         code,
         name: str(v.name)!,
         itemGroupId: groupId!,
@@ -262,7 +283,7 @@ export class ImportKindsService {
         units: packUnitId ? [{ unitId: packUnitId, factor: str(v.packSize)! }] : undefined,
         sellingPrice: str(v.price) ?? null,
         seasonId: seasonId ?? null,
-      },
+      }),
       ctx.actor,
       ctx.user,
     )) as { id: string; baseUnitId?: string };
@@ -310,7 +331,7 @@ export class ImportKindsService {
       orderBy: { startDate: 'desc' },
     });
     if (current && sameNumber(v.price, current.price)) return false;
-    await this.pricing.createPrice({ priceListId: settings.defaultSellingPriceListId, itemId, unitId: baseUnitId, price: str(v.price)!, startDate: today }, ctx.actor, ctx.user);
+    await this.pricing.createPrice(checked(createPriceSchema, { priceListId: settings.defaultSellingPriceListId, itemId, unitId: baseUnitId, price: str(v.price)!, startDate: today }), ctx.actor, ctx.user);
     return true;
   }
 
@@ -433,7 +454,7 @@ export class ImportKindsService {
     let added = false;
     if (!style) {
       const created = (await this.items.create(
-        { code: styleCode, name, itemGroupId: groupId, brandId: brandId ?? null, baseUnitId, hsnCode: str(v.hsn) ?? null, mrp: str(v.mrp) ?? null, seasonId: seasonId ?? null, variantAttributeIds: values.map((x) => x.attributeId) },
+        checked(createItemSchema, { code: styleCode, name, itemGroupId: groupId, brandId: brandId ?? null, baseUnitId, hsnCode: str(v.hsn) ?? null, mrp: str(v.mrp) ?? null, seasonId: seasonId ?? null, variantAttributeIds: values.map((x) => x.attributeId) }),
         ctx.actor,
         ctx.user,
       )) as { id: string };
@@ -451,7 +472,7 @@ export class ImportKindsService {
     if (seasonId && seasonId !== variant.seasonId) change.seasonId = seasonId;
     let changed = false;
     if (Object.keys(change).length) {
-      await this.items.update(variant.id, change, ctx.actor, ctx.user);
+      await this.items.update(variant.id, checked(updateItemSchema, change), ctx.actor, ctx.user);
       changed = true;
     }
     if (barcode && !(await this.prisma.barcode.findFirst({ where: { code: barcode } }))) {
@@ -494,11 +515,11 @@ export class ImportKindsService {
           if (!sameNumber(v.price, existing.price)) change.price = str(v.price);
           if (str(v.end) !== undefined && str(v.end) !== iso(existing.endDate)) change.endDate = str(v.end);
           if (!Object.keys(change).length) return { outcome: 'unchanged', recordId: existing.id };
-          await this.pricing.updatePrice(existing.id, change, ctx.actor, ctx.user);
+          await this.pricing.updatePrice(existing.id, checked(updatePriceSchema, change), ctx.actor, ctx.user);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException('There is no price with this start date to change');
-        const created = (await this.pricing.createPrice({ priceListId, itemId, unitId, price: str(v.price)!, startDate, endDate: str(v.end) ?? null, customerId }, ctx.actor, ctx.user)) as { id: string };
+        const created = (await this.pricing.createPrice(checked(createPriceSchema, { priceListId, itemId, unitId, price: str(v.price)!, startDate, endDate: str(v.end) ?? null, customerId }), ctx.actor, ctx.user)) as { id: string };
         return { outcome: 'added', recordId: created.id };
       },
       exportRows: async ({ companyId }) => {
@@ -577,14 +598,14 @@ export class ImportKindsService {
             if (d.dayMonth !== existing[dm] || d.year !== existing[yr]) Object.assign(change, { [dm]: d.dayMonth, [yr]: d.year });
           }
           if (!Object.keys(change).length) return { outcome: 'unchanged', recordId: existing.id };
-          await this.customers.update(existing.id, { ...change, confirmDuplicate: true }, ctx.actor);
+          await this.customers.update(existing.id, checked(updateCustomerSchema, { ...change, confirmDuplicate: true }), ctx.actor);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException('This customer does not exist');
         const birthday = str(v.birthday) ? splitDayMonth(str(v.birthday)!) : null;
         const anniversary = str(v.anniversary) ? splitDayMonth(str(v.anniversary)!) : null;
         const created = (await this.customers.create(
-          {
+          checked(createCustomerSchema, {
             code: str(v.code),
             name: str(v.name)!,
             mobile: str(v.mobile) ?? null,
@@ -599,7 +620,7 @@ export class ImportKindsService {
             birthYear: birthday?.year ?? null,
             anniversary: anniversary?.dayMonth ?? null,
             anniversaryYear: anniversary?.year ?? null,
-          },
+          }),
           ctx.actor,
         )) as { id: string };
         return { outcome: 'added', recordId: created.id };
@@ -636,7 +657,7 @@ export class ImportKindsService {
       importRight: 'import.masters',
       rights: ['suppliers.manage'],
       fields: this.partyFields('supplier'),
-      example: ['', 'Sri Murugan Traders', '9840012345', '', 'DISTRIBUTORS', '33AAACM1234B1ZQ', 'AAACM1234B', '33', 'NET30', '4 Godown Street', '', 'Chennai', '600001'],
+      example: ['', 'Sri Murugan Traders', '9840012345', '', 'DISTRIBUTORS', '33AAACM1234B1ZD', 'AAACM1234B', '33', 'NET30', '4 Godown Street', '', 'Chennai', '600001'],
       keyOf: (v) => str(v.code) ?? str(v.gstin) ?? (str(v.name) ? str(v.name)!.toLowerCase() : null),
       apply: async (v, mode, ctx) => {
         const existing = str(v.code)
@@ -655,12 +676,12 @@ export class ImportKindsService {
           if (groupId && groupId !== existing.supplierGroupId) change.supplierGroupId = groupId;
           if (termsId && termsId !== existing.paymentTermsId) change.paymentTermsId = termsId;
           if (!Object.keys(change).length) return { outcome: 'unchanged', recordId: existing.id };
-          await this.suppliers.update(existing.id, change, ctx.actor);
+          await this.suppliers.update(existing.id, checked(updateSupplierSchema, change), ctx.actor);
           return { outcome: 'changed', recordId: existing.id };
         }
         if (mode === 'change') throw new BadRequestException('This supplier does not exist');
         const created = (await this.suppliers.create(
-          { code: str(v.code), name: str(v.name)!, mobile: str(v.mobile) ?? null, email: str(v.email) ?? null, supplierGroupId: groupId, gstin: str(v.gstin) ?? null, pan: str(v.pan) ?? null, stateCode: str(v.state) ?? null, paymentTermsId: termsId ?? null, isBusiness: !!str(v.gstin), address: await this.address(v, ctx.companyId) },
+          checked(createSupplierSchema, { code: str(v.code), name: str(v.name)!, mobile: str(v.mobile) ?? null, email: str(v.email) ?? null, supplierGroupId: groupId, gstin: str(v.gstin) ?? null, pan: str(v.pan) ?? null, stateCode: str(v.state) ?? null, paymentTermsId: termsId ?? null, isBusiness: !!str(v.gstin), address: await this.address(v, ctx.companyId) }),
           ctx.actor,
         )) as { id: string };
         return { outcome: 'added', recordId: created.id };

@@ -34,7 +34,7 @@ export class ReorderService {
       where: { companyId: company.id, status: 'open', ...(storeId ? { storeId } : {}), ...(stores ? { storeId: { in: stores } } : {}) },
       orderBy: [{ storeId: 'asc' }, { createdAt: 'asc' }],
     });
-    const items = await this.prisma.item.findMany({ where: { id: { in: rows.map((r) => r.itemId) } }, select: { id: true, code: true, name: true, baseUnitId: true } });
+    const items = await this.prisma.item.findMany({ where: { id: { in: rows.map((r) => r.itemId) } }, select: { id: true, code: true, name: true, baseUnitId: true, preferredSupplierId: true } });
     const suppliers = await this.prisma.supplier.findMany({ where: { id: { in: rows.map((r) => r.supplierId).filter((x): x is string => !!x) } }, select: { id: true, code: true, name: true } });
     const storeRows = await this.prisma.store.findMany({ where: { id: { in: rows.map((r) => r.storeId) } }, select: { id: true, code: true, name: true } });
     const by = <T extends { id: string }>(list: T[]) => new Map(list.map((x) => [x.id, x]));
@@ -47,6 +47,8 @@ export class ReorderService {
       store: storeMap.get(r.storeId) ?? null,
       item: itemMap.get(r.itemId) ?? null,
       supplier: r.supplierId ? (supplierMap.get(r.supplierId) ?? null) : null,
+      /** "usual" when set on the item; "last" when it is the supplier it was last bought from. */
+      supplierSource: r.supplierId ? (itemMap.get(r.itemId)?.preferredSupplierId === r.supplierId ? 'usual' : 'last') : null,
       onHand: r.onHand.toString(),
       onOrder: r.onOrder.toString(),
       reorderLevel: r.reorderLevel.toString(),
@@ -97,7 +99,8 @@ export class ReorderService {
             companyId,
             storeId: level.storeId,
             itemId: level.itemId,
-            supplierId: item.preferredSupplierId,
+            // Launch check, 27 October 2026: with no usual supplier set, the one it was last bought from.
+            supplierId: item.preferredSupplierId ?? (await this.lastSupplier(tx, level.itemId)),
             onHand: onHand.toString(),
             onOrder: onOrder.toString(),
             reorderLevel: level.level.toString(),
@@ -119,6 +122,16 @@ export class ReorderService {
     const shelves = await tx.stockLocation.findMany({ where: { storeId, kind: 'shelf' }, select: { id: true } });
     const sum = await tx.stockPosition.aggregate({ where: { itemId, locationId: { in: shelves.map((l) => l.id) } }, _sum: { quantity: true } });
     return D(sum._sum.quantity ?? '0');
+  }
+
+  /** The supplier of the latest goods received for the item (not a return, not a draft or cancelled one). */
+  private async lastSupplier(tx: Db, itemId: string): Promise<string | null> {
+    const line = await tx.goodsReceiptLine.findFirst({
+      where: { itemId, receipt: { isReturn: false, status: { notIn: ['draft', 'cancelled'] } } },
+      orderBy: [{ receipt: { postingDate: 'desc' } }, { receipt: { createdAt: 'desc' } }],
+      select: { receipt: { select: { supplierId: true } } },
+    });
+    return line?.receipt.supplierId ?? null;
   }
 
   private async onOrder(tx: Db, itemId: string, storeId: string): Promise<Decimal> {

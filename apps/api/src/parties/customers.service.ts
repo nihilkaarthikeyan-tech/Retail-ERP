@@ -11,8 +11,7 @@ import {
   gstinStateCode,
   hasPermission,
   type QuickAddCustomerInput,
-  type UpdateCustomerInput,
-} from 'shared';
+  type UpdateCustomerInput, stateWithCode } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
@@ -260,7 +259,7 @@ export class CustomersService {
   private checkGstin(gstin: string | null, stateCode: string | null): string | null {
     if (!gstin) return stateCode;
     const fromGstin = gstinStateCode(gstin);
-    if (stateCode && stateCode !== fromGstin) throw new BadRequestException(`GSTIN ${gstin} belongs to state code ${fromGstin}, not ${stateCode}`);
+    if (stateCode && stateCode !== fromGstin) throw new BadRequestException(`GSTIN ${gstin} is for ${stateWithCode(fromGstin)}, not ${stateWithCode(stateCode)}`);
     return fromGstin;
   }
 

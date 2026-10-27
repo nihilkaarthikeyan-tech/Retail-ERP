@@ -327,15 +327,16 @@ describe("SummaryEmailSettings", () => {
     });
   }
 
-  it("explains in plain words that the mail account must be added on the server, and still saves", async () => {
+  it("explains in plain words that sending is not switched on, and still saves", async () => {
     const fetch = setup();
     render(
       <AuthProvider>
         <SummaryEmailSettings />
       </AuthProvider>,
     );
-    expect(await screen.findByText(/Email is not set up on the server yet/)).toBeTruthy();
-    expect(screen.getByText("SMTP_HOST")).toBeTruthy();
+    expect(await screen.findByText(/Sending email is not switched on yet/)).toBeTruthy();
+    expect(screen.queryByText("SMTP_HOST")).toBeNull();
+    expect(screen.getByText(/Retail ERP support switches it on/)).toBeTruthy();
     expect(screen.getByText(/You can still choose and save everything below now/)).toBeTruthy();
     // The last send's error is shown.
     expect(await screen.findByText(/No mail account is set up on the server/)).toBeTruthy();
@@ -390,7 +391,8 @@ describe("menu and history", () => {
 
   it("shows a report download as “Downloaded a report” with its name and filters", () => {
     expect(actionLabel("export")).toBe("Downloaded a report");
-    expect(actionLabel("update")).toBe("update");
+    expect(actionLabel("update")).toBe("Changed");
+    expect(actionLabel("something_new")).toBe("something_new");
     render(<ExportDetails changes={{ report: "Daily sales by store", filters: { from: "2026-10-01", to: "2026-10-16", store: "MAIN — Main Store" }, rows: 12 }} />);
     const items = screen.getAllByRole("listitem").map((li) => li.textContent);
     expect(items).toEqual(["Report: Daily sales by store", `From: ${formatDate("2026-10-01")}`, `To: ${formatDate("2026-10-16")}`, "Store: MAIN — Main Store", "Rows: 12"]);

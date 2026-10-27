@@ -21,12 +21,23 @@ export default function StoresPage() {
     [canSeeCompany],
   );
   const [adding, setAdding] = useState(false);
+  const defaultGstin = regs.data?.find((r) => r.isDefault && r.active)?.gstin;
 
   const columns: Column<StoreDto>[] = [
     { key: "code", header: "Code", render: (s) => <Link href={`/stores/${s.id}`}>{s.code}</Link> },
     { key: "name", header: "Name", render: (s) => s.name },
     { key: "city", header: "City", render: (s) => s.city ?? "—" },
-    { key: "gstin", header: "GSTIN", render: (s) => <span className="mono">{s.gstRegistration?.gstin ?? "—"}</span> },
+    { key: "gstin", header: "GSTIN", render: (s) =>
+        s.gstRegistration ? (
+          <span className="mono">{s.gstRegistration.gstin}</span>
+        ) : defaultGstin ? (
+          <span>
+            <span className="mono">{defaultGstin}</span> <span className="muted">(company default)</span>
+          </span>
+        ) : (
+          "—"
+        ),
+    },
     { key: "active", header: "Status", render: (s) => <ActiveBadge active={s.active} /> },
   ];
 

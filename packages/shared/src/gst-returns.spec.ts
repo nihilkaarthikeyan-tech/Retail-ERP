@@ -49,7 +49,7 @@ describe('return periods', () => {
 describe('sorting documents into GSTR-1 sections', () => {
   const doc = { sellerState: '33', date: '2026-09-10' };
   it('registered buyers are B2B; bills of supply are not reported', () => {
-    expect(outwardSection({ ...doc, invoiceKind: 'business', buyerGstin: '29AAACR1234A1Z1', placeOfSupply: '29', value: '1050' })).toBe('b2b');
+    expect(outwardSection({ ...doc, invoiceKind: 'business', buyerGstin: '29AAACR1234A1ZZ', placeOfSupply: '29', value: '1050' })).toBe('b2b');
     expect(outwardSection({ ...doc, invoiceKind: 'bill_of_supply', placeOfSupply: '33', value: '1050' })).toBe('excluded');
     // A "business" bill without a GSTIN is a consumer bill.
     expect(outwardSection({ ...doc, invoiceKind: 'business', buyerGstin: null, placeOfSupply: '33', value: '1050' })).toBe('b2cs');
@@ -63,7 +63,7 @@ describe('sorting documents into GSTR-1 sections', () => {
     expect(outwardSection({ ...doc, date: '2024-07-15', invoiceKind: 'consumer', placeOfSupply: '29', value: '200000' })).toBe('b2cs');
   });
   it('credit notes follow their original invoice', () => {
-    expect(noteSection({ ...doc, invoiceKind: 'business', buyerGstin: '29AAACR1234A1Z1', placeOfSupply: '29', value: '1050' })).toBe('cdnr');
+    expect(noteSection({ ...doc, invoiceKind: 'business', buyerGstin: '29AAACR1234A1ZZ', placeOfSupply: '29', value: '1050' })).toBe('cdnr');
     expect(noteSection({ ...doc, invoiceKind: 'consumer', placeOfSupply: '29', value: '300000' })).toBe('cdnur');
     expect(noteSection({ ...doc, invoiceKind: 'consumer', placeOfSupply: '33', value: '500' })).toBe('b2cs');
     expect(noteSection(null)).toBe('b2cs');
@@ -181,12 +181,12 @@ describe('GSTR-1 offline-tool JSON', () => {
     const item = { rate: '5.00', taxable: '1000.00', igst: '50.00', cgst: '0.00', sgst: '0.00', cess: '0.00' };
     const j = JSON.parse(stringifyPortalJson(gstr1PortalJson(
       {
-        gstin: '33AAACR1234A1ZV',
+        gstin: '33AAACR1234A1ZA',
         fp: '092026',
-        b2b: [{ number: 'B/1', date: '2026-09-02', value: '1050.00', placeOfSupply: '29', buyerGstin: '29AAACR1234A1Z1', reverseCharge: false, items: [item] }],
+        b2b: [{ number: 'B/1', date: '2026-09-02', value: '1050.00', placeOfSupply: '29', buyerGstin: '29AAACR1234A1ZZ', reverseCharge: false, items: [item] }],
         b2cl: [],
         b2cs: [{ supplyType: 'INTRA', placeOfSupply: '33', rate: '5.00', taxable: '800.00', igst: '0.00', cgst: '20.00', sgst: '20.00', cess: '0.00' }],
-        cdnr: [{ number: 'B/2', date: '2026-09-03', value: '-1050.00', placeOfSupply: '29', buyerGstin: '29AAACR1234A1Z1', reverseCharge: false, noteType: 'C', items: [{ ...item, taxable: '-1000.00', igst: '-50.00' }] }],
+        cdnr: [{ number: 'B/2', date: '2026-09-03', value: '-1050.00', placeOfSupply: '29', buyerGstin: '29AAACR1234A1ZZ', reverseCharge: false, noteType: 'C', items: [{ ...item, taxable: '-1000.00', igst: '-50.00' }] }],
         cdnur: [],
         nil: [],
         hsnBusiness: [{ hsn: '6205', description: 'Shirts', uqc: 'PCS', quantity: '0.000', rate: '5.00', taxable: '0.00', igst: '0.00', cgst: '0.00', sgst: '0.00', cess: '0.00' }],
@@ -196,11 +196,11 @@ describe('GSTR-1 offline-tool JSON', () => {
       '33',
     )));
     expect(j).toEqual({
-      gstin: '33AAACR1234A1ZV',
+      gstin: '33AAACR1234A1ZA',
       fp: '092026',
-      b2b: [{ ctin: '29AAACR1234A1Z1', inv: [{ inum: 'B/1', idt: '02-09-2026', val: 1050, pos: '29', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 5, txval: 1000, iamt: 50, csamt: 0 } }] }] }],
+      b2b: [{ ctin: '29AAACR1234A1ZZ', inv: [{ inum: 'B/1', idt: '02-09-2026', val: 1050, pos: '29', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 5, txval: 1000, iamt: 50, csamt: 0 } }] }] }],
       b2cs: [{ sply_ty: 'INTRA', pos: '33', typ: 'OE', rt: 5, txval: 800, camt: 20, samt: 20, csamt: 0 }],
-      cdnr: [{ ctin: '29AAACR1234A1Z1', nt: [{ ntty: 'C', nt_num: 'B/2', nt_dt: '03-09-2026', val: 1050, pos: '29', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 5, txval: 1000, iamt: 50, csamt: 0 } }] }] }],
+      cdnr: [{ ctin: '29AAACR1234A1ZZ', nt: [{ ntty: 'C', nt_num: 'B/2', nt_dt: '03-09-2026', val: 1050, pos: '29', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 5, txval: 1000, iamt: 50, csamt: 0 } }] }] }],
       hsn: { hsn_b2b: [{ num: 1, hsn_sc: '6205', desc: 'Shirts', uqc: 'PCS', qty: 0, rt: 5, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }] },
       doc_issue: { doc_det: [{ doc_num: 1, doc_typ: 'Invoices for outward supply', docs: [{ num: 1, from: 'B/1', to: 'B/1', totnum: 1, cancel: 0, net_issue: 1 }] }] },
     });

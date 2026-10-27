@@ -210,6 +210,8 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
             ))}
           </div>
         ) : null}
+        {/* Launch check, 27 October 2026: a bill paid fully by gift card or points said only "Paid ₹0.00". */}
+        {due.isZero() && !rows.length ? <p className="muted">Nothing more to pay: points, gift cards or credit cover the whole bill. Press Finish and print.</p> : null}
         <div className="till-pay-summary">
           <div>
             <span>{refund ? "Refunded" : "Paid"}</span>

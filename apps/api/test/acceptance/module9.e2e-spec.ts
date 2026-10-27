@@ -148,6 +148,14 @@ describe('9.1 daily sales by store, 9.8 store limits', () => {
     expect(items.totals.netSales).toBe('800.00');
     expect((await m.agent.get('/dashboards').expect(200)).body.dashboards).not.toContain('owner');
   });
+
+  // Found in the walkthrough of 27 October 2026: a ₹2,000 note for a ₹1,597 bill showed as ₹2,000 received.
+  it('payments received today count cash after the change given back', async () => {
+    await sell([{ itemId: rice.id, quantity: '3' }], '500');
+    const d = (await owner.get('/dashboards/store').expect(200)).body;
+    // 315 + 315 + 420 − 210 (return) + 525 (ANNA) + 500 handed over − 185 change.
+    expect(d.charts.paymentMix).toEqual([{ label: expect.any(String), value: '1680.00' }]);
+  });
 });
 
 describe('9.2 best sellers and gross profit, 9.9 dashboards agree with reports', () => {
@@ -302,6 +310,10 @@ describe('9.7 cash position and cash flow', () => {
     const flow = (await owner.get(`/reports/cash-flow?from=${monthStart}&to=${today()}`).expect(200)).body;
     expect(flow).toMatchObject({ opening: '0.00', closing: '4050.00', netChange: '4050.00', agrees: true });
     expect(flow.trading.total).toBe('1050.00');
+    // Launch check, 27 October 2026: the till's cash went only to sales and GST, never to cost of goods or stock.
+    const tradingNames = (flow.trading.rows as { name: string; amount: string }[]).map((r) => r.name);
+    expect(tradingNames.some((n) => /Cost of goods sold|Stock in hand/.test(n))).toBe(false);
+    expect(tradingNames.some((n) => /Sales/.test(n))).toBe(true);
     expect(flow.investing.total).toBe('-2000.00');
     expect(flow.financing.total).toBe('5000.00');
     expect(flow.transfers.total).toBe('0.00');

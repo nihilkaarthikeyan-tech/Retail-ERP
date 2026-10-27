@@ -80,6 +80,7 @@ export const billInclude = {
   lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { id: true, code: true, name: true, hsnCode: true, isStockItem: true, trackSerials: true, trackBatches: true } } } },
   payments: { include: { paymentMethod: { select: { id: true, code: true, name: true, kind: true, accountRole: true } } } },
   till: { select: { id: true, code: true, name: true, storeId: true, receiptFooter: true } },
+  shift: { select: { status: true } },
 } satisfies Prisma.PosBillInclude;
 export type BillRow = Prisma.PosBillGetPayload<{ include: typeof billInclude }>;
 
@@ -1809,6 +1810,8 @@ export class PosBillsService {
       status: b.status,
       till: { id: b.till.id, code: b.till.code, name: b.till.name },
       shiftId: b.shiftId,
+      /** Launch check, 27 October 2026: a bill can be cancelled only while its shift is open. */
+      shiftOpen: b.shift.status === 'open',
       clientId: b.clientId,
       returnOfId: b.returnOfId,
       exchangeId: b.exchangeId,

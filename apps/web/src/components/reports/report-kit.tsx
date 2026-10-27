@@ -21,6 +21,7 @@ import { type CsvCell, downloadReport, formatWorkedOut, type LogFilters, percent
 import { isNegative, showQuantity, useBusinessToday } from "@/lib/stock";
 import type { BrandDto, CompanyDto, ItemGroupNode, StoreRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
+import { forFilter, pickLabel } from "@/lib/pick";
 
 // ---- Filters kept in the address bar ----
 
@@ -122,7 +123,7 @@ export function useBrandOptions(): Option[] {
   const { user } = useAuth();
   const can = hasPermission(user, "catalogue.view");
   const brands = useLoad<BrandDto[]>(() => (can ? api.get<BrandDto[]>("/catalogue/brands") : Promise.resolve([])), [can]);
-  return (brands.data ?? []).map((b) => ({ id: b.id, label: b.name }));
+  return forFilter(brands.data ?? []).map((b) => ({ id: b.id, label: pickLabel(b.name, b) }));
 }
 
 export function OptionFilter({ id, label, all, options, value, onChange }: { id: string; label: string; all: string; options: Option[]; value: string; onChange: (v: string) => void }) {

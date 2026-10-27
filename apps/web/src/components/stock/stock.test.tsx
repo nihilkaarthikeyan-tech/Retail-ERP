@@ -294,10 +294,11 @@ describe("StockOnHand", () => {
         <StockOnHand />
       </AuthProvider>,
     );
-    expect(await screen.findByText("11684.00")).toBeTruthy();
+    expect(await screen.findByText("₹11,684.00")).toBeTruthy();
+    expect(screen.getByText("₹92.00")).toBeTruthy();
     const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
     expect(headers).toContain("Value");
     expect(headers).toContain("Cost per unit");
-    expect(screen.getByText("Total value: ₹11684.00")).toBeTruthy();
+    expect(screen.getByText("Total value: ₹11,684.00")).toBeTruthy();
   });
 });

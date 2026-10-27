@@ -123,7 +123,7 @@ export function PartyContacts({ basePath, contacts, readOnly, onChanged }: Party
           <TextInput id="con-email" label="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} error={errors.email} autoComplete="off" />
           <div className="check-row">
             <CheckInput id="con-isMain" label="Main contact" checked={form.isMain} onChange={(e) => setForm({ ...form, isMain: e.target.checked })} />
-            <CheckInput id="con-noPromotions" label="No promotional messages" description="The person has not agreed to offers by SMS or email (decision 74)." checked={form.noPromotions} onChange={(e) => setForm({ ...form, noPromotions: e.target.checked })} />
+            <CheckInput id="con-noPromotions" label="No promotional messages" description="The person has not agreed to offers by SMS or email." checked={form.noPromotions} onChange={(e) => setForm({ ...form, noPromotions: e.target.checked })} />
             {editing !== "new" ? <CheckInput id="con-active" label="Active" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> : null}
           </div>
           <div className="actions">

@@ -1,11 +1,14 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-// What this browser remembers about the menu: which groups are folded, and
+// What this browser remembers about the menu: which groups are opened, and
 // which screens this person opens most (so the five most-used sit at the
-// top). Kept in this browser only, read through useSyncExternalStore so the
-// first paint matches the server and updates arrive as events.
+// top). Kept in this browser only, per person (a shop computer is shared; found
+// in the launch check of 27 October 2026), read through useSyncExternalStore so
+// the first paint matches the server and updates arrive as events.
 
 const USAGE_KEY = "retail-erp.menu-usage";
-const COLLAPSED_KEY = "retail-erp.menu-collapsed";
+// Owner, 27 October 2026 (decision L11): groups start folded and the ones a person opens are
+// remembered. A new key, so the old "folded" lists of the earlier menu are simply left behind.
+const OPENED_KEY = "retail-erp.menu-opened";
 const MOST_USED = 5;
 
 export type Counts = Readonly<Record<string, number>>;
@@ -13,13 +16,26 @@ export type Counts = Readonly<Record<string, number>>;
 const EMPTY_COUNTS: Counts = Object.freeze({});
 const EMPTY_LIST: readonly string[] = Object.freeze([]);
 
+let user = "";
 let counts: Counts | null = null;
-let collapsed: readonly string[] | null = null;
+let opened: readonly string[] | null = null;
 const listeners = new Set<() => void>();
+
+/** Whose menu this is; called when the signed-in user is known or changes. */
+export function setMenuUser(userId: string | null): void {
+  const next = userId ?? "";
+  if (next === user) return;
+  user = next;
+  counts = null;
+  opened = null;
+  emit();
+}
+
+const keyFor = (key: string) => (user ? `${key}:${user}` : key);
 
 function readJson(key: string): unknown {
   try {
-    const raw = typeof window === "undefined" ? null : window.localStorage.getItem(key);
+    const raw = typeof window === "undefined" ? null : window.localStorage.getItem(keyFor(key));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -28,7 +44,7 @@ function readJson(key: string): unknown {
 
 function writeJson(key: string, value: unknown) {
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    window.localStorage.setItem(keyFor(key), JSON.stringify(value));
   } catch {
     // Private windows may refuse storage; the change then lasts for this visit only.
   }
@@ -54,16 +70,16 @@ export function getCounts(): Counts {
 
 export const getServerCounts = (): Counts => EMPTY_COUNTS;
 
-/** Folded menu groups; the same array until one is toggled. */
-export function getCollapsed(): readonly string[] {
-  if (collapsed === null) {
-    const parsed = readJson(COLLAPSED_KEY);
-    collapsed = Array.isArray(parsed) ? Object.freeze(parsed.filter((x): x is string => typeof x === "string")) : EMPTY_LIST;
+/** Menu groups the person opened; the same array until one is toggled. */
+export function getOpened(): readonly string[] {
+  if (opened === null) {
+    const parsed = readJson(OPENED_KEY);
+    opened = Array.isArray(parsed) ? Object.freeze(parsed.filter((x): x is string => typeof x === "string")) : EMPTY_LIST;
   }
-  return collapsed;
+  return opened;
 }
 
-export const getServerCollapsed = (): readonly string[] => EMPTY_LIST;
+export const getServerOpened = (): readonly string[] => EMPTY_LIST;
 
 /** Counts one visit to a menu screen (the dashboard is always one click away, so it is not counted). */
 export function recordVisit(href: string): void {
@@ -74,11 +90,11 @@ export function recordVisit(href: string): void {
   emit();
 }
 
-export function toggleCollapsed(section: string): void {
-  const now = getCollapsed();
+export function toggleOpened(section: string): void {
+  const now = getOpened();
   const next = now.includes(section) ? now.filter((s) => s !== section) : [...now, section];
-  collapsed = Object.freeze(next);
-  writeJson(COLLAPSED_KEY, next);
+  opened = Object.freeze(next);
+  writeJson(OPENED_KEY, next);
   emit();
 }
 

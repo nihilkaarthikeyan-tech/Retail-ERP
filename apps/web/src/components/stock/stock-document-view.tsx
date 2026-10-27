@@ -1,6 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
+import { rupees } from "@/lib/purchasing";
 import Link from "next/link";
 import { useState } from "react";
 import { Decimal } from "shared";
@@ -119,7 +120,7 @@ export function StockDocumentView({ doc, locations, stores, onChanged }: StockDo
     ...(withCost
       ? [
           { key: "cost", header: "Cost per basic unit", align: "right", render: (l: StockDocLineDto) => l.unitCost ?? "—" },
-          { key: "value", header: "Value change", align: "right", render: (l: StockDocLineDto) => (doc.status === "draft" ? "—" : (l.valueChange ?? "—")) },
+          { key: "value", header: "Value change", align: "right", render: (l: StockDocLineDto) => (doc.status === "draft" ? "—" : rupees(l.valueChange)) },
         ] satisfies Column<StockDocLineDto>[]
       : []),
   ];

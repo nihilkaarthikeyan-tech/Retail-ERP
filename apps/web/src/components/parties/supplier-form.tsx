@@ -209,7 +209,7 @@ export function SupplierForm({ supplier, groups, priceLists, terms, settings, re
             <CheckInput id="sup-billWithoutReceipt" label="Bill without receipt" description="A purchase bill may be entered before the goods are received." checked={form.allowBillWithoutReceipt} onChange={setFlag("allowBillWithoutReceipt")} />
           </div>
           <div className="span-2">
-            <PartyPicker id="sup-linkedCustomer" label="Linked customer" kind="customer" value={form.linkedCustomer} onChange={(p) => setForm((f) => ({ ...f, linkedCustomer: p }))} error={errors.linkedCustomerId} disabled={readOnly} hint="When this supplier is also one of our customers (decision 25). Balances stay separate." />
+            <PartyPicker id="sup-linkedCustomer" label="Linked customer" kind="customer" value={form.linkedCustomer} onChange={(p) => setForm((f) => ({ ...f, linkedCustomer: p }))} error={errors.linkedCustomerId} disabled={readOnly} hint="When this supplier is also one of our customers. Balances stay separate." />
           </div>
         </div>
       </fieldset>

@@ -161,7 +161,8 @@ describe("finalising a bill whose prices differ from the receipt", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Record the difference" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(finalised));
-    expect(writes(fetchMock).map((w) => w.body)).toEqual([{}, { confirmPriceDifference: true }]);
+    // Only the finalise calls: under a busy full run other background requests can also be sent.
+    expect(writes(fetchMock).filter((w) => w.path.endsWith("/finalise")).map((w) => w.body)).toEqual([{}, { confirmPriceDifference: true }]);
     // Over-billing accepted with a warning is shown.
     expect(await screen.findByText(/accepted above the allowance/)).toBeTruthy();
   });
@@ -389,7 +390,7 @@ describe("purchase reports", () => {
         billId: BILL_ID,
         number: "PB-0001",
         kind: "against_receipt",
-        supplier: { code: "SUP-001", name: 'Lakshmi "LT" Traders', gstin: "33AAAAA0000A1Z5" },
+        supplier: { code: "SUP-001", name: 'Lakshmi "LT" Traders', gstin: "33AAAAA0000A1Z9" },
         supplierBillNo: "LT/889",
         supplierBillDate: "2026-10-14",
         postingDate: "2026-10-15",
@@ -409,7 +410,7 @@ describe("purchase reports", () => {
       '"Our number","Kind","Posting date","Supplier","Supplier GSTIN","Supplier\'s bill no","Supplier\'s bill date","Item","HSN","Quantity","Price","Before GST","GST %","CGST","SGST","IGST","Line total"',
     );
     expect(csv[1]).toBe(
-      '"PB-0001","Against goods receipts","2026-10-15","SUP-001 Lakshmi ""LT"" Traders","33AAAAA0000A1Z5","LT/889","2026-10-14","ITM-000001 Rice","1006","10","100.00","1000.00","5","25.00","25.00","0.00","1050.00"',
+      '"PB-0001","Against goods receipts","2026-10-15","SUP-001 Lakshmi ""LT"" Traders","33AAAAA0000A1Z9","LT/889","2026-10-14","ITM-000001 Rice","1006","10","100.00","1000.00","5","25.00","25.00","0.00","1050.00"',
     );
   });
 

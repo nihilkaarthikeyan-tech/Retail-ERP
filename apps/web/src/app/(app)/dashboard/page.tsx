@@ -9,6 +9,7 @@ import { ItemSearchBox } from "@/components/items/item-search-box";
 import { GettingStarted } from "@/components/getting-started";
 import { Dashboards } from "@/components/reports/dashboards";
 import { SystemStatus } from "@/components/system-status";
+import { Alert } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { CompanyDto } from "@/lib/types";
@@ -42,6 +43,9 @@ export default function DashboardPage() {
   return (
     <>
       <h1>{user ? `${greeting}, ${user.firstName}` : greeting}</h1>
+      {user && !user.isOwnerAdmin && user.roles.length === 0 ? (
+        <Alert kind="info">You have no role yet, so there is nothing to open. Ask the shop owner to give you one under Administration → Users.</Alert>
+      ) : null}
       {canSeeCompany ? (
         <p className="muted">
           {company.loading
@@ -81,8 +85,13 @@ export default function DashboardPage() {
         <p className="muted">No store has been assigned to you yet.</p>
       )}
 
-      <h2>System status</h2>
-      <SystemStatus />
+      {/* Technical details for the owner (and for support); staff do not need them. */}
+      {user?.isOwnerAdmin ? (
+        <>
+          <h2>System status</h2>
+          <SystemStatus />
+        </>
+      ) : null}
     </>
   );
 }

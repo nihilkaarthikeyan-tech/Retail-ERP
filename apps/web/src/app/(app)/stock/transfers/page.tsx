@@ -90,8 +90,14 @@ export default function InTransitPage() {
       ) : null}
       <h2>Coming to your stores</h2>
       <DataTable columns={incomingColumns} rows={sends.data ? incoming : null} rowKey={(d) => d.id} loading={sends.loading} empty="Nothing is on its way to your stores." />
-      <h2>Sent from your stores</h2>
-      <DataTable columns={base} rows={sends.data ? outgoing : null} rowKey={(d) => d.id} loading={sends.loading} empty="Nothing you sent is still in transit." />
+      {/* Launch check, 27 October 2026: for someone who looks after every store, every transfer is
+          "coming to your stores", and a second empty list only confused. */}
+      {user?.allStores ? null : (
+        <>
+          <h2>Sent to stores you do not look after</h2>
+          <DataTable columns={base} rows={sends.data ? outgoing : null} rowKey={(d) => d.id} loading={sends.loading} empty="Nothing you sent to other stores is still on its way." />
+        </>
+      )}
       {receiving && locations.data ? (
         <ReceiveDialog
           send={receiving}

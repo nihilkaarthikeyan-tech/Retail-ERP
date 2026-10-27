@@ -90,7 +90,7 @@ describe('5.1–5.5, 5.7 and 5.11: one order through its life', () => {
   beforeAll(async () => {
     await freshCompany();
     rice = await item('Basmati Rice 1 kg');
-    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
     await opening(rice.id, '100', '90');
   });
   afterAll(expectConsistent);
@@ -192,7 +192,7 @@ describe('5.4 bill numbers in another year or from another supplier', () => {
   beforeAll(freshCompany);
 
   it('the same number is accepted from another supplier, and from the same supplier in another financial year', async () => {
-    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
     const other = await supplier('Lakshmi Agencies', { stateCode: '33' });
     const service = await item('Unloading charges', { isStockItem: false });
     const body = (s: string, billDate: string) => ({ kind: 'services', supplierId: s, supplierBillNo: 'SMT/1182', supplierBillDate: billDate, lines: [{ itemId: service.id, quantity: '1', rate: '500', gstRate: '18' }] });
@@ -212,7 +212,7 @@ describe('5.6 receiving without an order (decision 31)', () => {
 
   it('staff are refused; a Store Manager needs a reason, which is kept in the history', async () => {
     const dal = await item('Moong Dal 1 kg');
-    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
     await prisma.item.update({ where: { id: dal.id }, data: { lastPurchasePrice: '110' } });
     const receiver = await staff('Ravi', 'ravi@rademics.test', 'stock_receiving');
     const manager = await staff('Priya', 'priya@rademics.test', 'store_manager');
@@ -231,7 +231,7 @@ describe('5.8 free goods, 5.9 extra charges and 5.10 a bill that receives the go
   let smt: { id: string; code: string };
   beforeAll(async () => {
     await freshCompany();
-    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
   });
   afterAll(expectConsistent);
 
@@ -317,7 +317,7 @@ describe('5.13 reorder suggestions', () => {
   beforeAll(freshCompany);
 
   it('below the level a suggestion of the reorder quantity becomes a draft order; then nothing more is suggested', async () => {
-    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    const smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
     const sugar = await item('Sugar 1 kg');
     await prisma.item.update({ where: { id: sugar.id }, data: { preferredSupplierId: smt.id, lastPurchasePrice: '42' } });
     await opening(sugar.id, '30', '40');
@@ -340,6 +340,19 @@ describe('5.13 reorder suggestions', () => {
     await owner.post('/purchase/reorder-suggestions/run').expect(200);
     expect((await owner.get('/purchase/reorder-suggestions').expect(200)).body).toEqual([]);
   });
+
+  // Launch check, 27 October 2026: "Usual supplier: None set" though the item was just bought.
+  it('with no usual supplier, the suggestion is for the supplier it was last bought from', async () => {
+    const first = await supplier('Kumar Agencies', { stateCode: '33' });
+    const latest = await supplier('Lakshmi Wholesale', { stateCode: '33' });
+    const dal = await item('Toor Dal 1 kg');
+    await receive(owner, { supplierId: first.id, noOrderReason: 'Walk-in', lines: [{ itemId: dal.id, receivedQuantity: '5', rate: '120', gstRate: '0' }] });
+    await receive(owner, { supplierId: latest.id, noOrderReason: 'Walk-in', lines: [{ itemId: dal.id, receivedQuantity: '5', rate: '118', gstRate: '0' }] });
+    await owner.post('/stock/reorder-levels').send({ itemId: dal.id, storeId: MAIN, level: '50', quantity: '40' }).expect(201);
+    await owner.post('/purchase/reorder-suggestions/run').expect(200);
+    const s = ((await owner.get('/purchase/reorder-suggestions').expect(200)).body as { item: { id: string }; supplier: { id: string }; supplierSource: string }[]).find((r) => r.item.id === dal.id);
+    expect(s).toMatchObject({ supplier: { id: latest.id }, supplierSource: 'last' });
+  });
 });
 
 describe('approval limit, row locking and rights', () => {
@@ -347,7 +360,7 @@ describe('approval limit, row locking and rights', () => {
   let atta: { id: string; code: string };
   beforeAll(async () => {
     await freshCompany();
-    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZQ' });
+    smt = await supplier('Sri Murugan Traders', { gstin: '33AAACM1234B1ZD' });
     atta = await item('Aashirvaad Atta 5 kg');
   });
   afterAll(expectConsistent);

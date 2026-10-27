@@ -62,7 +62,7 @@ function salesFigures<T extends SalesTotals>(totals: SalesTotals, opts: { bills?
   const seesCost = totals.cost !== undefined;
   return [
     ...(opts.bills !== false ? [col.count<T>("bills", "Sale bills", (r) => r.saleBills, totals.saleBills)] : []),
-    col.qty<T>("quantity", "Quantity sold", (r) => r.quantity, totals.quantity),
+    col.qty<T>("quantity", "Pieces sold (before returns)", (r) => r.quantity, totals.quantity),
     ...(opts.returns !== false
       ? [col.money<T>("gross", "Sales (before GST)", (r) => r.grossSales, totals.grossSales), col.money<T>("returns", "Returns (before GST)", (r) => r.returns, totals.returns)]
       : []),
@@ -243,7 +243,7 @@ export function BestSellersReport() {
     return [
       col.count<GroupedRow>("rank", "Rank", (x) => x.rank ?? 0),
       ...nameColumns("item"),
-      col.qty<GroupedRow>("quantity", "Quantity sold", (x) => x.quantity, d.totals.quantity),
+      col.qty<GroupedRow>("quantity", "Pieces sold (before returns)", (x) => x.quantity, d.totals.quantity),
       col.money<GroupedRow>("net", "Net sales (before GST)", (x) => x.netSales, d.totals.netSales),
       ...(cost ? [col.money<GroupedRow>("profit", "Gross profit", (x) => x.grossProfit, d.totals.grossProfit), col.percent<GroupedRow>("margin", "Margin %", (x) => x.marginPercent, d.totals.marginPercent ?? null)] : []),
     ];
@@ -310,7 +310,7 @@ export function SalesByGroupReport() {
       { ...col.text<GroupWeekRow>("name", by === "brand" ? "Brand" : "Item group", (x) => x.name), wide: true },
       ...d.weeks.map((w) => col.money<GroupWeekRow>(`w-${w}`, `Week of ${formatDate(w)}`, (x) => x.weeks[w]?.netSales ?? "0.00", sum((x) => x.weeks[w]?.netSales))),
       col.money<GroupWeekRow>("net", "Net sales (before GST)", (x) => x.netSales, sum((x) => x.netSales)),
-      col.qty<GroupWeekRow>("quantity", "Quantity sold", (x) => x.quantity),
+      col.qty<GroupWeekRow>("quantity", "Quantity (after returns)", (x) => x.quantity),
     ];
   };
   return (
@@ -487,7 +487,7 @@ export function GrossProfitReport() {
     const t = d.totals;
     return [
       ...nameColumns(d.groupBy),
-      col.qty<GroupedRow>("quantity", "Quantity sold", (x) => x.quantity, t.quantity),
+      col.qty<GroupedRow>("quantity", "Pieces sold (before returns)", (x) => x.quantity, t.quantity),
       col.money<GroupedRow>("net", "Net sales (before GST)", (x) => x.netSales, t.netSales),
       ...(t.cost !== undefined
         ? [

@@ -52,8 +52,9 @@ export class PinService {
     if (!row) throw new BadRequestException('That person has not set a PIN yet');
     if (row.lockedUntil && row.lockedUntil > new Date()) throw new ForbiddenException('Too many wrong PINs; try again later');
     if (!(await verifyPassword(pin, row.pinHash))) {
-      const failed = row.failedCount + 1;
-      await this.prisma.userPin.update({ where: { userId }, data: { failedCount: failed, lockedUntil: failed >= MAX_FAILS ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null } });
+      // Counted in the database itself (code audit, 27 October 2026), so PINs tried all at once still lock.
+      const { failedCount } = await this.prisma.userPin.update({ where: { userId }, data: { failedCount: { increment: 1 } }, select: { failedCount: true } });
+      if (failedCount >= MAX_FAILS) await this.prisma.userPin.update({ where: { userId }, data: { lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) } });
       throw new UnauthorizedException('Wrong PIN');
     }
     if (row.failedCount) await this.prisma.userPin.update({ where: { userId }, data: { failedCount: 0, lockedUntil: null } });

@@ -13,6 +13,7 @@ import { CASHIER_KEY, type SessionLike, TillEngine } from "@/lib/till/engine";
 import { tillStore } from "@/lib/till/storage";
 import { tillApi } from "@/lib/till/till-api";
 import { getTillDevice, type TillDeviceInfo } from "@/lib/till-device";
+import { formatDate } from "@/lib/format";
 import { BillingScreen } from "./billing-screen";
 import { LockScreen } from "./pin-dialogs";
 import { OpenShiftScreen } from "./shift-dialogs";
@@ -117,7 +118,17 @@ export function TillApp({ device, engine: given }: { device: TillDeviceInfo; eng
   } else if (state.user && !hasPermission(state.user, "pos.sell")) {
     body = (
       <div className="till-center">
-        <Alert kind="error">Your role cannot bill at the till (needs the right “pos.sell”).</Alert>
+        <Alert kind="error">Your role cannot bill at the till. Ask the owner to give you the Cashier role under Administration → Users.</Alert>
+      </div>
+    );
+  } else if (state.user && !state.user.allStores && !state.user.stores.some((s) => s.id === snapshot.till.store.id)) {
+    // Found in the launch check of 27 October 2026: a cashier of another store could open a shift
+    // here; it was only refused when sent, and every bill after it would have been refused too.
+    body = (
+      <div className="till-center">
+        <Alert kind="error">
+          {state.user.firstName} is not allowed to work at {snapshot.till.store.name}. Ask the owner to allow this store under Administration → Users, or sign in as a cashier of this store.
+        </Alert>
       </div>
     );
   } else if (!state.shift) {
@@ -139,7 +150,7 @@ export function TillApp({ device, engine: given }: { device: TillDeviceInfo; eng
         </div>
         <div className="till-top-id">
           <span className="muted">Shift</span>
-          <strong>{state.shift ? state.shift.businessDate : "Not open"}</strong>
+          <strong>{state.shift ? formatDate(state.shift.businessDate) : "Not open"}</strong>
         </div>
         <TillStatus engine={engine} info={status} />
         <div className="till-top-end">

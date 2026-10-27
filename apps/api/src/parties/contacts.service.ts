@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Addresses and contact people of customers and suppliers.
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { type AddressInput, type ContactInput, gstinStateCode, type UpdateAddressInput, type UpdateContactInput } from 'shared';
+import { type AddressInput, type ContactInput, gstinStateCode, type UpdateAddressInput, type UpdateContactInput, stateWithCode } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { PartyType } from '../generated/prisma/client.js';
@@ -28,7 +28,7 @@ export class ContactsService {
   /** Runs inside the caller's transaction (also used when a party is created). */
   async createAddressIn(db: Db, partyType: PartyType, partyId: string, input: AddressInput, actor: Actor) {
     if (input.gstin && gstinStateCode(input.gstin) !== input.stateCode) {
-      throw new BadRequestException(`GSTIN ${input.gstin} belongs to state code ${gstinStateCode(input.gstin)}`);
+      throw new BadRequestException(`GSTIN ${input.gstin} is for ${stateWithCode(gstinStateCode(input.gstin))}`);
     }
     const count = await db.address.count({ where: { partyType, partyId, active: true } });
     const isMain = input.isMain ?? count === 0;
@@ -68,7 +68,7 @@ export class ContactsService {
     if (!before) throw new NotFoundException('Address not found');
     const gstin = input.gstin === undefined ? before.gstin : input.gstin;
     const stateCode = input.stateCode ?? before.stateCode;
-    if (gstin && gstinStateCode(gstin) !== stateCode) throw new BadRequestException(`GSTIN ${gstin} belongs to state code ${gstinStateCode(gstin)}`);
+    if (gstin && gstinStateCode(gstin) !== stateCode) throw new BadRequestException(`GSTIN ${gstin} is for ${stateWithCode(gstinStateCode(gstin))}, not ${stateWithCode(stateCode)}`);
     if (input.active === false && before.isMain) throw new BadRequestException('Make another address the main one before switching this off');
     return this.prisma.$transaction(async (tx) => {
       if (input.isMain) await tx.address.updateMany({ where: { partyType, partyId }, data: { isMain: false } });

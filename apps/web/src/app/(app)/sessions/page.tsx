@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Alert, Button, DataTable, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { addressName, browserName } from "@/lib/audit-labels";
 import { formatDateTime } from "@/lib/format";
 import type { SessionDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
@@ -30,8 +31,8 @@ export default function SessionsPage() {
     { key: "created", header: "Started", render: (s) => formatDateTime(s.createdAt) },
     { key: "active", header: "Last active", render: (s) => formatDateTime(s.lastActiveAt) },
     { key: "expires", header: "Expires", render: (s) => formatDateTime(s.expiresAt) },
-    { key: "ip", header: "Address", render: (s) => s.ipAddress ?? "—" },
-    { key: "ua", header: "Browser", render: (s) => <span className="muted">{s.userAgent ?? "—"}</span> },
+    { key: "ip", header: "From", render: (s) => addressName(s.ipAddress) },
+    { key: "ua", header: "Browser", render: (s) => <span title={s.userAgent ?? undefined}>{browserName(s.userAgent)}</span> },
     {
       key: "actions",
       header: "",

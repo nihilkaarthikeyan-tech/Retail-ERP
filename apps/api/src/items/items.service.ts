@@ -439,6 +439,7 @@ export class ItemsService {
         include: { unit: { select: { id: true, code: true } } },
       });
       await this.audit.record(tx, actor, { action: 'create', entityType: 'barcode', entityId: created.id, changes: { item: item.code, code: created.code, type } });
+      await this.touchForTills(tx, itemId, actor);
       return created;
     });
   }
@@ -453,16 +454,33 @@ export class ItemsService {
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.barcode.update({ where: { id: barcodeId }, data: { ...input, updatedById: actor.userId }, include: { unit: { select: { id: true, code: true } } } });
       await this.audit.recordUpdate(tx, actor, 'barcode', barcodeId, { unitId: before.unitId, active: before.active }, { unitId: after.unitId, active: after.active });
+      await this.touchForTills(tx, itemId, actor);
       return after;
     });
+  }
+
+  /**
+   * Tills download only the items changed since their last download (pos-snapshot), by the item's
+   * updatedAt. A barcode is its own row, so its item is marked changed too. Found in the launch
+   * check of 27 October 2026: a barcode added after the till's first download never scanned.
+   */
+  private async touchForTills(tx: Db, itemId: string, actor: Actor) {
+    await tx.item.update({ where: { id: itemId }, data: { updatedById: actor.userId } });
   }
 
   // ---- Variants ----
 
   async listVariants(parentId: string, user: CurrentUser) {
     await this.getRow(this.prisma, parentId);
+    const parent = await this.prisma.item.findUniqueOrThrow({ where: { id: parentId }, include: { variantAttributes: { orderBy: { sortOrder: 'asc' } } } });
     const rows = await this.prisma.item.findMany({ where: { parentItemId: parentId }, include: itemInclude, orderBy: { code: 'asc' } });
-    return rows.map((r) => this.toDto(r, user));
+    return sortVariants(rows, parent.variantAttributes.map((a) => a.attributeId), await this.valueOrder(parent.variantAttributes.map((a) => a.attributeId))).map((r) => this.toDto(r, user));
+  }
+
+  /** Each attribute value's place in its list (S before M before L), keyed attributeId|value. */
+  private async valueOrder(attributeIds: string[]): Promise<Map<string, number>> {
+    const values = await this.prisma.variantAttributeValue.findMany({ where: { attributeId: { in: attributeIds } }, select: { attributeId: true, value: true, sortOrder: true } });
+    return new Map(values.map((v) => [`${v.attributeId}|${v.value}`, v.sortOrder]));
   }
 
   async createVariants(parentId: string, input: CreateVariantsInput, actor: Actor, user: CurrentUser) {
@@ -643,4 +661,23 @@ function sameValue(a: unknown, b: unknown): boolean {
 
 function unitSummary(item: ItemRow): string[] {
   return item.units.map((u) => `${u.unit.code}=${u.factor.toString()}${u.mrp ? ` (MRP ${u.mrp.toString()})` : ''}`).sort();
+}
+
+/**
+ * Variants in the order of their lists: by the style's first attribute, then the next, each
+ * value in its list's own order (S, M, L rather than L, M, S by code). Found in the launch
+ * check of 27 October 2026. Values no longer in the list go last, then the code decides.
+ */
+export function sortVariants<T extends { code: string; variantValues: { attributeId: string; value: string }[] }>(rows: T[], attributeIds: string[], order: Map<string, number>): T[] {
+  const place = (r: T, attributeId: string) => {
+    const v = r.variantValues.find((x) => x.attributeId === attributeId);
+    return v ? (order.get(`${attributeId}|${v.value}`) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+  };
+  return [...rows].sort((a, b) => {
+    for (const id of attributeIds) {
+      const d = place(a, id) - place(b, id);
+      if (d !== 0) return d;
+    }
+    return a.code.localeCompare(b.code);
+  });
 }

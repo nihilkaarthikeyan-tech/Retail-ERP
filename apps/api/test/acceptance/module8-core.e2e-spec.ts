@@ -114,17 +114,17 @@ describe('Module 8: GST at the till', () => {
   it('8.1 consumer bill in the same state: taxable ₹1,000.00, CGST ₹25.00, SGST ₹25.00, HSN per line, store GSTIN; output tax posted at shift close', async () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body;
     first = res.sale;
-    expect(first).toMatchObject({ total: '1050.00', taxableAmount: '1000.00', cgst: '25.00', sgst: '25.00', igst: '0.00', invoiceKind: 'consumer', placeOfSupply: '33', documentTitle: 'Tax invoice', sellerGstin: '33AAACR1234A1ZV' });
+    expect(first).toMatchObject({ total: '1050.00', taxableAmount: '1000.00', cgst: '25.00', sgst: '25.00', igst: '0.00', invoiceKind: 'consumer', placeOfSupply: '33', documentTitle: 'Tax invoice', sellerGstin: '33AAACR1234A1ZA' });
     // CGST rule 46(b): at most 16 characters.
     expect(first.number).toBe('MAT1/2627/000001');
     expect(first.lines[0]).toMatchObject({ hsnCode: '62052000', gstRate: '5' });
     const receipt = res.receipts[0];
-    expect(receipt.gst).toMatchObject({ title: 'Tax invoice', sellerGstin: '33AAACR1234A1ZV', placeOfSupply: { code: '33', name: 'Tamil Nadu' }, reverseCharge: false, original: null, declaration: null });
+    expect(receipt.gst).toMatchObject({ title: 'Tax invoice', sellerGstin: '33AAACR1234A1ZA', placeOfSupply: { code: '33', name: 'Tamil Nadu' }, reverseCharge: false, original: null, declaration: null });
     expect(receipt.lines[0].hsn).toBe('6205');
     expect(receipt.gstTable).toEqual([{ rate: '5', taxable: '1000.00', cgst: '25.00', sgst: '25.00', igst: '0.00' }]);
     // The A4 tax invoice carries the CBIC invoice fields.
     const a4 = (await owner.get(`/print/pos_bill/${first.id}`).expect(200)).body;
-    expect(a4).toMatchObject({ title: 'Tax invoice', number: first.number, letterhead: { gstin: '33AAACR1234A1ZV' } });
+    expect(a4).toMatchObject({ title: 'Tax invoice', number: first.number, letterhead: { gstin: '33AAACR1234A1ZA' } });
     expect(a4.details).toEqual(expect.arrayContaining([['Place of supply', 'Tamil Nadu (33)'], ['Reverse charge', 'No']]));
     expect(a4.lines[0]).toMatchObject({ hsn: '6205', quantity: '1 PCS', taxable: '1000.00', gst: '5%', cgst: '25.00', sgst: '25.00' });
   });

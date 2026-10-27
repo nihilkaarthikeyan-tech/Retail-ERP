@@ -107,8 +107,8 @@ const source: EInvoiceSource = {
   typ: 'INV',
   number: 'B1-000045',
   date: '2026-10-18',
-  seller: { gstin: '29AAACR1234A1Z5', legalName: 'Rademics Retail Pvt Ltd', addr1: '12 MG Road', place: 'Bengaluru', pincode: '560001', stateCode: '29' },
-  buyer: { gstin: '33AAACB5678B1Z2', legalName: 'Buyer Traders', placeOfSupply: '33', addr1: '4 Anna Salai', place: 'Chennai', pincode: '600002', stateCode: '33' },
+  seller: { gstin: '29AAACR1234A1ZZ', legalName: 'Rademics Retail Pvt Ltd', addr1: '12 MG Road', place: 'Bengaluru', pincode: '560001', stateCode: '29' },
+  buyer: { gstin: '33AAACB5678B1Z0', legalName: 'Buyer Traders', placeOfSupply: '33', addr1: '4 Anna Salai', place: 'Chennai', pincode: '600002', stateCode: '33' },
   lines: [
     { description: 'Cotton shirt', isService: false, hsn: '620520', quantity: '3', unit: 'PCS', taxable: '2678.57', gstRate: '12', igst: '321.43', cgst: '0', sgst: '0' },
     { description: 'Silk saree', isService: false, hsn: '50072010', quantity: '1', unit: 'PCS', taxable: '9523.81', gstRate: '5', igst: '476.19', cgst: '0', sgst: '0' },
@@ -126,8 +126,8 @@ describe('e-invoice JSON (notified schema 1.1)', () => {
     expect(inv.Version).toBe('1.1');
     expect(inv.TranDtls).toMatchObject({ TaxSch: 'GST', SupTyp: 'B2B', RegRev: 'N' });
     expect(inv.DocDtls).toEqual({ Typ: 'INV', No: 'B1-000045', Dt: '18/10/2026' });
-    expect(inv.SellerDtls).toMatchObject({ Gstin: '29AAACR1234A1Z5', Pin: 560001, Stcd: '29', Loc: 'Bengaluru' });
-    expect(inv.BuyerDtls).toMatchObject({ Gstin: '33AAACB5678B1Z2', Pos: '33', Stcd: '33' });
+    expect(inv.SellerDtls).toMatchObject({ Gstin: '29AAACR1234A1ZZ', Pin: 560001, Stcd: '29', Loc: 'Bengaluru' });
+    expect(inv.BuyerDtls).toMatchObject({ Gstin: '33AAACB5678B1Z0', Pos: '33', Stcd: '33' });
     expect(inv.ItemList).toHaveLength(2);
     expect(inv.ItemList[0]).toMatchObject({ SlNo: '1', IsServc: 'N', HsnCd: '620520', Qty: 3, Unit: 'PCS', UnitPrice: 892.857, TotAmt: 2678.57, AssAmt: 2678.57, GstRt: 12, IgstAmt: 321.43, TotItemVal: 3000 });
     expect(inv.ValDtls).toMatchObject({ AssVal: 12202.38, IgstVal: 797.62, CgstVal: 0, TotInvVal: 13000, RndOffAmt: 0 });
@@ -160,14 +160,14 @@ describe('e-invoice JSON (notified schema 1.1)', () => {
 describe('e-way bill bulk JSON (attributes version 1.0.0621)', () => {
   it('builds { version, billLists } with the official keys', () => {
     const bill = buildEWayBill({
-      userGstin: '29AAACR1234A1Z5',
+      userGstin: '29AAACR1234A1ZZ',
       subSupplyType: 8,
       subSupplyDesc: 'Branch transfer',
       docType: 'CHL',
       number: 'TS-000012',
       date: '2026-10-18',
-      from: { gstin: '29AAACR1234A1Z5', name: 'Rademics MG Road', addr1: '12 MG Road', place: 'Bengaluru', pincode: '560001', stateCode: '29' },
-      to: { gstin: '33AAACR1234A1Z9', name: 'Rademics Chennai', addr1: '4 Anna Salai', place: 'Chennai', pincode: '600002', stateCode: '33' },
+      from: { gstin: '29AAACR1234A1ZZ', name: 'Rademics MG Road', addr1: '12 MG Road', place: 'Bengaluru', pincode: '560001', stateCode: '29' },
+      to: { gstin: '33AAACR1234A1ZA', name: 'Rademics Chennai', addr1: '4 Anna Salai', place: 'Chennai', pincode: '600002', stateCode: '33' },
       lines: [{ name: 'Cotton shirt', hsn: '620520', quantity: '100', unit: 'PCS', taxable: '60000', cgstRate: '0', sgstRate: '0', igstRate: '0' }],
       totals: { taxable: '60000', cgst: '0', sgst: '0', igst: '0', total: '60000' },
       distanceKm: 450,
@@ -177,7 +177,7 @@ describe('e-way bill bulk JSON (attributes version 1.0.0621)', () => {
     const file = JSON.parse(eWayBulkFile([bill]));
     expect(file.version).toBe('1.0.0621');
     expect(file.billLists[0]).toMatchObject({
-      userGstin: '29AAACR1234A1Z5',
+      userGstin: '29AAACR1234A1ZZ',
       supplyType: 'O',
       subSupplyType: 8,
       docType: 'CHL',
@@ -202,7 +202,7 @@ describe('reading the portals’ answer files', () => {
   const jwt = (claims: object) => `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.c2ln`;
 
   it('reads the bulk JSON result: IRN, acknowledgement and signed QR, matched by document number', () => {
-    const qr = jwt({ data: JSON.stringify({ SellerGstin: '29AAACR1234A1Z5', DocNo: 'B1-000045', DocTyp: 'INV', Irn: 'a'.repeat(64) }), iss: 'NIC' });
+    const qr = jwt({ data: JSON.stringify({ SellerGstin: '29AAACR1234A1ZZ', DocNo: 'B1-000045', DocTyp: 'INV', Irn: 'a'.repeat(64) }), iss: 'NIC' });
     const rows = parseEInvoiceResults(JSON.stringify([{ AckNo: 112010000002315, AckDt: '2026-10-18 15:18:00', Irn: 'a'.repeat(64), SignedQRCode: qr, Status: 'ACT' }]));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ documentNumber: 'B1-000045', irn: 'a'.repeat(64), ackNumber: '112010000002315', outcome: 'registered', signedQr: qr });
@@ -210,7 +210,7 @@ describe('reading the portals’ answer files', () => {
   });
 
   it('reads the CSV result and the error file', () => {
-    const csv = 'Seller GSTIN,Buyer GSTIN,Document Type,Document No.,Document Date,Ack No.,Ack Date,IRN,Status,Signed QR Code\r\n29AAACR1234A1Z5,33AAACB5678B1Z2,INV,B1-000045,18/10/2026,1120100,"18/10/2026 03:18:00 PM",' + 'b'.repeat(64) + ',ACT,eyJ.x.y\r\n';
+    const csv = 'Seller GSTIN,Buyer GSTIN,Document Type,Document No.,Document Date,Ack No.,Ack Date,IRN,Status,Signed QR Code\r\n29AAACR1234A1Z5,33AAACB5678B1Z0,INV,B1-000045,18/10/2026,1120100,"18/10/2026 03:18:00 PM",' + 'b'.repeat(64) + ',ACT,eyJ.x.y\r\n';
     const ok = parseEInvoiceResults(csv);
     expect(ok[0]).toMatchObject({ documentNumber: 'B1-000045', ackNumber: '1120100', outcome: 'registered', signedQr: 'eyJ.x.y' });
     expect(ok[0].ackDate?.toISOString()).toBe(new Date('2026-10-18T15:18:00+05:30').toISOString());

@@ -1,8 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { changeCounterSchema, createNumberSeriesSchema, NUMBER_PATTERN_TOKENS, updateNumberSeriesSchema } from "shared";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { changeCounterSchema, createNumberSeriesSchema, NUMBER_PATTERN_TOKENS, NUMBER_SERIES_KINDS, numberSeriesKindName, updateNumberSeriesSchema } from "shared";
 import { ActiveBadge, Alert, Button, CheckInput, DataTable, Dialog, SelectInput, TextInput, TextareaInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -30,6 +30,11 @@ function PreviewPanel({ series, isOwnerAdmin, onChanged }: { series: NumberSerie
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The preview opens under a long list: bring it into view.
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, []);
 
   function openChange(row: NumberPreviewRow) {
     setTarget(row);
@@ -62,9 +67,9 @@ function PreviewPanel({ series, isOwnerAdmin, onChanged }: { series: NumberSerie
   }
 
   const columns: Column<NumberPreviewRow>[] = [
-    { key: "store", header: "Store", render: (r) => r.store?.code ?? "—" },
-    { key: "prefix", header: "Filled prefix", render: (r) => <span className="mono">{r.filledPrefix}</span> },
-    { key: "nextNumber", header: "Next counter", align: "right", render: (r) => r.nextNumber },
+    { key: "store", header: "Store", render: (r) => r.store?.code ?? series.store?.code ?? "All stores" },
+    { key: "prefix", header: "Start of the number", render: (r) => <span className="mono">{r.filledPrefix}</span> },
+    { key: "nextNumber", header: "Next running number", align: "right", render: (r) => r.nextNumber },
     { key: "next", header: "Next number", render: (r) => <strong className="mono">{r.next}</strong> },
     ...(isOwnerAdmin
       ? [
@@ -82,8 +87,8 @@ function PreviewPanel({ series, isOwnerAdmin, onChanged }: { series: NumberSerie
   ];
 
   return (
-    <div className="card">
-      <h3 style={{ marginTop: 0 }}>Preview — next numbers for today</h3>
+    <div className="card" ref={panel}>
+      <h3 style={{ marginTop: 0 }}>Next {numberSeriesKindName(series.documentKind).toLowerCase()} numbers, if made today</h3>
       <Alert kind="error">{preview.error}</Alert>
       <DataTable columns={columns} rows={preview.data} rowKey={(r) => r.filledPrefix} loading={preview.loading} empty="No active store applies to this series." />
       <Dialog open={target !== null} title="Change counter" onClose={() => setTarget(null)}>
@@ -160,7 +165,7 @@ export default function NumberingPage() {
   }
 
   const columns: Column<NumberSeriesDto>[] = [
-    { key: "kind", header: "Document kind", render: (s) => <span className="mono">{s.documentKind}</span> },
+    { key: "kind", header: "Document", render: (s) => numberSeriesKindName(s.documentKind) },
     { key: "pattern", header: "Pattern", render: (s) => <span className="mono">{s.pattern}</span> },
     { key: "store", header: "Store", render: (s) => (s.store ? `${s.store.code} — ${s.store.name}` : "All stores") },
     { key: "len", header: "Counter length", align: "right", render: (s) => s.counterLength },
@@ -192,9 +197,9 @@ export default function NumberingPage() {
           Add series
         </Button>
       </div>
-      <p className="muted">One series per document kind, optionally per store. A store-specific series wins over the all-stores one.</p>
+      <p className="muted">How the number on each kind of document looks. A store can have its own numbering for a kind; it is then used instead of the all-stores one.</p>
       <Alert kind="error">{series.error}</Alert>
-      <DataTable columns={columns} rows={series.data} rowKey={(s) => s.id} loading={series.loading} empty="No number series yet." />
+      <DataTable columns={columns} rows={series.data && [...series.data].sort((a, b) => numberSeriesKindName(a.documentKind).localeCompare(numberSeriesKindName(b.documentKind)))} rowKey={(s) => s.id} loading={series.loading} empty="No number series yet." />
       {previewed ? <PreviewPanel key={previewed.id} series={previewed} isOwnerAdmin={isOwnerAdmin} onChanged={() => void series.reload()} /> : null}
 
       <Dialog open={editing !== null} title={editing === "new" ? "Add number series" : "Edit number series"} onClose={() => setEditing(null)}>
@@ -202,7 +207,16 @@ export default function NumberingPage() {
           <Alert kind="error">{error}</Alert>
           {editing === "new" ? (
             <>
-              <TextInput id="ns-kind" label="Document kind" value={form.documentKind} onChange={(e) => setForm({ ...form, documentKind: e.target.value })} error={errors.documentKind} required hint="Lower-case letters and underscores, e.g. sales_invoice." />
+              <SelectInput id="ns-kind" label="Document" value={form.documentKind} onChange={(e) => setForm({ ...form, documentKind: e.target.value })} error={errors.documentKind} required>
+                <option value="">Choose…</option>
+                {Object.entries(NUMBER_SERIES_KINDS)
+                  .sort((a, b) => a[1].localeCompare(b[1]))
+                  .map(([kind, name]) => (
+                    <option key={kind} value={kind}>
+                      {name}
+                    </option>
+                  ))}
+              </SelectInput>
               <SelectInput id="ns-store" label="Store" value={form.storeId} onChange={(e) => setForm({ ...form, storeId: e.target.value })} error={errors.storeId}>
                 <option value="">All stores</option>
                 {(stores.data ?? []).map((s) => (
@@ -214,7 +228,7 @@ export default function NumberingPage() {
             </>
           ) : (
             <p>
-              Document kind <span className="mono">{form.documentKind}</span>
+              {numberSeriesKindName(form.documentKind)}
               {editing && editing.store ? ` for store ${editing.store.code}` : " for all stores"}
             </p>
           )}

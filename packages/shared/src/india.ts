@@ -50,3 +50,8 @@ export const INDIAN_STATE_OPTIONS: [string, string][] = STATE_CODES.map((code) =
 export function isStateCode(value: string): boolean {
   return Object.prototype.hasOwnProperty.call(INDIAN_STATES, value);
 }
+
+/** "Karnataka (29)" for messages; the code alone if it is not a state. */
+export function stateWithCode(code: string): string {
+  return INDIAN_STATES[code] ? `${INDIAN_STATES[code]} (${code})` : code;
+}

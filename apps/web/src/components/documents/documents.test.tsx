@@ -71,8 +71,8 @@ const DOC: PrintDocumentDto = {
   date: "2026-10-16",
   mark: "DRAFT",
   paper: "A4",
-  letterhead: { name: "Rademics", legalName: "Rademics Retail Pvt Ltd", storeName: "Main Store", address: ["12 Anna Salai", "Chennai 600002"], gstin: "33AAACR1234A1ZV", phone: "044 2345 6789", email: null, showLogo: false },
-  party: { label: "Supplier", name: "Metro Distributors", code: "SUP-000001", address: ["4 Industrial Estate"], gstin: "33AAACM1234B1ZQ", phone: "9800011122" },
+  letterhead: { name: "Rademics", legalName: "Rademics Retail Pvt Ltd", storeName: "Main Store", address: ["12 Anna Salai", "Chennai 600002"], gstin: "33AAACR1234A1ZA", phone: "044 2345 6789", email: null, showLogo: false },
+  party: { label: "Supplier", name: "Metro Distributors", code: "SUP-000001", address: ["4 Industrial Estate"], gstin: "33AAACM1234B1ZD", phone: "9800011122" },
   details: [
     ["Needed by", "2026-10-20"],
     ["Payment terms", "Net 30"],

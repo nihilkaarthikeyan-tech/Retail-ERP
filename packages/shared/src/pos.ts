@@ -95,7 +95,8 @@ export function checkDiscount(args: {
   }
   const pct = D(args.manualDiscountPercent);
   const max = D(args.itemMaxPercent);
-  if (pct.gt(max)) return { ok: false, needsApproval: false, reason: `Discount ${pct.toFixed(2)}% is above this item's maximum of ${max.toFixed(2)}%` };
+  // Not approvable (blueprint 04, plan 06): say where the limit is set (launch check, 27 October 2026).
+  if (pct.gt(max)) return { ok: false, needsApproval: false, reason: `Discount ${pct.toFixed(2)}% is above this item's maximum of ${max.toFixed(2)}%. The maximum is set on the item (Items, "Maximum discount %")` };
   if (pct.gt(D(args.cashierLimitPercent)) && !args.approved) {
     return { ok: false, needsApproval: true, reason: `Discount ${pct.toFixed(2)}% is above the cashier's limit of ${D(args.cashierLimitPercent).toFixed(2)}%; a manager must approve it` };
   }

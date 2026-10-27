@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { describe, expect, it } from 'vitest';
-import { readCsv, readSpreadsheet, readXlsx, writeCsv, writeXlsx, writeXlsxBook } from './spreadsheet.js';
+import { noFormula, readCsv, readSpreadsheet, readXlsx, readZip, writeCsv, writeXlsx, writeXlsxBook, writeZip } from './spreadsheet.js';
 
 describe('our own .xlsx reader and writer (plan 10 answer 1)', () => {
   it('writes a file that reads back the same, keeping text columns as text', () => {
@@ -69,5 +69,27 @@ describe('files saved by Excel itself', () => {
     expect(readXlsx(buf)).toEqual([['Invoice', 'Taxable'], ['B/1', 1000]]);
     expect(readXlsx(buf, 'hsn(b2c)')).toEqual([['HSN', 'Quantity'], ['6205', 2]]);
     expect(() => readXlsx(buf, 'docs')).toThrow('no sheet docs');
+  });
+});
+
+describe('code audit, 27 October 2026: unsafe files', () => {
+  it('refuses a small file that would unpack to more than 50 MB (a "zip bomb")', () => {
+    const bomb = writeZip([{ name: 'xl/worksheets/sheet1.xml', data: Buffer.alloc(60 * 1024 * 1024, 0x41) }]);
+    expect(bomb.length).toBeLessThan(1024 * 1024);
+    expect(() => readZip(bomb)).toThrow('too large');
+  });
+
+  it('still reads an ordinary file', () => {
+    const zip = writeZip([{ name: 'a.txt', data: Buffer.from('hello') }]);
+    expect(readZip(zip).get('a.txt')?.toString()).toBe('hello');
+  });
+
+  it('a CSV export does not let a cell run as an Excel formula', () => {
+    expect(noFormula('=HYPERLINK("http://x","click")')).toBe(`'=HYPERLINK("http://x","click")`);
+    expect(noFormula('+91 98400')).toBe(`'+91 98400`);
+    expect(noFormula('@SUM(A1)')).toBe(`'@SUM(A1)`);
+    expect(noFormula('-120.50')).toBe('-120.50');
+    expect(noFormula('Ravi')).toBe('Ravi');
+    expect(writeCsv([['=1+1', -5, 'ok']])).toContain(`'=1+1,-5,ok`);
   });
 });

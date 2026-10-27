@@ -3,6 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { createItemSchema, STYLE_FIELDS_FOR_VARIANTS, updateItemSchema } from "shared";
+import { GstRateWarning } from "@/components/items/gst-rate-warning";
 import { HsnInput } from "@/components/items/hsn-input";
 import { Alert, Button, CheckInput, SelectInput, TextInput, TextareaInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -169,7 +170,8 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
       canSell: form.canSell,
       endDate: blankToNull(form.endDate),
       trackBatches: stock && form.trackBatches,
-      autoNumberBatches: form.autoNumberBatches,
+      // "Number batches automatically" only means something for an item tracked by batch.
+      autoNumberBatches: stock && form.trackBatches && form.autoNumberBatches,
       shelfLifeDays: stock ? intOrNull(form.shelfLifeDays) : null,
       trackSerials: stock && form.trackSerials,
       warrantyDays: intOrNull(form.warrantyDays),
@@ -217,7 +219,20 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
           )}
           <TextInput id="item-name" label="Name" value={form.name} onChange={set("name")} error={errors.name} required autoComplete="off" />
           <TextareaInput id="item-description" label="Description" rows={2} value={form.description} onChange={set("description")} error={errors.description} className="span-2" />
-          <SelectInput id="item-group" label="Group" value={form.itemGroupId} onChange={set("itemGroupId")} error={errors.itemGroupId} required hint="Only the last level of the tree can hold items.">
+          <SelectInput
+            id="item-group"
+            label="Group"
+            value={form.itemGroupId}
+            onChange={(e) => {
+              const itemGroupId = e.target.value;
+              // Launch check, 27 October 2026: the group's HSN code was used only on saving, unseen; now it shows at once.
+              const groupHsn = groupOptions.find((g) => g.id === itemGroupId)?.node.hsnCode ?? null;
+              setForm((f) => ({ ...f, itemGroupId, ...(!f.hsnCode && groupHsn ? { hsnCode: groupHsn } : {}) }));
+            }}
+            error={errors.itemGroupId}
+            required
+            hint="Only the last level of the tree can hold items. A new item takes the group's HSN code when it has one."
+          >
             <option value="">Choose a group</option>
             {groupOptions.map((g) => (
               <option key={g.id} value={g.id} disabled={!g.isLeaf}>
@@ -256,9 +271,12 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
               </option>
             ))}
           </SelectInput>
-          <HsnInput id="item-hsn" value={form.hsnCode} onChange={(hsnCode) => setForm((f) => ({ ...f, hsnCode }))} error={errors.hsnCode} disabled={readOnly} hint="4, 6 or 8 digits; the GST rate per code comes with the GST module." />
+          <div>
+            <HsnInput id="item-hsn" value={form.hsnCode} onChange={(hsnCode) => setForm((f) => ({ ...f, hsnCode }))} error={errors.hsnCode} disabled={readOnly} hint="4, 6 or 8 digits. The GST rate for each code is set under Billing counter → GST rates." />
+            {form.canSell && !readOnly ? <GstRateWarning hsnCode={form.hsnCode} /> : null}
+          </div>
           <TextInput id="item-mrp" label="MRP (per basic unit)" value={form.mrp} onChange={set("mrp")} error={errors.mrp} inputMode="decimal" className="mono" hint="Printed maximum retail price, if any." />
-          <TextInput id="item-maxDiscount" label="Maximum discount %" value={form.maxDiscountPercent} onChange={set("maxDiscountPercent")} error={errors.maxDiscountPercent} inputMode="decimal" className="mono" hint="0 = no cashier discount unless a manager allows it." />
+          <TextInput id="item-maxDiscount" label="Maximum discount %" value={form.maxDiscountPercent} onChange={set("maxDiscountPercent")} error={errors.maxDiscountPercent} inputMode="decimal" className="mono" hint="The most a discount typed at the till can be, even with a manager's PIN. 0 = no typed discount on this item. Offers are not limited by it." />
           <TextInput id="item-endDate" label="End date" type="date" value={form.endDate} onChange={set("endDate")} error={errors.endDate} hint="After this date the item cannot be used on any document." />
           <div className="span-2 check-row">
             <CheckInput id="item-isStockItem" label="Stock item" description="Off = service; no stock is kept." checked={form.isStockItem} onChange={setFlag("isStockItem")} disabled={isVariant || form.isStyle} />
