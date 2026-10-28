@@ -20,6 +20,7 @@ import { CatalogueSettingsService } from '../catalogue/catalogue-settings.servic
 import { CompanyService } from '../company/company.service.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
 import type { Item, PurchaseSettings, StockLocation, Store, Supplier } from '../generated/prisma/client.js';
+import { GstCoreService } from '../gst/gst-core.service.js';
 import { ItemsService } from '../items/items.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { SuppliersService } from '../parties/suppliers.service.js';
@@ -96,6 +97,7 @@ export class PurchaseCommon {
     private readonly catalogue: CatalogueSettingsService,
     private readonly years: FinancialYearsService,
     private readonly numbering: NumberingService,
+    private readonly gst: GstCoreService,
   ) {}
 
   /** Companies set up before module 5 get their settings and number series. */
@@ -215,12 +217,21 @@ export class PurchaseCommon {
     return null;
   }
 
-  /** Plan 05 §2: the GST rate is pre-filled from the last purchase of the item (0 when never bought). */
-  async lastGstRate(db: Db, itemId: string): Promise<string> {
+  /**
+   * Plan 05 §2: the GST rate is pre-filled from the last purchase of the item. Decision L4 (owner,
+   * 28 October 2026): an item never bought takes the GST rate list's rate for its HSN code (the band
+   * of the price per piece before GST, when given), and 0 only when the list has none.
+   */
+  async lastGstRate(db: Db, itemId: string, at?: { date: string; rate?: string | null; factor?: Decimal }): Promise<string> {
     const receipt = await db.goodsReceiptLine.findFirst({ where: { itemId, receipt: { status: { notIn: ['draft', 'cancelled'] }, isReturn: false } }, orderBy: { receipt: { postingAt: 'desc' } }, select: { gstRate: true } });
     if (receipt) return receipt.gstRate.toString();
     const order = await db.purchaseOrderLine.findFirst({ where: { itemId, order: { status: { not: 'cancelled' } } }, orderBy: { order: { createdAt: 'desc' } }, select: { gstRate: true } });
-    return order?.gstRate.toString() ?? '0';
+    if (order) return order.gstRate.toString();
+    const item = await db.item.findUnique({ where: { id: itemId }, select: { code: true, hsnCode: true } });
+    if (!item?.hsnCode) return '0';
+    const perPiece = at?.rate != null && at.factor && !at.factor.isZero() ? D(at.rate).div(at.factor) : null;
+    const listed = await this.gst.rateFor(db, item, at?.date ?? businessDate(), perPiece).catch(() => null);
+    return listed && listed.kind !== 'exempt' && listed.kind !== 'nil' ? listed.rate.toString() : '0';
   }
 
   /**

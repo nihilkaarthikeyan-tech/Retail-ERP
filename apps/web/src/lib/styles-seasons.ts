@@ -42,7 +42,11 @@ export interface MarkdownDto {
   value: string;
   startDate: string;
   endDate: string | null;
-  status: "upcoming" | "running" | "ended";
+  /** Decision L3: "withdrawn" = stopped before it started. */
+  status: "upcoming" | "running" | "ended" | "withdrawn";
+  stoppedOn?: string | null;
+  stoppedBy?: string | null;
+  stoppedReason?: string | null;
   itemCount: number;
   remark: string | null;
   createdAt: string;

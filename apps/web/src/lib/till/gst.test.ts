@@ -61,9 +61,11 @@ describe("GST at the till (plan 08)", () => {
     const bill = priceBill(draft([line(SHIRT_2000), line(SHIRT_3000)]), { snapshot: snapshot(), date: DATE });
     expect(tax(bill)).toEqual([
       ["5", "1904.76", "47.62", "47.62", "0.00"],
-      ["18", "2542.37", "228.82", "228.81", "0.00"],
+      // Decision L8: CGST and SGST each worked out, always equal.
+      ["18", "2542.38", "228.81", "228.81", "0.00"],
     ]);
     const discounted = priceBill(draft([line(SHIRT_3000, { discountPercent: "20" })]), { snapshot: snapshot(), date: DATE });
+    // ₹2,400 is ₹2,285.71 before GST at 5%: inside the band (decision L7).
     expect(discounted.sale!.lines[0].gstRate.toString()).toBe("5");
     // Offline the till sends the rate it charged; the server checks it.
     const tx = buildTransaction({ ...draft([line(SHIRT_3000, { discountPercent: "20" })]), payments: [{ methodId: CASH, amount: "2400", reference: "" }] }, discounted, snapshot().till.paymentMethods, options(true));

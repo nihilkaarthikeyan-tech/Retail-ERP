@@ -55,13 +55,23 @@ describe('rates by date and price band (G2)', () => {
     { hsnCode: '1006', rate: '5', effectiveFrom: '2025-04-01' },
     { hsnCode: '10063020', rate: '0', kind: 'nil', effectiveFrom: '2025-04-01' },
   ];
-  it('chooses the band by the selling price per unit, GST included', () => {
+  it('chooses the band by the value per unit before GST (decision L7)', () => {
     expect(pickGstRate(rows, '62052000', '2026-10-18', '2000')?.rate).toBe('5');
     expect(pickGstRate(rows, '6205', '2026-10-18', '2500')?.rate).toBe('5');
     expect(pickGstRate(rows, '6205', '2026-10-18', '2500.01')?.rate).toBe('18');
     expect(pickGstRate(rows, '6205', '2026-10-18', '3000')?.rate).toBe('18');
     expect(pickGstRate(rows, '6205', '2026-10-18', '0')?.rate).toBe('5');
     expect(pickGstRate(rows, '6205', '2026-10-18')?.rate).toBe('5');
+  });
+  it('a till price includes GST: each band is tried with its own rate taken out (decision L7)', () => {
+    const till = (p: string) => pickGstRate(rows, '6205', '2026-10-18', p, { gstIncluded: true })?.rate;
+    expect(till('2500')).toBe('5'); // 2,380.95 before GST
+    expect(till('2625')).toBe('5'); // exactly 2,500 before GST at 5%
+    expect(till('2625.01')).toBe('18');
+    // ₹2,700: 2,571.43 at 5% is above the band, 2,288.14 at 18% is below the other: the higher rate, never too little tax.
+    expect(till('2700')).toBe('18');
+    expect(till('2950.01')).toBe('18');
+    expect(till('0')).toBe('5');
   });
   it('uses the rate in force on the date; old bills keep theirs', () => {
     expect(pickGstRate(rows, '6205', '2025-09-21', '3000')?.rate).toBe('12');

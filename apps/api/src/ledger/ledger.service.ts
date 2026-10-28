@@ -47,7 +47,8 @@ export interface PostInput {
   isOpening?: boolean;
   remark?: string | null;
   /** document: up to 50 paise goes to Rounding; journal: 5 paise. */
-  tolerance?: keyof typeof POSTING_TOLERANCE;
+  /** A named tolerance, or an amount (decision L9: a till day allows 1 paisa per bill). */
+  tolerance?: keyof typeof POSTING_TOLERANCE | Decimal;
   actorId: string | null;
   lines: LedgerLineInput[];
   /** refuse (default): a date in locked books is refused unless the actor may post there; next_open: moved to the first open day. */
@@ -115,7 +116,7 @@ export class LedgerService {
       const k = keyOf(r.account.id, r.line);
       if (!meta.has(k)) meta.set(k, r.line);
     }
-    const tolerance = POSTING_TOLERANCE[input.tolerance ?? 'document'];
+    const tolerance = input.tolerance instanceof Decimal ? input.tolerance : POSTING_TOLERANCE[input.tolerance ?? 'document'];
     const combined = combinePosting(
       resolved.map((r) => ({ key: keyOf(r.account.id, r.line), debit: (r.line.debit ?? 0).toString(), credit: (r.line.credit ?? 0).toString() })),
       tolerance,

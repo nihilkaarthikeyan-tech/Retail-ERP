@@ -248,6 +248,10 @@ export const markdownSchema = z
   .refine((m) => !m.endDate || m.endDate >= m.startDate, { message: 'End date cannot be before start date' });
 export type MarkdownInput = z.infer<typeof markdownSchema>;
 
+/** Decision L3 (owner, 28 October 2026): withdrawing a markdown before it starts, or ending it early. */
+export const stopMarkdownSchema = z.object({ reason: trimmed(300) });
+export type StopMarkdownInput = z.infer<typeof stopMarkdownSchema>;
+
 // ---- Price lists and prices ----
 
 export const createPriceListSchema = z
@@ -328,6 +332,8 @@ export const updateCatalogueSettingsSchema = z
     allowPriceChangeOnBill: z.boolean(),
     blockSellingBelowCost: z.boolean(),
     saveTypedPrices: z.boolean(),
+    newItemMaxDiscountPercent: decimalString.refine((v) => Number(v) >= 0 && Number(v) <= 100, 'Discount must be between 0 and 100'),
+    newItemAutoNumberBatches: z.boolean(),
   })
   .partial();
 export type UpdateCatalogueSettingsInput = z.infer<typeof updateCatalogueSettingsSchema>;

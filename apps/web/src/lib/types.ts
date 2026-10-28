@@ -223,6 +223,8 @@ export interface CatalogueSettingsDto {
   allowPriceChangeOnBill: boolean;
   blockSellingBelowCost: boolean;
   saveTypedPrices: boolean;
+  newItemMaxDiscountPercent: string;
+  newItemAutoNumberBatches: boolean;
   updatedAt: string;
 }
 

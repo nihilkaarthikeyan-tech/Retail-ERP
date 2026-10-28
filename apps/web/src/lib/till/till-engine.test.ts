@@ -35,16 +35,16 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
     expect(bill.problems).toEqual([]);
     expect(bill.net.toFixed(2)).toBe("372.00");
     const [rice, surf] = bill.sale!.lines;
-    expect([rice.tax.taxable.toFixed(2), rice.tax.cgst.toFixed(2), rice.tax.sgst.toFixed(2)]).toEqual(["228.57", "5.72", "5.71"]);
+    expect([rice.tax.taxable.toFixed(2), rice.tax.cgst.toFixed(2), rice.tax.sgst.toFixed(2)]).toEqual(["228.58", "5.71", "5.71"]);
     expect([surf.tax.taxable.toFixed(2), surf.tax.cgst.toFixed(2), surf.tax.sgst.toFixed(2)]).toEqual(["111.86", "10.07", "10.07"]);
-    expect(bill.sale!.taxable.toFixed(2)).toBe("340.43");
+    expect(bill.sale!.taxable.toFixed(2)).toBe("340.44");
     expect(bill.sale!.rounding.toFixed(2)).toBe("0.00");
     const pay = checkPayments(bill.net, [{ methodId: CASH, amount: "500", reference: "" }], sampleSnapshot().till.paymentMethods);
     expect(pay.change.toFixed(2)).toBe("128.00");
     expect(pay.problem).toBeNull();
   });
 
-  it("a return from 6.1 gives back ₹120.00 with taxable ₹114.29, CGST ₹2.86, SGST ₹2.85 (scenario 6.2)", () => {
+  it("a return from 6.1 gives back ₹120.00 with taxable ₹114.28, CGST ₹2.86, SGST ₹2.86 (scenario 6.2, decision L8)", () => {
     const d = draft([], {
       ret: {
         originalBillId: "b1",
@@ -57,7 +57,7 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
     const bill = priceBill(d, { snapshot: sampleSnapshot(), date: DATE });
     expect(bill.net.toFixed(2)).toBe("-120.00");
     const l = bill.ret!.lines[0];
-    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.29", "-2.86", "-2.85"]);
+    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.28", "-2.86", "-2.86"]);
     // Refunds only by refund methods, exactly the amount.
     expect(checkPayments(bill.net, [{ methodId: UPI, amount: "120", reference: "x" }], sampleSnapshot().till.paymentMethods).problem).toMatch(/cannot be used for refunds/);
     expect(checkPayments(bill.net, [{ methodId: CASH, amount: "120", reference: "" }], sampleSnapshot().till.paymentMethods).problem).toBeNull();
@@ -505,7 +505,7 @@ describe("return without the original bill (plan 11 A9, scenario 11.8)", () => {
     expect(bill.net.toFixed(2)).toBe("-120.00");
     expect(bill.approvals).toEqual([expect.objectContaining({ kind: "return_without_bill", lineKey: null })]);
     const l = bill.ret!.lines[0];
-    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.29", "-2.86", "-2.85"]);
+    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.28", "-2.86", "-2.86"]);
     // Once approved nothing more is asked; a typed price is what comes back.
     const approved = priceBill(draft([], { ret: noBill([back(BASMATI, "1", "100")], "t") }), { snapshot: s, date: DATE });
     expect(approved.approvals).toEqual([]);

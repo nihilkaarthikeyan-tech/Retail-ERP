@@ -237,7 +237,7 @@ describe('13.2 spending points', () => {
     expect(paid).toEqual(expect.arrayContaining([['CASH', '400.00', null], ['POINTS', '100.00', '100 points']]));
     expect(res.receipts[0].loyalty).toMatchObject({ earned: 4, spent: 100, balance: 54 });
     // GST is on the goods as usual: the points are a payment, not a discount (CA to confirm).
-    expect(res.sale.taxableAmount).toBe('476.19');
+    expect(res.sale.taxableAmount).toBe('476.20');
     expect(await points(priya.id)).toMatchObject({ balance: 54 });
   });
 
@@ -247,7 +247,7 @@ describe('13.2 spending points', () => {
     expect(await credit('loyalty_liability')).toBe('54.00');
     expect(await credit('loyalty_expense')).toBe('-154.00');
     // The points were a payment: cash in the till is only the ₹400.
-    expect(await credit('sales')).toBe('14761.90');
+    expect(await credit('sales')).toBe('14761.92');
   });
 });
 
@@ -473,8 +473,8 @@ describe('13.6 spending a gift card', () => {
 
   it('a ₹600 bill (GST included) paid with the card charges GST on the goods as usual and leaves ₹900.00 on the card', async () => {
     const res = await postBill(sale([{ itemId: shirt.id, quantity: '1' }], cash('0'), { giftCards: [{ number: card.number, amount: '600' }], expectedTotal: '600.00' }));
-    expect(res.sale).toMatchObject({ total: '600.00', taxableAmount: '571.43' });
-    expect(new Decimal(res.sale.cgst).add(res.sale.sgst).toFixed(2)).toBe('28.57');
+    expect(res.sale).toMatchObject({ total: '600.00', taxableAmount: '571.42' });
+    expect(new Decimal(res.sale.cgst).add(res.sale.sgst).toFixed(2)).toBe('28.58');
     expect(res.sale.payments).toEqual([expect.objectContaining({ amount: '600.00', reference: `**** ${card.number.slice(-4)}`, paymentMethod: expect.objectContaining({ code: 'GIFTCARD' }) })]);
     expect(res.receipts[0].giftCards).toEqual([expect.objectContaining({ action: 'spent', number: `**** ${card.number.slice(-4)}`, amount: '600.00', balance: '900.00' })]);
     const check = (await owner.post(`/pos/till/${tillId}/gift-cards/check`).send({ number: card.number }).expect(200)).body;

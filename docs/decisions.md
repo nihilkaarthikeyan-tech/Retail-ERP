@@ -1,4 +1,4 @@
-# Decisions — Version 1 Baseline
+**Decided 28 October 2026 (owner accepted the recommendation).** Yes: off for cosmetics, on for the rest |**Decided 28 October 2026 (owner accepted the recommendation).** Tighten to 1 paisa per bill |**Decided 28 October 2026 (owner accepted the recommendation).** Yes: e-invoice and GSTR-1 usually expect them equal |**Decided 28 October 2026 (owner accepted the recommendation).** Yes, 10% for clothing and fancy shops |**Decided 28 October 2026 (owner accepted the recommendation).** (a) |**Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** Yes ||||# Decisions — Version 1 Baseline
 
 This file records the agreed answers to the 81 open questions in `docs/blueprint/99-open-questions.md`.
 
@@ -36,15 +36,15 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 
 | Topic | Questions |
 | --- | --- |
-| First retail sector to launch with (fashion, grocery, electronics, etc.) | — |
-| Which shops need true offline billing | 1 / 38 |
-| Number of legal companies and GST registrations at launch | 2, 4, 64 |
-| Weighing-scale barcodes (depends on first sector) | 9 |
+| ~~First retail sector~~ **Decided 28 October 2026:** fancy, clothing and general shops | — |
+| ~~Which shops need true offline billing~~ **Decided 28 October 2026:** none at launch | 1 / 38 |
+| ~~Number of companies and GST registrations~~ **Decided 28 October 2026:** one company and one GSTIN per shop at launch (several stay possible) | 2, 4, 64 |
+| ~~Weighing-scale barcodes~~ **Decided 28 October 2026:** deferred (no grocery at launch) | 9 |
 | Card terminal and UPI providers | 44 |
 | Bank statement formats | 53 |
 | Old software to import from | 77 |
-| Final list of launch integrations | 79 |
-| Points from the launch check of 27 October 2026 | L1–L10 and L12 below (L11 decided) |
+| ~~Final list of launch integrations~~ **Decided 28 October 2026:** receipt printer, cash drawer, UPI and WhatsApp bills (WhatsApp built after launch) | 79 |
+| ~~Points from the launch check~~ **Decided 28 October 2026:** all recommendations accepted | L1–L12 below |
 
 ### Waiting for the owner: points from the launch check (27 October 2026)
 
@@ -52,13 +52,13 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 | No. | Topic | The question | Recommendation |
 | --- | --- | --- | --- |
-| L1 | HSN codes (27) | The HSN list starts empty, but the GST return's HSN summary needs a description per code. Fill in the common codes of each shop type at set-up, with the official CBIC descriptions? | **Partly decided 28 October 2026:** the official HSN / SAC list of the GST portal is built in (owner asked for it). Still open: whether each shop-type template also adds its common codes to the shop's own list at set-up. Recommended: yes |
+| L1 | HSN codes (27) | The HSN list starts empty, but the GST return's HSN summary needs a description per code. Fill in the common codes of each shop type at set-up, with the official CBIC descriptions? | **Partly decided 28 October 2026:** the official HSN / SAC list of the GST portal is built in (owner asked for it). Decided 28 October 2026: each shop-type template also adds its common codes to the shop's own list at set-up |
 | L2 | Sizes (28) | The clothing template has no "Free size" (dupattas, sarees, some kurtis) and no XS. Add them? | Yes |
 | L3 | Markdowns (32) | A markdown made by mistake cannot be withdrawn or ended early; each new price is ended by hand. Add "Withdraw" (before it starts) and "End now"? | Yes |
 | L4 | Purchase order GST (33) | An item never bought before starts at 0% GST on a purchase order. Start from the GST rate list (per HSN) instead? | Yes |
 | L5 | Freight on goods returned to a supplier (34) | A returned piece leaves stock at full cost including its freight share, but the supplier's debit note clears only the goods, so a few rupees stay in "Goods received not billed" for ever. (a) The freight share goes back to "Freight inward", or (b) the piece leaves at the supplier's rate and the freight stays in the remaining stock? Ask the accountant if unsure. | (a) |
 | L6 | Starting discount limit (49) | Every item starts with a 0% maximum discount, so a new shop cannot give any typed discount until it sets one per item. Let each shop-type template set a starting maximum (for example 10%)? | Yes, 10% for clothing and fancy shops |
-| L7 | GST price band for clothing (61) | The till decides the ₹2,500 clothing band on the price including GST; the official rule may be on the value before GST. Which one? Answer from the official CBIC notification. | Check the notification; most readings use the value before GST |
+| L7 | GST price band for clothing (61) | The till decides the ₹2,500 clothing band on the price including GST; the official rule may be on the value before GST. Which one? Answer from the official CBIC notification. | **Decided 28 October 2026 (owner accepted the recommendation).** the band uses the value **before GST**, after any discount, per piece. Source: CBIC GST Rates FAQ, question 33 ("sale value … refers to the transaction value"), and CGST Act section 15 (the transaction value does not include the GST itself). A till price includes GST, so each band is tried with its own rate taken out; a price that fits neither (₹2,625.01 to ₹2,950 for the ₹2,500 band) takes the higher rate, so the tax is never too low |
 | L8 | CGST and SGST paise (62) | Each line gives its odd paisa to CGST, so a long bill can show CGST a few paise above SGST. Split per bill and rate instead, so they are always equal? | Yes: e-invoice and GSTR-1 usually expect them equal |
 | L9 | Rounding at the till (63) | A till day's accounts entry may be up to ₹0.50 out, and the difference goes to Rounding without notice, which could hide a mistake. Tighten to 1 paisa per bill, or keep ₹0.50 per day? | Tighten to 1 paisa per bill |
 | L10 | Cash accounts of a new store (36) | A new store gets its cash accounts only at its first till shift, so its cash cannot be chosen on a payment before that. Make them when the store is added? | Yes |
@@ -69,7 +69,7 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 ## General
 
-**1 / 38. Offline billing.** Online-first billing counter with a **local offline queue**: if the connection drops, bills are saved on the till and sent to the server when it returns. Full offline selling (local-first) only for shops with genuinely unreliable internet, because it makes syncing, stock and offers much more complex. Which shops need it: **OPEN**.
+**1 / 38. Offline billing.** Online-first billing counter with a **local offline queue**: if the connection drops, bills are saved on the till and sent to the server when it returns. Full offline selling (local-first) only for shops with genuinely unreliable internet, because it makes syncing, stock and offers much more complex. Which shops need it: **decided 28 October 2026: none at launch**; every shop uses the offline queue.
 
 **2. Companies.** One legal company = one company and one set of accounts. Shops are branches within it. Create a separate company only where the business is legally separate.
 
@@ -87,7 +87,7 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 ## Items
 
-**9.** Weighing-scale barcodes: support them if the first sector sells grocery, produce, meat or loose goods; otherwise defer. **OPEN** until the sector is chosen.
+**9.** Weighing-scale barcodes: support them if the first sector sells grocery, produce, meat or loose goods; otherwise defer. **Decided 28 October 2026: deferred**; the first sectors are fancy, clothing and general shops.
 
 **10.** Readable variant codes (for example `SHIRT-RED-M`), plus a separate barcode.
 
@@ -254,7 +254,7 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 ## Integrations
 
-**79.** Priority: payment terminal and UPI, receipt printer and cash drawer, SMS/WhatsApp, e-invoice, bank imports. Defer marketplace and online-store integration unless it is already a key sales channel. Final launch list: **OPEN**.
+**79.** Priority: payment terminal and UPI, receipt printer and cash drawer, SMS/WhatsApp, e-invoice, bank imports. Defer marketplace and online-store integration unless it is already a key sales channel. Final launch list: **decided 28 October 2026: receipt printer, cash drawer, UPI payment recording and WhatsApp bills** (WhatsApp after launch, plan first).
 
 **80.** Automatically retry safe failed connections, using idempotency so a payment or invoice is never duplicated.
 
@@ -287,3 +287,4 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 | 2026-10-28 | L1 (part) | The official HSN / SAC list of the GST portal (HSN_SAC.xlsx, published 26 October 2026) is built in, the same for every shop: codes and descriptions only, never rates. The HSN box suggests official codes by code or by words and warns (does not refuse) when a code is not in the list; the shop's own list and the GSTR-1 HSN summary take the official description when the shop gave none | Owner asked for it; fewer wrong HSN codes on bills and returns |
 | 2026-10-28 | — | Typing checks: mobile numbers 10 digits starting 6–9; a customer's or supplier's PIN code must be in the address's state (India Post's first-digit zones, so a genuine address is never refused); a supplier's PAN shown as wrong next to its box when it does not match the GSTIN | Owner asked for them |
 | 2026-10-28 | — | Plan 15 approved and built: GSTINs of customers and suppliers are checked with the GST network through gstinapi.in (provider switchable); a cancelled, suspended or unknown GSTIN is warned about but never refused; checked again every 90 days at night (owner may change, 30–365); one Rademics key on the server only | Owner: proceed and launch as soon as possible, following the recommendations |
+| 2026-10-28 | L1–L12, 1/38, 9, 79, sector | Owner accepted every recommendation: L1 shop-type templates add their common HSN codes; L2 "Free size" and "XS" for clothing; L3 markdowns can be withdrawn before they start and ended early; L4 a purchase order line starts at the GST rate list's rate; L5 a returned piece's freight share goes back to "Freight inward"; L6 clothing and fancy templates start items at a 10% maximum discount; L7 the ₹2,500 clothing band is measured before GST (CBIC FAQ 33, CGST Act s.15); L8 CGST and SGST split per bill and rate so they are equal; L9 till rounding at most 1 paisa per bill; L10 cash accounts made when a store is added; L12 cosmetics starts with manual batch numbers. First sectors fancy, clothing and general; no full offline billing; one company and GSTIN per shop at launch; weighing scales deferred; launch connections receipt printer, cash drawer, UPI recording, WhatsApp bills | Owner: launch as soon as possible |

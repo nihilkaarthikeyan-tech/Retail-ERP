@@ -77,7 +77,7 @@ export interface GstRateRow {
   hsnCode: string;
   rate: DecimalInput;
   kind?: string | null;
-  /** The rate applies above this selling price per unit, GST included (none = from nothing). */
+  /** The rate applies above this value per unit, before GST (none = from nothing). Decision L7. */
   priceFrom?: DecimalInput | null;
   /** … and up to and including this one (none = no upper limit). */
   priceUpTo?: DecimalInput | null;
@@ -110,7 +110,7 @@ export function hasPriceBand(r: GstRateRow): boolean {
   return (r.priceFrom !== null && r.priceFrom !== undefined) || (r.priceUpTo !== null && r.priceUpTo !== undefined);
 }
 
-/** Whether a selling price per unit (GST included) falls in a row's band: above "from", up to and including "up to". */
+/** Whether a value per unit (before GST) falls in a row's band: above "from", up to and including "up to". */
 export function inPriceBand(r: GstRateRow, unitPrice: DecimalInput): boolean {
   const p = D(unitPrice);
   if (r.priceFrom !== null && r.priceFrom !== undefined && !p.gt(D(r.priceFrom))) return false;
@@ -120,19 +120,30 @@ export function inPriceBand(r: GstRateRow, unitPrice: DecimalInput): boolean {
 
 /**
  * The rate for an item: in force on the date, and for price-banded HSN codes
- * (clothing, footwear) the band of the selling price per unit, GST included.
- * Without a price (or a price outside every band, such as a free unit) the
- * lowest band applies. Null when no rate is set.
+ * (clothing, footwear) the band of the value per unit before GST.
+ *
+ * Decision L7 (owner, 28 October 2026): the band is the "sale value" of the
+ * notification, which is the transaction value (CBIC GST rates FAQ, question 33),
+ * and the transaction value does not include the GST itself (CGST Act, section 15).
+ * A till price includes GST (`gstIncluded`): each band is tried with its own
+ * rate taken out, lowest band first. A price that fits no band that way (between
+ * the bands, for example ₹2,700 with GST for a ₹2,500 band) takes the highest
+ * band's rate, so the tax is never too low.
+ *
+ * Without a price (or a price of nothing, such as a free unit) the lowest band
+ * applies. Null when no rate is set.
  */
-export function pickGstRate<T extends GstRateRow>(rows: T[], hsnCode: string | null | undefined, date: string, unitPrice?: DecimalInput | null): T | null {
+export function pickGstRate<T extends GstRateRow>(rows: T[], hsnCode: string | null | undefined, date: string, unitPrice?: DecimalInput | null, opts: { gstIncluded?: boolean } = {}): T | null {
   const inForce = ratesInForce(rows, hsnCode, date);
   if (!inForce.length) return null;
   const plain = inForce.find((r) => !hasPriceBand(r));
   const bands = inForce.filter(hasPriceBand).sort((a, b) => D(a.priceFrom ?? -1).cmp(D(b.priceFrom ?? -1)));
   if (!bands.length) return plain ?? inForce[0];
   if (unitPrice !== null && unitPrice !== undefined) {
-    const hit = bands.find((r) => inPriceBand(r, unitPrice));
+    const before = (r: T) => (opts.gstIncluded ? D(unitPrice).div(D(1).add(D(r.rate).div(100))) : D(unitPrice));
+    const hit = bands.find((r) => inPriceBand(r, before(r)));
     if (hit) return hit;
+    if (opts.gstIncluded && D(unitPrice).gt(0)) return bands.reduce((m, r) => (D(r.rate).gt(D(m.rate)) ? r : m), bands[0]);
   }
   return plain ?? bands[0];
 }
@@ -151,7 +162,7 @@ export function priceBandProblem(rows: GstRateRow[]): string | null {
   return null;
 }
 
-/** The selling price per unit that chooses the band: the line amount (GST included, after discounts) per basic unit. */
+/** The selling price per unit that chooses the band (with `gstIncluded`): the line amount (GST included, after discounts) per basic unit. */
 export function bandUnitPrice(amount: DecimalInput, basicQuantity: DecimalInput): Decimal {
   const q = D(basicQuantity).abs();
   return q.isZero() ? ZERO : D(amount).abs().div(q);

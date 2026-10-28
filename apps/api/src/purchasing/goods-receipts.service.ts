@@ -286,7 +286,7 @@ export class GoodsReceiptsService {
       if (rate == null) throw new BadRequestException(`${code}: give the buying price (no order, price list or last purchase price)`);
       // With an order, GST follows the order unless someone who sees prices typed it from the delivery note.
       const gstFromOrder = !!orderLine && (!seesPrices || (l.cgst === undefined && l.sgst === undefined && l.igst === undefined && l.gstRate === undefined));
-      const gstRate = gstFromOrder ? orderLine!.gstRate.toString() : (l.gstRate ?? (await this.common.lastGstRate(db, l.itemId)));
+      const gstRate = gstFromOrder ? orderLine!.gstRate.toString() : (l.gstRate ?? (await this.common.lastGstRate(db, l.itemId, { date: header.postingDate, rate, factor: info.factor })));
       const discountAmount =
         l.discountAmount ?? (orderLine && D(orderLine.discountAmount).gt(0) ? roundMoney(D(orderLine.discountAmount).mul(charged).div(D(orderLine.quantity))).toString() : null);
       const priced = this.common.price(
@@ -662,6 +662,7 @@ export class GoodsReceiptsService {
     }
     const entries = await this.engine.post(tx, movements, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, original) });
     await this.applySerials(tx, ret, 'finalise', actor);
+    await this.postings.returnFreight(tx, ret, await this.freightShare(tx, plan), roleOf(original), actor.userId);
 
     for (const p of plan) {
       await tx.goodsReceiptLine.update({
@@ -682,6 +683,26 @@ export class GoodsReceiptsService {
     for (const orderId of new Set(original.lines.map((l) => l.orderLine?.orderId).filter((x): x is string => !!x))) await this.orders.refreshProgress(tx, orderId);
     await this.audit.record(tx, actor, { action: 'create', entityType: 'goods_receipt', entityId: ret.id, changes: { number, returnOf: original.number, lines: plan.length }, reason: input.reason });
     return this.getRow(tx, ret.id);
+  }
+
+  /**
+   * Decision L5 (owner, 28 October 2026): the returned pieces' share of the freight added to their
+   * cost. GST not claimable that a bill added to the same cost (`extraCharges`) is not freight.
+   */
+  private async freightShare(tx: Db, plan: { line: ReceiptRow['lines'][number]; basicAcc: Decimal; basicRej: Decimal }[]): Promise<Decimal> {
+    let freight = new Decimal(0);
+    for (const p of plan) {
+      const charges = D(p.line.extraCharges);
+      if (charges.isZero()) continue;
+      const blocked = await tx.supplierBillLine.findMany({
+        where: { receiptLineId: p.line.id, creditClaimable: false, bill: { kind: { not: 'debit_note' }, status: { notIn: ['draft', 'cancelled'] } } },
+        select: { cgst: true, sgst: true, igst: true },
+      });
+      const tax = blocked.reduce((s, b) => s.add(D(b.cgst)).add(D(b.sgst)).add(D(b.igst)), new Decimal(0));
+      const received = D(p.line.basicAcceptedQuantity).add(D(p.line.basicRejectedQuantity));
+      freight = freight.add(roundMoney(Decimal.max(0, charges.sub(tax)).mul(p.basicAcc.add(p.basicRej)).div(received)));
+    }
+    return freight;
   }
 
   // ---- Cancelling ----

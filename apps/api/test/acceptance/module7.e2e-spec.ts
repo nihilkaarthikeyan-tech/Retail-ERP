@@ -153,9 +153,9 @@ describe('7.1 a till shift is posted when it closes (decision 39)', () => {
     await T(owner.post(`/pos/shifts/${shift.id}/close`)).send({ denominations: { '500': 4, '100': 1, '20': 1 } }).expect(200);
     const entries = await prisma.ledgerEntry.findMany({ where: { documentType: 'pos_shift', documentId: shift.id }, include: { lines: true } });
     expect(entries).toHaveLength(2);
-    expect(await bal('sales', MAIN)).toBe('-122.85');
+    expect(await bal('sales', MAIN)).toBe('-122.86');
     expect(await bal('gst_output_cgst')).toBe('-3.07');
-    expect(await bal('gst_output_sgst')).toBe('-3.08');
+    expect(await bal('gst_output_sgst')).toBe('-3.07');
     expect(await bal('cost_of_goods_sold', MAIN)).toBe('104.00');
     expect(await bal('cash_short_over', MAIN)).toBe('9.00');
     expect(await bal(`cash_in_till:${MAIN}`)).toBe('0.00');

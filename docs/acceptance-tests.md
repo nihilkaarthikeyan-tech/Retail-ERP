@@ -295,11 +295,11 @@ Sample data: store MAIN, till T1, opening cash ₹2,000. Basmati Rice 1 kg sold 
 
 ### 6.1 A sale ★
 - **When** 2 Basmati and 1 Surf are billed and paid with ₹500 cash
-- **Then** total ₹372.00. Basmati: taxable ₹228.57, CGST ₹5.72, SGST ₹5.71. Surf: taxable ₹111.86, CGST ₹10.07, SGST ₹10.07. Change ₹128.00. Stock Basmati 98, Surf 49. Cost of goods sold stored: ₹180.00 and ₹95.00.
+- **Then** total ₹372.00. Basmati: taxable ₹228.58, CGST ₹5.71, SGST ₹5.71 (decision L8: CGST and SGST always equal). Surf: taxable ₹111.86, CGST ₹10.07, SGST ₹10.07. Change ₹128.00. Stock Basmati 98, Surf 49. Cost of goods sold stored: ₹180.00 and ₹95.00.
 
 ### 6.2 A return ★
 - **When** 1 Basmati from 6.1 comes back
-- **Then** the refund is ₹120.00 in cash (taxable ₹114.29, CGST ₹2.86, SGST ₹2.85), and stock is 99 at the original cost of ₹90.00. Returning 2 more is refused: only 1 is left to return.
+- **Then** the refund is ₹120.00 in cash (taxable ₹114.28, CGST ₹2.86, SGST ₹2.86; decision L8), and stock is 99 at the original cost of ₹90.00. Returning 2 more is refused: only 1 is left to return.
 
 ### 6.3 An exchange ★
 - **When** the Surf comes back and the customer takes Ariel at ₹150 on the same screen
@@ -341,7 +341,7 @@ Every scenario ends with the same check: total debits equal total credits, and e
 - **Given** a shift with a ₹186 cash sale (3 kg rice), a ₹62 return of 1 kg and a ₹5 carry bag (₹200 paid, ₹14 change, ₹57 refunded), counted ₹9 short
 - **Then** closing the shift writes one ledger entry for the store:
   - debits: cash in till ₹129.00, cost of goods sold ₹104.00, cash short ₹9.00;
-  - credits: sales ₹122.85, output CGST ₹3.07, output SGST ₹3.08, stock ₹104.00, cash in till ₹9.00.
+  - credits: sales ₹122.86, output CGST ₹3.07, output SGST ₹3.07 (decision L8), stock ₹104.00, cash in till ₹9.00.
 - The same entry moves the ₹2,000 starting float from the store's cash in hand into cash in till, and the ₹2,120 counted back to cash in hand, so cash in till is zero after every shift.
 - Nothing is posted to the accounts until the shift closes.
 
@@ -879,3 +879,41 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
   - a refused request says "Too many tries from this connection. Please wait a few minutes and try again." and tells the browser when to try again;
   - one limit being reached does not block other pages.
 
+
+## Module 15 — The owner's decisions of 28 October 2026 (L1–L12)
+
+### 15.1 Clothing template (L1, L2, L6)
+- **Given** the owner picks the shop type "Clothing"
+- **Then** the shop's own HSN list gets the common clothing headings (6104–6111, 6115, 6203–6211, 6214) with the official descriptions of the GST portal's list; the size list is XS, S, M, L, XL, XXL and Free size; a new item starts with a 10% maximum discount (a typed one wins). Applying the shop type again adds nothing twice and leaves the shop's own wording alone.
+
+### 15.2 Cosmetics template (L12)
+- **Then** a new batch item starts with "Number batches automatically" off (the batch number on the pack is typed in); the owner can still tick it per item; other shop types start it on.
+
+### 15.3 Withdrawing or ending a markdown (L3)
+- **Given** a 20% markdown starting in two days
+- **When** it is withdrawn with a reason
+- **Then** its prices never apply (each ends the day before it starts, nothing is deleted, every change is in the history), and it shows "Withdrawn".
+- **Given** a markdown that started three days ago
+- **When** it is ended now
+- **Then** from today the price before the markdown applies again; the days it ran keep its price; it shows "Ended" with yesterday as its last day.
+
+### 15.4 GST rate on a purchase order (L4)
+- **Given** HSN 6203 at 5% up to ₹2,500 and 18% above, and items never bought before
+- **Then** a line at ₹900 a piece starts at 5%, one at ₹6,000 at 18%, and an item whose HSN has no rate at 0%.
+
+### 15.5 Freight on goods returned (L5)
+- **Given** 10 T-shirts at ₹100 with ₹100 freight added (₹110 each in stock), billed by the supplier
+- **When** 2 go back on a debit note
+- **Then** goods received not billed is ₹0.00 and ₹20.00 of the freight goes back to Freight inward (₹80.00 left as the cost of the 8 kept).
+
+### 15.6 Clothing price band (L7)
+- **Then** the ₹2,500 band is on the value before GST, after discounts (CBIC GST rates FAQ 33: the transaction value; CGST Act section 15: it does not include the GST). At the till a ₹2,625 shirt (₹2,500 + 5%) is at 5%, a ₹2,700 one at 18% (the higher rate when the price fits no band once its GST is taken out).
+
+### 15.7 CGST equals SGST (L8)
+- **Then** within a state, CGST and SGST of every line (and so of every bill) are equal; the odd paisa stays in the taxable value.
+
+### 15.8 Till rounding (L9)
+- **Then** a till day's accounts entry may differ by at most 1 paisa per bill, which goes to Rounding; more is refused.
+
+### 15.9 Cash accounts of a new store (L10)
+- **Then** a store added in Settings has "Cash in till" and "Cash in hand" at once, before its first till shift.

@@ -180,6 +180,7 @@ describe("My modules", () => {
       warnings: ["2 styles have sizes and colours"],
       itemGroups: ["Make-up", "Skin care"],
       attributes: [],
+      hsnCodes: [],
       message: "",
       shopType: "clothing",
       modules: map,

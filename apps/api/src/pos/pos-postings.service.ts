@@ -62,7 +62,8 @@ export class PosPostings {
 
     for (const date of dates) {
       const lines: LedgerLineInput[] = [];
-      for (const b of completed.filter((x) => iso(x.businessDate) === date)) {
+      const billsOnDate = completed.filter((x) => iso(x.businessDate) === date);
+      for (const b of billsOnDate) {
         lines.push({ role: 'sales', storeId, credit: D(b.taxableAmount) });
         lines.push({ role: 'gst_output_cgst', storeId, credit: D(b.cgst) });
         lines.push({ role: 'gst_output_sgst', storeId, credit: D(b.sgst) });
@@ -102,7 +103,9 @@ export class PosPostings {
         storeId,
         actorId,
         lines,
-        remark: `Till ${shift.till.code}: ${completed.filter((x) => iso(x.businessDate) === date).length} bills`,
+        remark: `Till ${shift.till.code}: ${billsOnDate.length} bills`,
+        // Decision L9 (owner, 28 October 2026): at most 1 paisa per bill goes to Rounding unnoticed; more is refused.
+        tolerance: new Decimal('0.01').mul(Math.max(1, billsOnDate.length)),
         // Tills never stop because the books are locked; the entry moves to the first open day (plan 06 §9c item 8).
         whenLocked: 'next_open',
       });

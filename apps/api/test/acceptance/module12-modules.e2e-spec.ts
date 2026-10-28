@@ -417,7 +417,8 @@ describe('12.5 shop types fill in settings', () => {
       ['COLOUR', 'Colour'],
       ['SIZE', 'Size'],
     ]);
-    expect(attrs[1].values.map((v) => v.value)).toEqual(['S', 'M', 'L', 'XL', 'XXL']);
+    // Decision L2: XS and Free size too.
+    expect(attrs[1].values.map((v) => v.value)).toEqual(['XS', 'S', 'M', 'L', 'XL', 'XXL', 'Free size']);
     expect(attrs[0].values.map((v) => v.value)).toEqual(expect.arrayContaining(['Black', 'White', 'Red', 'Blue']));
     expect((await prisma.itemGroup.findMany()).map((g) => g.name)).toEqual(expect.arrayContaining([...SHOP_TYPES.clothing.itemGroups]));
     // Each starting record is in the history.

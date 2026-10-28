@@ -3,7 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { hasPermission, updateCatalogueSettingsSchema } from "shared";
-import { Alert, Button, CheckInput, SelectInput } from "@/components/ui";
+import { Alert, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups } from "@/lib/catalogue";
@@ -21,6 +21,8 @@ interface SettingsForm {
   allowPriceChangeOnBill: boolean;
   blockSellingBelowCost: boolean;
   saveTypedPrices: boolean;
+  newItemMaxDiscountPercent: string;
+  newItemAutoNumberBatches: boolean;
 }
 
 function fromDto(s: CatalogueSettingsDto): SettingsForm {
@@ -34,6 +36,8 @@ function fromDto(s: CatalogueSettingsDto): SettingsForm {
     allowPriceChangeOnBill: s.allowPriceChangeOnBill,
     blockSellingBelowCost: s.blockSellingBelowCost,
     saveTypedPrices: s.saveTypedPrices,
+    newItemMaxDiscountPercent: String(Number(s.newItemMaxDiscountPercent)),
+    newItemAutoNumberBatches: s.newItemAutoNumberBatches,
   };
 }
 
@@ -44,7 +48,7 @@ function SettingsForm({ settings, groups, units, lists, canEdit, onSaved }: { se
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const setFlag = (key: "autoItemCodes" | "fallbackToDefaultSellingList" | "allowPriceChangeOnBill" | "blockSellingBelowCost" | "saveTypedPrices") => (e: { target: { checked: boolean } }) =>
+  const setFlag = (key: "autoItemCodes" | "fallbackToDefaultSellingList" | "allowPriceChangeOnBill" | "blockSellingBelowCost" | "saveTypedPrices" | "newItemAutoNumberBatches") => (e: { target: { checked: boolean } }) =>
     setForm((f) => ({ ...f, [key]: e.target.checked }));
   const setId = (key: "defaultItemGroupId" | "defaultUnitId" | "defaultSellingPriceListId" | "defaultBuyingPriceListId") => (e: { target: { value: string } }) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -63,6 +67,8 @@ function SettingsForm({ settings, groups, units, lists, canEdit, onSaved }: { se
       allowPriceChangeOnBill: form.allowPriceChangeOnBill,
       blockSellingBelowCost: form.blockSellingBelowCost,
       saveTypedPrices: form.saveTypedPrices,
+      newItemMaxDiscountPercent: form.newItemMaxDiscountPercent.trim(),
+      newItemAutoNumberBatches: form.newItemAutoNumberBatches,
     });
     const issues = issuesToFieldErrors(parsed);
     setErrors(issues);
@@ -111,7 +117,17 @@ function SettingsForm({ settings, groups, units, lists, canEdit, onSaved }: { se
                 </option>
               ))}
           </SelectInput>
+          <TextInput
+            id="cs-maxDiscount"
+            label="Starting maximum discount (%)"
+            inputMode="decimal"
+            value={form.newItemMaxDiscountPercent}
+            error={errors.newItemMaxDiscountPercent}
+            hint="Filled in on each new item; change it on the item any time. 0 = no typed discount at the till without a manager."
+            onChange={(e) => setForm((f) => ({ ...f, newItemMaxDiscountPercent: e.target.value }))}
+          />
         </div>
+        <CheckInput id="cs-autoBatches" label="New batch items number their batches automatically" description="Off: the batch number printed on the pack is typed in when goods arrive (best for cosmetics, for recalls)." checked={form.newItemAutoNumberBatches} onChange={setFlag("newItemAutoNumberBatches")} />
       </fieldset>
 
       <fieldset disabled={!canEdit}>

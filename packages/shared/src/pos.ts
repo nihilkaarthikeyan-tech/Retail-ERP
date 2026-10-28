@@ -21,25 +21,30 @@ export interface InclusiveTax {
 }
 
 /**
- * GST inside a price that includes it (MRP-style retail): taxable =
- * amount ÷ (1 + rate ÷ 100) to paise, GST = amount − taxable, CGST takes the
- * odd paisa (half up), SGST the rest; IGST alone between states.
- * Works for minus amounts (returns) by symmetry.
+ * GST inside a price that includes it (MRP-style retail).
+ * Within a state (decision L8, owner, 28 October 2026): CGST and SGST are each
+ * amount × (rate ÷ 2) ÷ (100 + rate) to paise, always equal, and the taxable
+ * value is the rest, so a bill's CGST and SGST are equal too (e-invoice and
+ * GSTR-1 expect them so). Between states: taxable = amount ÷ (1 + rate ÷ 100)
+ * to paise and IGST the rest. Works for minus amounts (returns) by symmetry.
  */
 export function inclusiveTax(amount: DecimalInput, gstRate: DecimalInput, interState = false): InclusiveTax {
   const a = D(amount);
   const sign = a.isNegative() ? -1 : 1;
   const abs = a.abs();
-  const taxable = roundMoney(abs.div(D(1).add(D(gstRate).div(100))));
-  const tax = abs.sub(taxable);
+  let taxable: Decimal;
   let cgst = ZERO;
   let sgst = ZERO;
   let igst = ZERO;
-  if (interState) igst = tax;
-  else {
-    cgst = roundMoney(tax.div(2));
-    sgst = tax.sub(cgst);
+  if (interState) {
+    taxable = roundMoney(abs.div(D(1).add(D(gstRate).div(100))));
+    igst = abs.sub(taxable);
+  } else {
+    cgst = roundMoney(abs.mul(D(gstRate).div(2)).div(D(100).add(D(gstRate))));
+    sgst = cgst;
+    taxable = abs.sub(cgst).sub(sgst);
   }
+  const tax = cgst.add(sgst).add(igst);
   const s = (v: Decimal) => v.mul(sign);
   return { taxable: s(taxable), cgst: s(cgst), sgst: s(sgst), igst: s(igst), tax: s(tax) };
 }

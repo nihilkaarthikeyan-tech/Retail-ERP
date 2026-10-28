@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { hasPermission, type MarkdownInput, markdownSchema } from "shared";
 import { ItemPicker } from "@/components/prices/item-picker";
+import { OrdersReasonDialog } from "@/components/purchasing/orders-shared";
 import { Alert, Badge, Button, CheckInput, DataTable, Field, RadioInput, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -35,6 +36,8 @@ interface Choice {
   remark: string;
 }
 
+const STATUS_WORDS: Record<MarkdownDto["status"], string> = { running: "Running", upcoming: "Not started", ended: "Ended", withdrawn: "Withdrawn" };
+
 const toggled = (list: string[], id: string, on: boolean) => (on ? [...list, id] : list.filter((x) => x !== id));
 
 export function MarkdownTool() {
@@ -51,6 +54,8 @@ export function MarkdownTool() {
   const [done, setDone] = useState<MarkdownDto | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState<MarkdownDto | null>(null);
+  const [stopped, setStopped] = useState<string | null>(null);
 
   // Anything changed makes the preview out of date.
   const change = (patch: Partial<Choice>) => {
@@ -117,15 +122,33 @@ export function MarkdownTool() {
     { key: "dates", header: "From – to", render: (m) => `${formatDate(m.startDate)} – ${m.endDate ? formatDate(m.endDate) : "no end"}` },
     { key: "list", header: "Price list", render: (m) => m.priceList?.name ?? "—" },
     { key: "items", header: "Items", align: "right", render: (m) => m.itemCount },
-    { key: "status", header: "Status", render: (m) => <Badge kind={m.status === "running" ? "ok" : m.status === "upcoming" ? "warn" : "off"}>{m.status === "running" ? "Running" : m.status === "upcoming" ? "Not started" : "Ended"}</Badge> },
+    {
+      key: "status",
+      header: "Status",
+      render: (m) => (
+        <>
+          <Badge kind={m.status === "running" ? "ok" : m.status === "upcoming" ? "warn" : "off"}>{STATUS_WORDS[m.status]}</Badge>
+          {m.stoppedOn ? <span className="muted"> {m.status === "withdrawn" ? "on" : "early, on"} {formatDate(m.stoppedOn)}{m.stoppedReason ? `: ${m.stoppedReason}` : ""}</span> : null}
+        </>
+      ),
+    },
     { key: "by", header: "By", render: (m) => `${m.createdBy ?? "—"}${m.remark ? ` · ${m.remark}` : ""}` },
     {
       key: "labels",
       header: "",
       render: (m) => (
-        <Link href={`/labels?markdownId=${m.id}`} className="btn btn-small">
-          Print labels
-        </Link>
+        <span className="row-actions">
+          {m.status !== "withdrawn" ? (
+            <Link href={`/labels?markdownId=${m.id}`} className="btn btn-small">
+              Print labels
+            </Link>
+          ) : null}
+          {canManage && (m.status === "upcoming" || m.status === "running") ? (
+            <Button size="small" onClick={() => setStopping(m)}>
+              {m.status === "upcoming" ? "Withdraw" : "End now"}
+            </Button>
+          ) : null}
+        </span>
       ),
     },
   ];
@@ -241,7 +264,27 @@ export function MarkdownTool() {
       ) : null}
 
       <h2>Past markdowns</h2>
+      {stopped ? <Alert kind="success">{stopped}</Alert> : null}
       <DataTable columns={historyColumns} rows={history.data} rowKey={(m) => m.id} loading={history.loading} empty="No markdowns yet." />
+      <OrdersReasonDialog
+        open={stopping !== null}
+        title={stopping?.status === "upcoming" ? "Withdraw this markdown?" : "End this markdown now?"}
+        explain={
+          stopping?.status === "upcoming"
+            ? `Its ${stopping.itemCount} new prices will never apply; the items keep their present prices.`
+            : `From today the ${stopping?.itemCount ?? ""} items go back to the price they had before the markdown. Bills already made keep their prices.`
+        }
+        confirmLabel={stopping?.status === "upcoming" ? "Withdraw" : "End now"}
+        danger
+        onClose={() => setStopping(null)}
+        onConfirm={async (reason) => {
+          const m = stopping!;
+          await api.post<MarkdownDto>(`/markdowns/${m.id}/stop`, { reason });
+          if (done?.id === m.id) setDone(null);
+          setStopped(m.status === "upcoming" ? "The markdown was withdrawn." : "The markdown has ended; the old prices apply from today.");
+          await history.reload();
+        }}
+      />
     </>
   );
 }

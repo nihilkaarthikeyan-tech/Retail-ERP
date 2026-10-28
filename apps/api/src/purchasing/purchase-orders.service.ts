@@ -264,7 +264,7 @@ export class PurchaseOrdersService {
     const rate = l.rate ?? keep?.rate.toString() ?? (await this.common.buyingRate(db, supplier, info, header.orderDate, l.quantity, user));
     if (rate === null) throw new BadRequestException(`${info.item.code}: give the buying price (no price list or last purchase price found)`);
     const interState = await this.common.interState(db, supplier, storeId);
-    const gstRate = l.gstRate ?? keep?.gstRate.toString() ?? (await this.common.lastGstRate(db, info.item.id));
+    const gstRate = l.gstRate ?? keep?.gstRate.toString() ?? (await this.common.lastGstRate(db, info.item.id, { date: header.orderDate, rate, factor: info.factor }));
     const discountPercent = l.discountPercent ?? keep?.discountPercent.toString();
     const discountAmount = l.discountAmount ?? (keep && keep.discountAmount.gt(0) ? keep.discountAmount.toString() : undefined);
     const priced = this.common.price({ quantity: l.quantity, rate, discountPercent, discountAmount, gstRate, cgst: l.cgst, sgst: l.sgst, igst: l.igst }, interState, info.item.code);

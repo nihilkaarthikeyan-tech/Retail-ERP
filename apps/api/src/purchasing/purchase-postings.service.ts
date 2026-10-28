@@ -55,6 +55,30 @@ export class PurchasePostings {
   }
 
   /**
+   * Decision L5 (owner, 28 October 2026): goods going back to the supplier leave stock at their full
+   * cost, freight included, against goods received not billed; the supplier's debit note clears only
+   * the goods. The freight share goes back to Freight inward, so nothing is left behind. Cancelling
+   * the return reverses it with the rest of the return's entries.
+   */
+  async returnFreight(tx: Db, r: { id: string; companyId: string; number: string; storeId: string; postingDate: Date }, amount: Decimal, counterRole: string, actorId: string | null): Promise<void> {
+    if (amount.lte(0)) return;
+    await this.ledger.post(tx, {
+      companyId: r.companyId,
+      date: iso(r.postingDate),
+      documentType: 'goods_receipt',
+      documentId: r.id,
+      documentNumber: r.number,
+      storeId: r.storeId,
+      actorId,
+      remark: 'Freight share of the goods returned',
+      lines: [
+        { role: 'freight_inward', storeId: r.storeId, debit: amount },
+        { role: counterRole, storeId: r.storeId, credit: amount },
+      ],
+    });
+  }
+
+  /**
    * A supplier bill or debit note: the supplier's balance for the total; on the
    * other side each line's account (goods received not billed, stock or an
    * expense), the price difference, input GST per head and rounding. Debit

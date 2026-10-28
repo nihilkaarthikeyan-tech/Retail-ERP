@@ -362,7 +362,7 @@ export class SupplierBillsService {
           const orderLine = l.orderLineId ? await this.openOrderLine(db, companyId, supplier, l.orderLineId, l.itemId, input.supplierBillDate) : null;
           const rate = l.rate ?? orderLine?.rate.toString() ?? (await this.common.buyingRate(db, supplier, info, input.postingDate, l.quantity, user));
           if (rate == null) throw new BadRequestException(`${info.item.code}: give the price`);
-          const priced = this.common.price({ quantity: l.quantity, rate, discountPercent: l.discountPercent, discountAmount: l.discountAmount, gstRate: l.gstRate ?? (await this.common.lastGstRate(db, info.item.id)), cgst: l.cgst, sgst: l.sgst, igst: l.igst }, interState, label);
+          const priced = this.common.price({ quantity: l.quantity, rate, discountPercent: l.discountPercent, discountAmount: l.discountAmount, gstRate: l.gstRate ?? (await this.common.lastGstRate(db, info.item.id, { date: input.postingDate, rate, factor: info.factor })), cgst: l.cgst, sgst: l.sgst, igst: l.igst }, interState, label);
           lines.push({
             creditClaimable: claimable(l),
             hsnCode: info.item.hsnCode,

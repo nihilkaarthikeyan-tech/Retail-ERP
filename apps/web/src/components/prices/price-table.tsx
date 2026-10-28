@@ -20,8 +20,13 @@ interface PriceTableProps {
   onChanged: () => Promise<void> | void;
 }
 
+/** Decision L3: a withdrawn markdown's price ends before it starts, so it never applied. */
+function isWithdrawn(p: PriceDto): boolean {
+  return p.endDate !== null && p.startDate !== null && p.endDate < p.startDate;
+}
+
 function isEnded(p: PriceDto): boolean {
-  return p.endDate !== null && p.endDate < todayIso();
+  return isWithdrawn(p) || (p.endDate !== null && p.endDate < todayIso());
 }
 
 /** Prices with "End today" and "Change price" actions; prices are never deleted. */
@@ -99,7 +104,7 @@ export function PriceTable({ rows, loading, showItem = false, showList = false, 
       render: (p) => (
         <span className="row-actions">
           {p.endDate ? formatDate(p.endDate) : <span className="muted">open</span>}
-          {isEnded(p) ? <Badge kind="off">Ended</Badge> : null}
+          {isWithdrawn(p) ? <Badge kind="off">Withdrawn</Badge> : isEnded(p) ? <Badge kind="off">Ended</Badge> : null}
           {p.customerId ? <Badge kind="neutral">Customer</Badge> : null}
           {p.supplierId ? <Badge kind="neutral">Supplier</Badge> : null}
         </span>
@@ -112,9 +117,11 @@ export function PriceTable({ rows, loading, showItem = false, showList = false, 
             header: "",
             render: (p: PriceDto) => (
               <span className="row-actions">
-                <Button size="small" onClick={() => openChange(p)}>
-                  Change price
-                </Button>
+                {!isWithdrawn(p) ? (
+                  <Button size="small" onClick={() => openChange(p)}>
+                    Change price
+                  </Button>
+                ) : null}
                 {!isEnded(p) ? (
                   <Button size="small" variant="danger" onClick={() => endToday(p)}>
                     End today

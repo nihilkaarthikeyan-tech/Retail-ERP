@@ -186,7 +186,7 @@ export function MyModulesScreen() {
             </div>
           </div>
         ) : null}
-        <p className="muted">A shop type sets the modules and adds starting item groups (and size and colour lists for clothes and shoes). It never deletes anything.</p>
+        <p className="muted">A shop type sets the modules, adds starting item groups, size and colour lists (clothes and shoes) and its common HSN codes, and sets the starting discount and batch numbering for new items. It never deletes anything.</p>
       </section>
 
       <h2>Optional modules</h2>
@@ -229,6 +229,7 @@ export function MyModulesScreen() {
             <p>{preview.switchOff.length ? `Switches off (hidden, not deleted): ${listText(preview.switchOff.map(labelOf))}.` : "Switches nothing off."}</p>
             {preview.itemGroups.length ? <p>Adds item groups: {listText(preview.itemGroups)}.</p> : <p>Adds no item groups; the starting ones are already there.</p>}
             {preview.attributes.length ? <p>Adds lists: {listText(preview.attributes)}.</p> : null}
+            {preview.hsnCodes.length ? <p>Adds common HSN codes to your list: {listText(preview.hsnCodes)}.</p> : null}
             {preview.warnings.length ? (
               <>
                 <p>Still in use in the modules it switches off:</p>

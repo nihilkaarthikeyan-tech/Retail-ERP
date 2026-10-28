@@ -130,7 +130,7 @@ describe("GST rate list with price bands (G2)", () => {
     fireEvent.change(screen.getByLabelText(/HSN code/, { selector: "input#gst-hsn" }), { target: { value: "6205" } });
     fireEvent.change(screen.getByLabelText(/GST %/), { target: { value: "5" } });
     fireEvent.change(screen.getByLabelText(/Starts on/), { target: { value: "2025-09-22" } });
-    fireEvent.change(screen.getByLabelText(/Only up to this selling price/), { target: { value: "2500" } });
+    fireEvent.change(screen.getByLabelText(/Only up to this value per piece/), { target: { value: "2500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(writes(fetchMock)).toHaveLength(1));
     expect(writes(fetchMock)[0]).toMatchObject({ path: "/pos/gst-rates", body: { hsnCode: "6205", rate: "5", kind: "taxable", priceFrom: null, priceUpTo: "2500", effectiveFrom: "2025-09-22" } });

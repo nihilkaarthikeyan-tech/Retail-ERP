@@ -22,12 +22,13 @@ const t = (r: ReturnType<typeof inclusiveTax>) => [r.taxable.toFixed(2), r.cgst.
 
 describe('GST inside prices that include it', () => {
   it('scenario 6.1: 2 Basmati at ₹120 (5%) and 1 Surf at ₹132 (18%)', () => {
-    expect(t(inclusiveTax('240', '5'))).toEqual(['228.57', '5.72', '5.71', '0.00']);
+    // Decision L8: CGST and SGST are each worked out and always equal; the taxable value takes the odd paisa.
+    expect(t(inclusiveTax('240', '5'))).toEqual(['228.58', '5.71', '5.71', '0.00']);
     expect(t(inclusiveTax('132', '18'))).toEqual(['111.86', '10.07', '10.07', '0.00']);
   });
 
-  it('scenario 6.2: a returned Basmati is minus ₹114.29, CGST ₹2.86, SGST ₹2.85', () => {
-    expect(t(inclusiveTax('-120', '5'))).toEqual(['-114.29', '-2.86', '-2.85', '0.00']);
+  it('scenario 6.2: a returned Basmati at ₹120 is minus ₹114.28, CGST ₹2.86, SGST ₹2.86', () => {
+    expect(t(inclusiveTax('-120', '5'))).toEqual(['-114.28', '-2.86', '-2.86', '0.00']);
   });
 
   it('IGST alone between states; 0% means no tax', () => {

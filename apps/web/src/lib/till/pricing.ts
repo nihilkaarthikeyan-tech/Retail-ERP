@@ -379,7 +379,8 @@ export function listPriceFor(snapshot: TillSnapshot, item: SnapItem, unitId: str
  * per unit (GST included); the same shared rule as the server.
  */
 export function gstRateFor(rates: SnapGstRate[], hsnCode: string | null, date: string, unitPrice?: DecimalInput | null): SnapGstRate | null {
-  return pickGstRate(rates, hsnCode, date, unitPrice);
+  // Till prices include GST (decision L7: the band is on the value before GST).
+  return pickGstRate(rates, hsnCode, date, unitPrice, { gstIncluded: true });
 }
 
 /** Plan 08 G1, G3, G4: the place of supply and invoice kind of the sale, as the server works them out. */

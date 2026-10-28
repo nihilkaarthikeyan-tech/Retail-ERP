@@ -3,7 +3,7 @@
 // Owner decision of 22 Oct 2026: a rate applies as soon as it is saved; every
 // change is kept in the history, and saved bills keep the rate they used.
 // Plan 08 G2: exempt and nil-rated kept apart from 0%, and price bands (a rate
-// chosen by the selling price per unit, GST included, e.g. clothing).
+// chosen by the value per unit before GST, e.g. clothing; decision L7).
 "use client";
 
 import { useState, type FormEvent } from "react";
@@ -147,8 +147,8 @@ export function GstRatesView() {
           {form.kind === "taxable" ? (
             <TextInput id="gst-rate" label="GST %" required inputMode="decimal" value={form.rate} error={errors.rate} hint="The full rate, for example 18 (split into CGST 9 + SGST 9)." onChange={(e) => setForm({ ...form, rate: e.target.value })} />
           ) : null}
-          <TextInput id="gst-price-from" label="Only above this selling price per piece (₹)" inputMode="decimal" value={form.priceFrom} error={errors.priceFrom} hint="Leave both prices empty when the rate does not depend on the price. GST included." onChange={(e) => setForm({ ...form, priceFrom: e.target.value })} />
-          <TextInput id="gst-price-up-to" label="Only up to this selling price per piece (₹)" inputMode="decimal" value={form.priceUpTo} error={errors.priceUpTo} hint="For example 5% up to ₹2,500 and a second rate of 18% above ₹2,500." onChange={(e) => setForm({ ...form, priceUpTo: e.target.value })} />
+          <TextInput id="gst-price-from" label="Only above this value per piece, before GST (₹)" inputMode="decimal" value={form.priceFrom} error={errors.priceFrom} hint="Leave both prices empty when the rate does not depend on the price. The value before GST, after any discount: the till takes the GST out of its price first." onChange={(e) => setForm({ ...form, priceFrom: e.target.value })} />
+          <TextInput id="gst-price-up-to" label="Only up to this value per piece, before GST (₹)" inputMode="decimal" value={form.priceUpTo} error={errors.priceUpTo} hint="For example 5% up to ₹2,500 and a second rate of 18% above ₹2,500." onChange={(e) => setForm({ ...form, priceUpTo: e.target.value })} />
           <TextInput id="gst-cess" label="Cess %" inputMode="decimal" value={form.cessRate} error={errors.cessRate} onChange={(e) => setForm({ ...form, cessRate: e.target.value })} />
           <TextInput id="gst-from" label="Starts on" type="date" required value={form.effectiveFrom} error={errors.effectiveFrom} onChange={(e) => setForm({ ...form, effectiveFrom: e.target.value })} />
           <TextInput id="gst-note" label="Note" value={form.note} error={errors.note} hint="For example the government notification number." onChange={(e) => setForm({ ...form, note: e.target.value })} />

@@ -113,7 +113,8 @@ export class PricingService {
       orderBy: [{ item: { code: 'asc' } }, { startDate: 'desc' }],
       take: 500,
     });
-    return rows.map(toPriceDto);
+    // Decision L3: a withdrawn markdown's prices end before they start (they never applied); shown only with the ended ones.
+    return rows.filter((r) => q.includeEnded === 'true' || !r.endDate || r.endDate >= r.startDate).map(toPriceDto);
   }
 
   /** The same price on every variant of a style that has none in the list on that date (see stylePriceSchema). */

@@ -160,9 +160,9 @@ describe('Module 8: GST at the till', () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt2000.id, quantity: '1' }, { itemId: shirt3000.id, quantity: '1' }], '5000')).expect(201)).body;
     expect(res.sale.lines.map(lineTax)).toEqual([
       ['5', '1904.76', '47.62', '47.62', '0.00'],
-      ['18', '2542.37', '228.82', '228.81', '0.00'],
+      ['18', '2542.38', '228.81', '228.81', '0.00'],
     ]);
-    expect(res.sale).toMatchObject({ taxableAmount: '4447.13', cgst: '276.44', sgst: '276.43', total: '5000.00' });
+    expect(res.sale).toMatchObject({ taxableAmount: '4447.14', cgst: '276.43', sgst: '276.43', total: '5000.00' });
     const summary = new Map<string, Decimal>();
     for (const l of res.sale.lines) summary.set(`${l.hsnCode.slice(0, 4)}@${l.gstRate}`, (summary.get(`${l.hsnCode.slice(0, 4)}@${l.gstRate}`) ?? new Decimal(0)).add(l.taxableAmount));
     expect([...summary.keys()]).toEqual(['6205@5', '6205@18']);
@@ -178,7 +178,7 @@ describe('Module 8: GST at the till', () => {
     oldCream = before.sale;
     expect(oldCream.lines.map(lineTax)).toEqual([['12', '100.00', '6.00', '6.00', '0.00']]);
     const after = (await T(owner.post('/pos/bills')).send(offlineSale('2025-09-22', '2025-26', [{ itemId: cream.id, quantity: '1' }], '112')).expect(201)).body;
-    expect(after.sale.lines.map(lineTax)).toEqual([['5', '106.67', '2.67', '2.66', '0.00']]);
+    expect(after.sale.lines.map(lineTax)).toEqual([['5', '106.66', '2.67', '2.67', '0.00']]);
     const now = (await T(owner.post('/pos/bills')).send(sale([{ itemId: cream.id, quantity: '1' }], '112')).expect(201)).body;
     expect(now.sale.lines[0].gstRate).toBe('5');
     const reprint = (await owner.post(`/pos/bills/${oldCream.id}/reprint`).expect(200)).body;
@@ -357,7 +357,7 @@ describe('8.11 GST settings and rates apply as soon as they are saved (owner dec
     expect(audit?.changes).toMatchObject({ rate: { old: '12', new: '5' }, note: { old: null, new: 'Corrected rate' } });
 
     const after = (await T(owner.post('/pos/bills')).send(sale([{ itemId: toy.id, quantity: '1' }], '112')).expect(201)).body.sale;
-    expect(after).toMatchObject({ gstProvisional: false, taxableAmount: '106.67' });
+    expect(after).toMatchObject({ gstProvisional: false, taxableAmount: '106.66' });
     expect(after.lines[0].gstRate).toBe('5');
     // The bill saved before the change keeps the 12% it was made with.
     expect((await owner.get(`/pos/bills/${before.id}`).expect(200)).body.lines[0].gstRate).toBe('12');

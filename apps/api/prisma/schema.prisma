@@ -787,6 +787,10 @@ model CatalogueSettings {
   allowPriceChangeOnBill       Boolean @default(false)
   blockSellingBelowCost        Boolean @default(false)
   saveTypedPrices              Boolean @default(false)
+  /// Decision L6 (owner, 28 October 2026): a new item's maximum discount %; the clothing and fancy templates start it at 10.
+  newItemMaxDiscountPercent    Decimal @default(0) @db.Decimal(5, 2)
+  /// Decision L12: a new batch item starts with "Number batches automatically" ticked; the cosmetics template starts it off.
+  newItemAutoNumberBatches     Boolean @default(true)
 
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
@@ -2969,6 +2973,10 @@ model Markdown {
   chosenBy    Json
   itemCount   Int
   remark      String?
+  /// Decision L3 (owner, 28 October 2026): withdrawn before it started, or ended early; the business date it was stopped.
+  stoppedOn     DateTime? @db.Date
+  stoppedById   String?   @db.Uuid
+  stoppedReason String?
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid

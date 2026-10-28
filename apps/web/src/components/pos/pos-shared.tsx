@@ -45,7 +45,7 @@ export interface GstRateDto {
   hsnCode: string;
   rate: string;
   cessRate: string;
-  /** Plan 08 G2: taxable, exempt or nil; a price band on the selling price per unit (GST included). */
+  /** Plan 08 G2: taxable, exempt or nil; a price band on the value per unit before GST (decision L7). */
   kind?: "taxable" | "exempt" | "nil";
   priceFrom?: string | null;
   priceUpTo?: string | null;

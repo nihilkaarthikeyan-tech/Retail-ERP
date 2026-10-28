@@ -65,38 +65,71 @@ export const SHOP_TYPES = {
     description: 'Fashion jewellery, cosmetics, toys, bags, gifts, stationery and decor.',
     modules: ['offers', 'delivery', 'transfers', 'purchase_orders'],
     itemGroups: ['Fashion jewellery', 'Cosmetics', 'Toys', 'Bags and wallets', 'Gift articles', 'Stationery', 'Home decor', 'Hair accessories'],
+    hsnCodes: ['7117', '3304', '4202', '9503', '9615', '9004', '9102', '4820', '9608', '6117', '3926'],
+    newItemMaxDiscountPercent: '10',
+    newItemAutoNumberBatches: true,
   },
   clothing: {
     label: 'Clothing',
     description: 'Garments for men, women and children, in sizes and colours.',
     modules: ['variants', 'seasons', 'salesperson', 'alterations', 'customer_orders', 'offers', 'transfers', 'purchase_orders', 'delivery'],
     itemGroups: ['Men shirts', 'Men trousers', 'Men T-shirts', 'Women kurtis', 'Women tops', 'Sarees', 'Kids wear', 'Innerwear'],
+    hsnCodes: ['6105', '6106', '6109', '6104', '6111', '6115', '6203', '6204', '6205', '6206', '6207', '6208', '6209', '6211', '6214'],
+    newItemMaxDiscountPercent: '10',
+    newItemAutoNumberBatches: true,
   },
   footwear: {
     label: 'Footwear',
     description: 'Shoes, sandals and slippers in sizes and colours.',
     modules: ['variants', 'seasons', 'salesperson', 'offers', 'transfers', 'purchase_orders'],
     itemGroups: ['Men footwear', 'Women footwear', 'Kids footwear', 'Sports shoes', 'Slippers', 'Accessories'],
+    hsnCodes: ['6401', '6402', '6403', '6404', '6405', '6406'],
+    newItemMaxDiscountPercent: '0',
+    newItemAutoNumberBatches: true,
   },
   cosmetics: {
     label: 'Cosmetics and beauty',
     description: 'Make-up, skin and hair care, perfumes — sold by batch with expiry dates.',
     modules: ['batches', 'offers', 'transfers', 'purchase_orders'],
     itemGroups: ['Make-up', 'Skin care', 'Hair care', 'Perfumes', 'Personal care', 'Accessories'],
+    hsnCodes: ['3303', '3304', '3305', '3306', '3401', '9615', '9603'],
+    newItemMaxDiscountPercent: '0',
+    // Cosmetics packs carry the maker's batch number, which the shop types in (recalls).
+    newItemAutoNumberBatches: false,
   },
   mobiles: {
     label: 'Mobiles and electronics',
     description: 'Phones, accessories and small electronics with serial numbers and warranty.',
     modules: ['serials', 'customer_orders', 'offers', 'transfers', 'purchase_orders', 'credit_sales'],
     itemGroups: ['Mobile phones', 'Tablets', 'Chargers and cables', 'Earphones and speakers', 'Covers and screen guards', 'Small electronics'],
+    hsnCodes: ['8517', '8504', '8507', '8518', '8544', '3926'],
+    newItemMaxDiscountPercent: '0',
+    newItemAutoNumberBatches: true,
   },
   general: {
     label: 'General store',
     description: 'A mix of everyday goods; switch on more modules any time.',
     modules: ['offers'],
     itemGroups: ['General'],
+    hsnCodes: ['3401', '3306', '3924', '4820', '9608'],
+    newItemMaxDiscountPercent: '0',
+    newItemAutoNumberBatches: true,
   },
-} as const satisfies Record<string, { label: string; description: string; modules: readonly ModuleKey[]; itemGroups: readonly string[] }>;
+} as const satisfies Record<
+  string,
+  {
+    label: string;
+    description: string;
+    modules: readonly ModuleKey[];
+    itemGroups: readonly string[];
+    /** Decision L1 (owner, 28 October 2026): common HSN headings added to the shop's own list, with the official descriptions. */
+    hsnCodes: readonly string[];
+    /** Decision L6: a new item's starting maximum discount %. */
+    newItemMaxDiscountPercent: string;
+    /** Decision L12: whether a new batch item numbers its batches itself. */
+    newItemAutoNumberBatches: boolean;
+  }
+>;
 
 export type ShopTypeKey = keyof typeof SHOP_TYPES;
 export const SHOP_TYPE_KEYS = Object.keys(SHOP_TYPES) as ShopTypeKey[];
@@ -146,5 +179,7 @@ export interface ShopTypeResult extends ModulesState {
   /** Starting item groups and attributes created (done) or to be created (names that already exist are skipped). */
   itemGroups: string[];
   attributes: string[];
+  /** Decision L1: common HSN codes added to the shop's own list. */
+  hsnCodes: string[];
   message: string;
 }

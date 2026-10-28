@@ -156,7 +156,8 @@ export class PosCommon {
    * for price-banded codes the band of the selling price per unit.
    */
   async gstRateFor(db: Db, item: Pick<Item, 'code' | 'hsnCode'>, date: string, unitPrice?: Decimal | string | null): Promise<GstRate> {
-    return this.gst.rateFor(db, item, date, unitPrice);
+    // Till prices include GST (decision L7: the band is on the value before GST).
+    return this.gst.rateFor(db, item, date, unitPrice, { gstIncluded: true });
   }
 
   // ---- Invoice prefix of a till (plan 08: CGST rule 46(b), 16 characters) ----

@@ -49,15 +49,15 @@ export interface GstSplit {
 }
 
 /**
- * A suggested split for filling the form: rate × taxable rounded to paise,
- * halved for CGST/SGST (CGST takes the odd paisa), or all IGST between states.
+ * A suggested split for filling the form: within a state CGST and SGST are each
+ * taxable × (rate ÷ 2) to paise, always equal (decision L8); between states
+ * IGST is rate × taxable to paise.
  * The supplier's bill is the authority; users may type their figures instead.
  */
 export function suggestGst(taxable: DecimalInput, gstRate: DecimalInput, interState: boolean): GstSplit {
-  const total = roundMoney(D(taxable).mul(D(gstRate)).div(100));
-  if (interState) return { cgst: ZERO, sgst: ZERO, igst: total };
-  const cgst = roundMoney(total.div(2));
-  return { cgst, sgst: total.sub(cgst), igst: ZERO };
+  if (interState) return { cgst: ZERO, sgst: ZERO, igst: roundMoney(D(taxable).mul(D(gstRate)).div(100)) };
+  const half = roundMoney(D(taxable).mul(D(gstRate)).div(200));
+  return { cgst: half, sgst: half, igst: ZERO };
 }
 
 /**

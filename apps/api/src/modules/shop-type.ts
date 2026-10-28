@@ -1,8 +1,9 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Plan 12 §2: a shop type is a starting set of modules and settings. Applying
 // one saves the shop type, writes the module switches and creates the starting
-// item groups and size and colour lists. It never deletes or renames anything:
-// a group or list whose name already exists is left as it is.
+// item groups, size and colour lists and common HSN codes, and (when the shop
+// type changes) the starting values for new items. It never deletes or renames
+// anything: a group, list or HSN code that already exists is left as it is.
 import { type ModuleKey, MODULE_KEYS, modulesForShopType, SHOP_TYPES, type ShopTypeKey, withNeeds } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
@@ -37,7 +38,8 @@ const COLOURS: StartingAttribute = {
 /** The starting size and colour lists of each shop type (suggestions the owner can edit at once). */
 export const STARTING_ATTRIBUTES: Record<ShopTypeKey, StartingAttribute[]> = {
   fancy: [],
-  clothing: [{ code: 'SIZE', name: 'Size', values: ['S', 'M', 'L', 'XL', 'XXL'].map((v) => ({ value: v, shortCode: v })) }, COLOURS],
+  // Decision L2 (owner, 28 October 2026): XS, and "Free size" for dupattas, sarees and some kurtis.
+  clothing: [{ code: 'SIZE', name: 'Size', values: [...['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((v) => ({ value: v, shortCode: v })), { value: 'Free size', shortCode: 'FS' }] }, COLOURS],
   // A separate list from clothing sizes, so a shop selling both keeps them apart.
   footwear: [{ code: 'SHOE-SIZE', name: 'Shoe size', values: ['5', '6', '7', '8', '9', '10', '11'].map((v) => ({ value: `UK ${v}`, shortCode: v })) }, COLOURS],
   cosmetics: [],
@@ -64,13 +66,15 @@ function codeFor(name: string): string {
 
 const key = (s: string) => s.trim().toLowerCase();
 
-/** Which starting item groups and lists are still missing (by name, ignoring case). */
-export async function missingStartingSettings(db: Db, type: ShopTypeKey): Promise<{ itemGroups: string[]; attributes: StartingAttribute[] }> {
+/** Which starting item groups, lists and HSN codes are still missing (groups and lists by name, ignoring case). */
+export async function missingStartingSettings(db: Db, type: ShopTypeKey): Promise<{ itemGroups: string[]; attributes: StartingAttribute[]; hsnCodes: string[] }> {
   const groups = new Set((await db.itemGroup.findMany({ select: { name: true } })).map((g) => key(g.name)));
   const attrs = await db.variantAttribute.findMany({ select: { code: true, name: true } });
+  const codes = new Set((await db.hsnCode.findMany({ select: { code: true } })).map((h) => h.code));
   return {
     itemGroups: (SHOP_TYPES[type].itemGroups as readonly string[]).filter((n) => !groups.has(key(n))),
     attributes: STARTING_ATTRIBUTES[type].filter((a) => !attrs.some((x) => x.code === a.code || key(x.name) === key(a.name))),
+    hsnCodes: (SHOP_TYPES[type].hsnCodes as readonly string[]).filter((c) => !codes.has(c)),
   };
 }
 
@@ -78,9 +82,10 @@ export interface ShopTypeApplied {
   modules: ModuleOnOff;
   switchedOn: ModuleKey[];
   switchedOff: ModuleKey[];
-  /** Names of the item groups and lists created now. */
+  /** Names of the item groups and lists, and the HSN codes, created now. */
   itemGroups: string[];
   attributes: string[];
+  hsnCodes: string[];
 }
 
 async function record(db: Db, actor: Actor, action: 'create' | 'update', entityType: string, entityId: string, changes: Prisma.InputJsonValue) {
@@ -102,6 +107,17 @@ export async function applyShopType(tx: Db, companyId: string, type: ShopTypeKey
   if (company.shopType !== type) {
     await tx.company.update({ where: { id: companyId }, data: { shopType: type, updatedById: actor.userId } });
     await record(tx, actor, 'update', 'company', companyId, { shopType: { old: company.shopType, new: type } });
+    // Decisions L6 and L12: the starting values for new items (existing items keep theirs).
+    const t = SHOP_TYPES[type];
+    const settings = await tx.catalogueSettings.findUnique({ where: { companyId }, select: { newItemMaxDiscountPercent: true, newItemAutoNumberBatches: true } });
+    if (settings && (!settings.newItemMaxDiscountPercent.eq(t.newItemMaxDiscountPercent) || settings.newItemAutoNumberBatches !== t.newItemAutoNumberBatches)) {
+      await tx.catalogueSettings.update({ where: { companyId }, data: { newItemMaxDiscountPercent: t.newItemMaxDiscountPercent, newItemAutoNumberBatches: t.newItemAutoNumberBatches, updatedById: actor.userId } });
+      await record(tx, actor, 'update', 'catalogue_settings', companyId, {
+        newItemMaxDiscountPercent: { old: settings.newItemMaxDiscountPercent.toString(), new: t.newItemMaxDiscountPercent },
+        newItemAutoNumberBatches: { old: settings.newItemAutoNumberBatches, new: t.newItemAutoNumberBatches },
+        shopType: type,
+      });
+    }
   }
 
   const switchedOn: ModuleKey[] = [];
@@ -142,6 +158,17 @@ export async function applyShopType(tx: Db, companyId: string, type: ShopTypeKey
     await record(tx, actor, 'create', 'variant_attribute', created.id, { code: a.code, kind: 'list', values: a.values.map((v) => v.value), from: `shop type ${SHOP_TYPES[type].label}` });
   }
 
+  // Decision L1: the shop type's common HSN headings, with the official descriptions of the GST portal's list.
+  const official = new Map((await tx.officialHsnCode.findMany({ where: { code: { in: missing.hsnCodes } }, select: { code: true, description: true, isService: true } })).map((o) => [o.code, o]));
+  const hsnCodes: string[] = [];
+  for (const code of missing.hsnCodes) {
+    const o = official.get(code);
+    if (!o) continue;
+    const created = await tx.hsnCode.create({ data: { code, description: o.description, isService: o.isService, createdById: actor.userId, updatedById: actor.userId } });
+    await record(tx, actor, 'create', 'hsn_code', created.id, { code, description: o.description, from: `shop type ${SHOP_TYPES[type].label}` });
+    hsnCodes.push(code);
+  }
+
   invalidateModuleCache();
-  return { modules: after, switchedOn, switchedOff, itemGroups: missing.itemGroups, attributes: missing.attributes.map((a) => a.name) };
+  return { modules: after, switchedOn, switchedOff, itemGroups: missing.itemGroups, attributes: missing.attributes.map((a) => a.name), hsnCodes };
 }

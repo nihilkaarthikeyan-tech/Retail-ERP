@@ -113,9 +113,10 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: basmati.id, quantity: '2' }, { itemId: surf.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '500' }])).expect(201)).body;
     first = res.sale;
     expect(res.sale.shiftOpen).toBe(true);
-    expect(res.sale).toMatchObject({ total: '372.00', taxableAmount: '340.43', cgst: '15.79', sgst: '15.78', changeAmount: '128.00', gstProvisional: false, costValue: '275.00' });
+    expect(res.sale).toMatchObject({ total: '372.00', taxableAmount: '340.44', cgst: '15.78', sgst: '15.78', changeAmount: '128.00', gstProvisional: false, costValue: '275.00' });
     expect(res.sale.lines.map((l: Record<string, string>) => [l.taxableAmount, l.cgst, l.sgst, l.costValue])).toEqual([
-      ['228.57', '5.72', '5.71', '180.00'],
+      // Decision L8: CGST and SGST always equal.
+      ['228.58', '5.71', '5.71', '180.00'],
       ['111.86', '10.07', '10.07', '95.00'],
     ]);
     expect(res.change).toBe('128.00');
@@ -129,7 +130,7 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
     const basLine = first.lines.find((l) => l.item.id === basmati.id)!;
     const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: basmati.id, quantity: '1', returnOfLineId: basLine.id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-120' }] };
     const res = (await T(owner.post('/pos/bills')).send(body).expect(201)).body;
-    expect(res.return).toMatchObject({ total: '-120.00', taxableAmount: '-114.29', cgst: '-2.86', sgst: '-2.85' });
+    expect(res.return).toMatchObject({ total: '-120.00', taxableAmount: '-114.28', cgst: '-2.86', sgst: '-2.86' });
     expect(await position(basmati.id)).toEqual({ q: '99', cost: '90.0000' });
     const again = { ...body, clientId: randomUUID(), ret: { ...body.ret, number: num(), lines: [{ ...body.ret.lines[0], quantity: '2' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-240' }] };
     expect((await T(owner.post('/pos/bills')).send(again).expect(400)).body.message).toMatch(/only 1 left to return/);

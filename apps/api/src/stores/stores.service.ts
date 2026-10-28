@@ -6,6 +6,7 @@ import { allowedStoreIds, assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import { ensureStoreLocations } from '../inventory/location-defaults.js';
+import { AccountingSetup } from '../ledger/accounting-setup.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const storeInclude = { gstRegistration: { select: { id: true, gstin: true } } };
@@ -16,6 +17,7 @@ export class StoresService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly company: CompanyService,
+    private readonly accounts: AccountingSetup,
   ) {}
 
   /** Only the stores the user may work in (record restriction). */
@@ -74,6 +76,10 @@ export class StoresService {
     });
     // Every store gets its stock locations at once (module 4, approved plan question 2).
     await ensureStoreLocations(db, created);
+    // Decision L10 (owner, 28 October 2026): its cash accounts too, so its cash can be chosen on a
+    // payment before its first till shift.
+    await this.accounts.ensure(db, companyId);
+    await this.accounts.ensureStore(db, companyId, created.id);
     return created;
   }
 

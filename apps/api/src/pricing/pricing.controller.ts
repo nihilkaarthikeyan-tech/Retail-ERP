@@ -11,6 +11,8 @@ import {
   priceLookupSchema,
   type PriceQuery,
   priceQuerySchema,
+  type StopMarkdownInput,
+  stopMarkdownSchema,
   type StylePriceInput,
   stylePriceSchema,
   type UpdatePriceInput,
@@ -107,6 +109,15 @@ export class PricingController {
   @RequirePermission('prices.manage')
   markdownApply(@Body(new ZodValidationPipe(markdownSchema)) input: MarkdownInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.markdowns.apply(input, actor, user);
+  }
+
+  /** Decision L3: withdraw (before it starts) or end now; from today the price before the markdown applies again. */
+  @Post('markdowns/:id/stop')
+  @RequireModule('seasons')
+  @HttpCode(200)
+  @RequirePermission('prices.manage')
+  markdownStop(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(stopMarkdownSchema)) input: StopMarkdownInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.markdowns.stop(id, input.reason, actor, user);
   }
 
   @Get('markdowns/:id')

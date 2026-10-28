@@ -39,9 +39,9 @@ describe('GST as stated by the supplier', () => {
     expect([g.cgst.toFixed(2), g.sgst.toFixed(2), g.igst.toFixed(2)]).toEqual(['475.00', '475.00', '0.00']);
   });
 
-  it('gives the odd paisa to CGST and uses IGST between states', () => {
-    const g = suggestGst('606.10', '5', false); // 30.305 → 30.31 total
-    expect([g.cgst.toFixed(2), g.sgst.toFixed(2)]).toEqual(['15.16', '15.15']);
+  it('makes CGST and SGST equal (decision L8) and uses IGST between states', () => {
+    const g = suggestGst('606.10', '5', false); // 2.5% of 606.10 = 15.1525 → 15.15 each
+    expect([g.cgst.toFixed(2), g.sgst.toFixed(2)]).toEqual(['15.15', '15.15']);
     expect(suggestGst('100', '18', true).igst.toFixed(2)).toBe('18.00');
   });
 

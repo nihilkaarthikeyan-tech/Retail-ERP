@@ -121,11 +121,67 @@ export class MarkdownsService {
     return { ...(await this.get(markdown.id, user)), ...this.counts(lines) };
   }
 
+  /**
+   * Decision L3 (owner, 28 October 2026): a markdown made by mistake is withdrawn before it starts,
+   * and a running one can be ended early. Its prices end the day before today (a price not started
+   * yet ends the day before its own start, so it never applies): from today the price before the
+   * markdown applies again. Nothing is deleted; every price change is in the history.
+   */
+  async stop(id: string, reason: string, actor: Actor, user: CurrentUser) {
+    const company = await this.company.current();
+    const today = businessDate();
+    const yesterday = addDays(today, -1);
+    await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Markdown" WHERE "id" = ${id}::uuid FOR UPDATE`;
+        const md = await tx.markdown.findUnique({ where: { id } });
+        if (!md || md.companyId !== company.id) throw new NotFoundException('Markdown not found');
+        if (md.stoppedOn) throw new BadRequestException('This markdown was already stopped');
+        const end = date(md.endDate);
+        if (end && end < today) throw new BadRequestException('This markdown has already ended');
+        const withdrawn = date(md.startDate)! >= today;
+        const prices = await tx.price.findMany({ where: { markdownId: md.id }, select: { id: true, startDate: true, endDate: true, item: { select: { code: true } } } });
+        const byEnd = new Map<string, typeof prices>();
+        for (const p of prices) {
+          const start = date(p.startDate)!;
+          const newEnd = start > yesterday ? addDays(start, -1) : yesterday;
+          const oldEnd = date(p.endDate);
+          if (oldEnd !== null && oldEnd <= newEnd) continue;
+          byEnd.set(newEnd, [...(byEnd.get(newEnd) ?? []), p]);
+        }
+        for (const [newEnd, group] of byEnd) {
+          await tx.price.updateMany({ where: { id: { in: group.map((p) => p.id) } }, data: { endDate: fromDate(newEnd), updatedById: actor.userId } });
+          await tx.auditLog.createMany({
+            data: group.map((p) => ({
+              userId: actor.userId,
+              ipAddress: actor.ipAddress,
+              action: 'update',
+              entityType: 'price',
+              entityId: p.id,
+              changes: { item: p.item.code, endDate: { old: date(p.endDate), new: newEnd }, markdown: md.id } as Prisma.InputJsonValue,
+              reason: withdrawn ? 'Markdown withdrawn' : 'Markdown ended early',
+            })),
+          });
+        }
+        await tx.markdown.update({ where: { id: md.id }, data: { stoppedOn: fromDate(today), stoppedById: actor.userId, stoppedReason: reason, updatedById: actor.userId } });
+        await this.audit.record(tx, actor, {
+          action: 'update',
+          entityType: 'markdown',
+          entityId: md.id,
+          changes: { status: { old: withdrawn ? 'upcoming' : 'running', new: withdrawn ? 'withdrawn' : 'ended' }, stoppedOn: today, prices: prices.length },
+          reason,
+        });
+      },
+      { timeout: 60_000 },
+    );
+    return this.get(id, user);
+  }
+
   async list(user: CurrentUser) {
     const company = await this.company.current();
     const rows = await this.prisma.markdown.findMany({ where: { companyId: company.id }, orderBy: [{ createdAt: 'desc' }], take: 200 });
     const lists = new Map((await this.prisma.priceList.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.priceListId))] } }, select: { id: true, code: true, name: true } })).map((l) => [l.id, l]));
-    const users = await this.users(rows.map((r) => r.createdById));
+    const users = await this.users(rows.flatMap((r) => [r.createdById, r.stoppedById]));
     void user;
     return rows.map((r) => this.dto(r, lists.get(r.priceListId) ?? null, users));
   }
@@ -138,7 +194,7 @@ export class MarkdownsService {
     const list = await this.prisma.priceList.findUniqueOrThrow({ where: { id: md.priceListId }, select: { id: true, code: true, name: true } });
     const prices = await this.prisma.price.findMany({ where: { markdownId: md.id }, include: { item: { select: { id: true, code: true, name: true, mrp: true, baseUnitId: true } } }, orderBy: { item: { code: 'asc' } } });
     const before = await this.priceOn(md.priceListId, prices.map((p) => p.item), addDays(date(md.startDate)!, -1), md.id);
-    const users = await this.users([md.createdById]);
+    const users = await this.users([md.createdById, md.stoppedById]);
     void user;
     return {
       ...this.dto(md, list, users),
@@ -264,10 +320,17 @@ export class MarkdownsService {
     return new Map((await this.prisma.user.findMany({ where: { id: { in: wanted } }, select: { id: true, firstName: true, lastName: true } })).map((u) => [u.id, `${u.firstName}${u.lastName ? ` ${u.lastName}` : ''}`]));
   }
 
-  private dto(m: { id: string; rule: string; value: Prisma.Decimal; startDate: Date; endDate: Date | null; chosenBy: Prisma.JsonValue; itemCount: number; remark: string | null; createdAt: Date; createdById: string | null }, list: { id: string; code: string; name: string } | null, users: Map<string, string>) {
+  private dto(
+    m: { id: string; rule: string; value: Prisma.Decimal; startDate: Date; endDate: Date | null; chosenBy: Prisma.JsonValue; itemCount: number; remark: string | null; createdAt: Date; createdById: string | null; stoppedOn: Date | null; stoppedById: string | null; stoppedReason: string | null },
+    list: { id: string; code: string; name: string } | null,
+    users: Map<string, string>,
+  ) {
     const today = businessDate();
     const start = date(m.startDate)!;
-    const end = date(m.endDate);
+    const stoppedOn = date(m.stoppedOn);
+    // Decision L3: a markdown stopped before its first day was withdrawn; one stopped later ended the day before.
+    const withdrawn = stoppedOn !== null && start >= stoppedOn;
+    const end = stoppedOn && !withdrawn ? addDays(stoppedOn, -1) : date(m.endDate);
     return {
       id: m.id,
       priceList: list,
@@ -275,7 +338,10 @@ export class MarkdownsService {
       value: m.rule === 'percent' ? m.value.toDecimalPlaces(2).toString() : m.value.toFixed(2),
       startDate: start,
       endDate: end,
-      status: start > today ? 'upcoming' : end && end < today ? 'ended' : 'running',
+      status: withdrawn ? 'withdrawn' : start > today ? 'upcoming' : end && end < today ? 'ended' : 'running',
+      stoppedOn,
+      stoppedBy: m.stoppedById ? (users.get(m.stoppedById) ?? null) : null,
+      stoppedReason: m.stoppedReason,
       chosenBy: m.chosenBy,
       itemCount: m.itemCount,
       remark: m.remark,

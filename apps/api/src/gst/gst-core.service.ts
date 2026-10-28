@@ -126,10 +126,10 @@ export class GstCoreService {
   /**
    * The GST rate for an item on a date: the longest matching HSN code, the
    * latest start date on or before the date, and for price-banded codes the
-   * band of the selling price per unit (GST included). Refuses when none is set.
-   * Purchases: pass the price per unit the supplier charges (GST included) or none.
+   * band of the value per unit before GST (decision L7). Refuses when none is set.
+   * The till passes its selling price with `gstIncluded`; purchases pass the price before GST.
    */
-  async rateFor(db: Db, item: { code: string; hsnCode: string | null }, date: string, unitPrice?: DecimalInput | null): Promise<GstRate> {
+  async rateFor(db: Db, item: { code: string; hsnCode: string | null }, date: string, unitPrice?: DecimalInput | null, opts: { gstIncluded?: boolean } = {}): Promise<GstRate> {
     if (!item.hsnCode) throw new BadRequestException(`${item.code} has no HSN code, so its GST rate is not known`);
     const rows = await this.ratesFor(db, item.hsnCode, date);
     const picked = pickGstRate(
@@ -137,6 +137,7 @@ export class GstCoreService {
       item.hsnCode,
       date,
       unitPrice,
+      opts,
     );
     if (!picked) throw new BadRequestException(`No GST rate is set for HSN ${item.hsnCode} (${item.code}); add it to the GST rate list`);
     return picked.row;
