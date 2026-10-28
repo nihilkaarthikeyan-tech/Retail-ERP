@@ -417,6 +417,10 @@ export interface Gstr1Invoice {
   buyerGstin: string | null;
   reverseCharge: boolean;
   items: Gstr1Item[];
+  /** Audit 4: R regular; SEWP / SEWOP a supply to an SEZ with / without payment of tax (GSTR-1 table 6B). */
+  invType?: 'R' | 'SEWP' | 'SEWOP';
+  /** Audit 4: IGST heads; an SEZ supply is inter-state even in the seller's own state (IGST Act s.7(5)(b)). */
+  interState?: boolean;
 }
 
 export interface Gstr1Note extends Gstr1Invoice {
@@ -496,7 +500,7 @@ export function gstr1PortalJson(f: Gstr1Figures, sellerState: string): Record<st
   if (f.b2b.length) {
     out.b2b = [...byBuyer(f.b2b)].map(([ctin, invs]) => ({
       ctin,
-      inv: invs.map((x) => ({ inum: x.number, idt: returnDate(x.date), val: abs2(x.value), pos: x.placeOfSupply, rchrg: x.reverseCharge ? 'Y' : 'N', inv_typ: 'R', itms: itemDetails(x.items, x.placeOfSupply !== sellerState, true) })),
+      inv: invs.map((x) => ({ inum: x.number, idt: returnDate(x.date), val: abs2(x.value), pos: x.placeOfSupply, rchrg: x.reverseCharge ? 'Y' : 'N', inv_typ: x.invType ?? 'R', itms: itemDetails(x.items, x.interState ?? x.placeOfSupply !== sellerState, true) })),
     }));
   }
   if (f.b2cl.length) {
@@ -504,8 +508,11 @@ export function gstr1PortalJson(f: Gstr1Figures, sellerState: string): Record<st
     for (const x of f.b2cl) byPos.set(x.placeOfSupply, [...(byPos.get(x.placeOfSupply) ?? []), x]);
     out.b2cl = [...byPos].map(([pos, invs]) => ({ pos, inv: invs.map((x) => ({ inum: x.number, idt: returnDate(x.date), val: abs2(x.value), itms: itemDetails(x.items, true, true) })) }));
   }
-  if (f.b2cs.length) {
-    out.b2cs = f.b2cs.map((r) =>
+  // Audit 4 (GST offline tool manual, FAQ 29): no minus values are accepted. A rate and state where this
+  // month's consumer credit notes exceed its sales is left out of the file (and listed for the CA).
+  const b2csRows = f.b2cs.filter((r) => D(r.taxable).gte(0));
+  if (b2csRows.length) {
+    out.b2cs = b2csRows.map((r) =>
       r.supplyType === 'INTER'
         ? { sply_ty: 'INTER', pos: r.placeOfSupply, typ: 'OE', rt: n2(r.rate), txval: n2(r.taxable), iamt: n2(r.igst), csamt: n2(r.cess) }
         : { sply_ty: 'INTRA', pos: r.placeOfSupply, typ: 'OE', rt: n2(r.rate), txval: n2(r.taxable), camt: n2(r.cgst), samt: n2(r.sgst), csamt: n2(r.cess) },
@@ -514,7 +521,7 @@ export function gstr1PortalJson(f: Gstr1Figures, sellerState: string): Record<st
   if (f.cdnr.length) {
     out.cdnr = [...byBuyer(f.cdnr)].map(([ctin, notes]) => ({
       ctin,
-      nt: notes.map((x) => ({ ntty: x.noteType, nt_num: x.number, nt_dt: returnDate(x.date), val: abs2(x.value), pos: x.placeOfSupply, rchrg: x.reverseCharge ? 'Y' : 'N', inv_typ: 'R', itms: itemDetails(x.items, x.placeOfSupply !== sellerState, true) })),
+      nt: notes.map((x) => ({ ntty: x.noteType, nt_num: x.number, nt_dt: returnDate(x.date), val: abs2(x.value), pos: x.placeOfSupply, rchrg: x.reverseCharge ? 'Y' : 'N', inv_typ: x.invType ?? 'R', itms: itemDetails(x.items, x.interState ?? x.placeOfSupply !== sellerState, true) })),
     }));
   }
   if (f.cdnur.length) {
@@ -523,7 +530,10 @@ export function gstr1PortalJson(f: Gstr1Figures, sellerState: string): Record<st
   if (f.nil.length) out.nil = { inv: f.nil.map((r) => ({ sply_ty: r.supplyType, nil_amt: n2(r.nil), expt_amt: n2(r.exempt), ngsup_amt: n2(r.nonGst) })) };
   const hsnRows = (rows: Gstr1HsnRow[]) =>
     rows.map((r, i) => ({ num: ji(i + 1), hsn_sc: r.hsn, ...(r.description ? { desc: r.description.slice(0, 30) } : {}), uqc: r.uqc, qty: n2(r.quantity), rt: n2(r.rate), txval: n2(r.taxable), iamt: n2(r.igst), camt: n2(r.cgst), samt: n2(r.sgst), csamt: n2(r.cess) }));
-  if (f.hsnBusiness.length || f.hsnConsumer.length) out.hsn = { ...(f.hsnBusiness.length ? { hsn_b2b: hsnRows(f.hsnBusiness) } : {}), ...(f.hsnConsumer.length ? { hsn_b2c: hsnRows(f.hsnConsumer) } : {}) };
+  const plus = (rows: Gstr1HsnRow[]) => rows.filter((r) => D(r.taxable).gte(0) && D(r.quantity).gte(0));
+  const hsnB2b = plus(f.hsnBusiness);
+  const hsnB2c = plus(f.hsnConsumer);
+  if (hsnB2b.length || hsnB2c.length) out.hsn = { ...(hsnB2b.length ? { hsn_b2b: hsnRows(hsnB2b) } : {}), ...(hsnB2c.length ? { hsn_b2c: hsnRows(hsnB2c) } : {}) };
   if (f.documents.length) {
     const natures = [...new Set(f.documents.map((d) => d.nature))].sort((a, b) => a - b);
     out.doc_issue = {

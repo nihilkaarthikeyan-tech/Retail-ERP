@@ -315,7 +315,7 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 1. Security and access | **Done**: 28 findings, all closed (2 Critical, 7 High) | 28 Oct 2026 | `docs/audit/01-security-access.md`, route table `docs/audit/01-routes.md` |
 | 2. Money and accounts | **Done**: 18 findings, all closed (1 Critical, 6 High) | 28 Oct 2026 | `docs/audit/02-money-accounts.md` |
 | 3. Stock | **Done**: 17 findings, 3 Critical and 5 High fixed with tests | 28 Oct 2026 | `docs/audit/03-stock.md` |
-| 4. GST | Not started | | |
+| 4. GST | **Done**: 15 findings and the owner's decisions T1–T15, all closed | 28 Oct 2026 | `docs/audit/04-gst.md` |
 | 5. Billing counter and offline | Not started | | |
 | 6. Dates | Not started | | |
 | 7. Data safety | Not started | | |
@@ -327,4 +327,4 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 4 (GST and the law). Carried to Session 8: stock re-costing speed (03 #14).
+**Next step:** Session 5 (billing counter and offline). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).

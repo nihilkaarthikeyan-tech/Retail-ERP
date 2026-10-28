@@ -232,7 +232,7 @@ describe('plan 08: GST details on the receipt', () => {
     expect(lines).toContain('GSTIN: 33AAACR1234A1ZV');
     expect(lines).toContain('Buyer GSTIN: 29AABCK1234A1Z5');
     expect(lines).toContain('Place of supply: Karnataka (29)');
-    expect(lines).toContain('Reverse charge: No');
+    expect(lines).toContain('Tax payable on reverse charge: No');
     expect(lines).toContain('Authorised signatory');
   });
   it('prints a bill of supply with its declaration and a credit note with the original bill', () => {
@@ -322,5 +322,53 @@ describe('plan 13: gift cards and loyalty points', () => {
     expect(bad({ giftCards: [{ ...card, expiresOn: '21-10-2027' }] })).toEqual({ ok: false, error: 'receipt.giftCards[0].expiresOn must be a date (YYYY-MM-DD)' });
     expect(bad({ giftCards: [{ ...card, amount: null }] })).toEqual({ ok: false, error: 'receipt.giftCards[0] amount and balance must be numbers' });
     expect(bad({ giftCards: 'card' })).toEqual({ ok: false, error: 'receipt.giftCards must be a list of at most 10' });
+  });
+});
+
+describe('audit 4 (28 October 2026): what a GST receipt must carry', () => {
+  const gst = { title: 'Tax invoice', invoiceKind: 'consumer', sellerGstin: '33AAACR1234A1ZV', buyer: null, placeOfSupply: { code: '33', name: 'Tamil Nadu' }, reverseCharge: false, original: null, declaration: null, creditNoteLate: false };
+  const text = (r: Receipt) => asText(buildReceipt(r, 80)).join(' ');
+  it('prints the unit after the quantity (rule 46(i))', () => {
+    const s = sampleSale();
+    const r: Receipt = { ...s, lines: [{ ...s.lines[0], quantity: '2.5', unit: 'KG' }, { ...s.lines[1], unit: 'PCS' }] };
+    expect(checkReceipt(r).ok).toBe(true);
+    const lines = asText(buildReceipt(r, 80));
+    expect(lines.some((l) => l.startsWith('  2.5 KG x 120.00'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('  1 PCS x 132.00'))).toBe(true);
+    expect(checkReceipt({ ...s, lines: [{ ...s.lines[0], unit: 5 }] }).ok).toBe(false);
+  });
+  it('with the GST table off, a tax invoice still prints the tax, one short line per rate', () => {
+    const t = text({ ...sampleSale(), gst, taxTable: false });
+    expect(t).toMatch(/GST 5%: taxable Rs\. 228\.57, CGST Rs\. 5\.72, SGST Rs\. 5\.71/);
+    expect(t).toMatch(/GST 18%: taxable Rs\. 111\.86, CGST Rs\. 10\.07, SGST Rs\. 10\.07/);
+    const igst = text({ ...sampleSale(), gst, taxTable: false, gstTable: [{ rate: '5', taxable: '1000.00', cgst: '0.00', sgst: '0.00', igst: '50.00' }] });
+    expect(igst).toMatch(/GST 5%: taxable Rs\. 1000\.00, IGST Rs\. 50\.00/);
+    expect(checkReceipt({ ...sampleSale(), taxTable: 'no' }).ok).toBe(false);
+  });
+  it('a bill of supply shows no tax, even with rows', () => {
+    const t = text({ ...sampleSale(), gst: { ...gst, title: 'Bill of supply', invoiceKind: 'bill_of_supply' } });
+    expect(t).not.toMatch(/CGST/);
+    expect(t).not.toMatch(/reverse charge/);
+  });
+  it('every tax invoice states reverse charge; Yes for a reverse-charge buyer', () => {
+    expect(text({ ...sampleSale(), gst })).toMatch(/Tax payable on reverse charge: No/);
+    expect(text({ ...sampleSale(), gst: { ...gst, buyerSituation: 'reverse_charge' } })).toMatch(/Tax payable on reverse charge: Yes/);
+    expect(text({ ...sampleSale(), kind: 'return', gst: { ...gst, title: 'Credit note' } })).not.toMatch(/reverse charge/);
+  });
+  it('a supply to an SEZ carries the rule 46 endorsement: with IGST, or under LUT without tax', () => {
+    const sez = { ...gst, invoiceKind: 'business', buyerSituation: 'sez' };
+    const paid = text({ ...sampleSale(), gst: sez, gstTable: [{ rate: '5', taxable: '1000.00', cgst: '0.00', sgst: '0.00', igst: '50.00' }] });
+    expect(paid).toMatch(/SUPPLY MEANT FOR SEZ UNIT OR SEZ DEVELOPER FOR AUTHORISED\s+OPERATIONS ON PAYMENT OF INTEGRATED TAX/);
+    const lut = text({ ...sampleSale(), gst: sez, gstTable: [{ rate: '5', taxable: '1050.00', cgst: '0.00', sgst: '0.00', igst: '0.00' }] });
+    expect(lut).toMatch(/UNDER BOND OR LETTER OF\s+UNDERTAKING WITHOUT PAYMENT OF INTEGRATED TAX/);
+    expect(text({ ...sampleSale(), gst: { ...sez, endorsement: 'GIVEN BY THE ERP' } })).toMatch(/GIVEN BY THE ERP/);
+  });
+  it('a return note prints as such, with no GST and the note that no GST is reduced', () => {
+    const t = text({ ...sampleSale(), kind: 'return', gst: { ...gst, title: 'Return note', documentKind: 'return_note' } });
+    expect(t).toMatch(/RETURN NOTE/);
+    expect(t).toMatch(/Return note: S1-T1-000123/);
+    expect(t).toMatch(/Not a credit note: no GST is reduced/);
+    expect(t).not.toMatch(/CGST|Taxable value/);
+    expect(text({ ...sampleSale(), gst: { ...gst, title: 'Invoice-cum-bill of supply' } })).toMatch(/INVOICE-CUM-BILL OF SUPPLY/);
   });
 });

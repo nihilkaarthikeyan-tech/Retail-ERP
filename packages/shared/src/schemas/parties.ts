@@ -6,7 +6,7 @@ import { businessDate } from '../business-date.js';
 import { PAN_RE, panFromGstin } from '../company.js';
 import { dayMonthYearProblem, EARLIEST_CUSTOMER_YEAR, isDayMonth } from '../customer-dates.js';
 import { isIsoDate } from '../financial-year.js';
-import { gstinProblem, TAX_SITUATIONS } from '../gst-core.js';
+import { CUSTOMER_TAX_SITUATIONS, gstinProblem } from '../gst-core.js';
 import { INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE, isStateCode, pinCodeStateProblem } from '../india.js';
 import { DUE_BASES } from '../payment-terms.js';
 import { itemCode, nonNegativeDecimalString } from './catalogue.js';
@@ -28,7 +28,8 @@ const gstin = z
 const pan = z.string().trim().toUpperCase().regex(PAN_RE, 'Not a valid PAN');
 const stateCode = z.string().refine(isStateCode, 'Unknown GST state code');
 /** Plan 08 G3: empty = worked out from the GSTIN. */
-const taxSituation = z.enum(TAX_SITUATIONS).optional().nullable();
+// Audit 4 T5 (owner, 28 October 2026): "exempt buyer" is no longer offered; exemption follows the goods.
+const taxSituation = z.enum(CUSTOMER_TAX_SITUATIONS, { message: 'Choose regular, unregistered, SEZ or reverse charge (an exempt buyer is not a GST situation: exemption follows the goods)' }).optional().nullable();
 
 export const PARTY_STATUSES = ['active', 'blocked', 'off'] as const;
 export type PartyStatus = (typeof PARTY_STATUSES)[number];

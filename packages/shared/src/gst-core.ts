@@ -19,9 +19,14 @@ export type TurnoverBand = (typeof TURNOVER_BANDS)[number];
 export const HSN_DIGITS = [4, 6, 8] as const;
 /** Decision 61: how true free samples are taxed is set by the CA. */
 export const FREE_SAMPLE_TAX = ['not_set', 'reverse_input_credit', 'tax_on_value'] as const;
-/** Plan 08 G3. */
+/** Plan 08 G3. "exempt" stays only for records made before audit 4 (T5); it is no longer offered. */
 export const TAX_SITUATIONS = ['regular', 'unregistered', 'sez', 'exempt', 'reverse_charge'] as const;
 export type TaxSituation = (typeof TAX_SITUATIONS)[number];
+/**
+ * Audit 4 T5 (owner, 28 October 2026): the situations a customer can be given. GST exemption follows
+ * the goods, not the buyer; only a supply to a special economic zone can go without tax (IGST Act s.16).
+ */
+export const CUSTOMER_TAX_SITUATIONS = ['regular', 'unregistered', 'sez', 'reverse_charge'] as const;
 /** Plan 08 G4, G5, G7. */
 export const INVOICE_KINDS = ['consumer', 'business', 'bill_of_supply'] as const;
 export type InvoiceKind = (typeof INVOICE_KINDS)[number];
@@ -185,6 +190,10 @@ export interface SupplyInput {
   buyerState?: string | null;
   /** Where the goods are delivered (home delivery). */
   deliveryState?: string | null;
+  /** Audit 4 T2: delivered to another person on the (registered) buyer's direction. */
+  deliveredToOther?: boolean | null;
+  /** Audit 4 T6: the seller supplies SEZ units without tax under a letter of undertaking (LUT). */
+  sezUnderLut?: boolean | null;
   taxSituation?: string | null;
 }
 
@@ -195,34 +204,46 @@ export interface Supply {
   placeOfSupply: string;
   /** IGST instead of CGST + SGST. */
   interState: boolean;
-  /** No tax is charged: composition scheme or an exempt buyer. */
+  /** No tax is charged: composition scheme, or an SEZ supply under LUT. */
   noTax: boolean;
+  /** Why this supply cannot be made at all (a composition seller's inter-state sale); null when it can. */
+  problem: string | null;
 }
 
 /**
- * Place of supply of goods (IGST Act section 10): where the movement of the
- * goods ends for delivery (the delivery address); for an unregistered buyer
- * the address recorded on the invoice; with no address, the seller's own
- * location. Supply is inter-state when that state differs from the seller's
- * (IGST Act section 7), and a supply to a special economic zone is always
- * inter-state (section 7(5)(b)).
+ * Place of supply of goods (IGST Act section 10, read on the CBIC site on 28 October 2026):
+ * - delivered to another person on the buyer's direction: the buyer's principal place of business,
+ *   its GSTIN state (s.10(1)(b); audit 4 T2);
+ * - goods moved for delivery: where the movement ends, the delivery address (s.10(1)(a));
+ * - a registered buyer taking the goods away: its GSTIN state (s.10(1)(a), the movement by the
+ *   recipient ends at its place);
+ * - an unregistered buyer at the counter: the shop's own state (s.10(1)(c)). Clause (ca), the
+ *   address on the invoice, is "yet to be notified", so the state written on the bill does not
+ *   decide it (audit 4 T1).
+ * Supply is inter-state when that state differs from the seller's (IGST Act s.7); a supply to a
+ * special economic zone is always inter-state (s.7(5)(b)), with IGST or, under LUT, without tax
+ * (s.16; audit 4 T6). A composition dealer issues bills of supply with no tax (plan 08 G7) and may not
+ * make inter-state supplies at all (CGST Act s.10(2)(c); audit 4 T3). An "exempt buyer" (older
+ * records) is treated like any other: exemption follows the goods (audit 4 T5).
  * https://taxinformation.cbic.gov.in/content/html/tax_repository/gst/acts/2017_IGST_Act/active/chapterv/section10_v1.00.html
  * https://taxinformation.cbic.gov.in/content/html/tax_repository/gst/acts/2017_IGST_Act/active/chapteriv/section7_v1.00.html
- * Plan 08 G4: a buyer with a GSTIN (not marked unregistered) gets a business
- * tax invoice; a composition dealer issues bills of supply with no tax (G7).
  */
 export function resolveSupply(i: SupplyInput): Supply {
   const gstin = i.buyerGstin?.trim().toUpperCase() || null;
   const situation = taxSituationOf(gstin, i.taxSituation);
   const registered = !!gstin && situation !== 'unregistered';
-  const buyerState = registered ? gstin!.slice(0, 2) : i.buyerState || null;
-  const placeOfSupply = i.deliveryState || buyerState || i.sellerState;
-  const interState = situation === 'sez' || placeOfSupply !== i.sellerState;
-  if (i.scheme === 'composition') return { invoiceKind: 'bill_of_supply', situation, placeOfSupply, interState, noTax: true };
-  return { invoiceKind: registered ? 'business' : 'consumer', situation, placeOfSupply, interState, noTax: situation === 'exempt' };
+  const gstinState = registered ? gstin!.slice(0, 2) : null;
+  const placeOfSupply = (i.deliveredToOther && gstinState) || i.deliveryState || gstinState || i.sellerState;
+  const sez = situation === 'sez' && registered;
+  const interState = sez || placeOfSupply !== i.sellerState;
+  if (i.scheme === 'composition') {
+    const problem = interState ? 'A composition dealer cannot sell to another state (CGST Act section 10(2)(c)); bill it from a shop in that state, or deliver within the state' : null;
+    return { invoiceKind: 'bill_of_supply', situation, placeOfSupply, interState, noTax: true, problem };
+  }
+  return { invoiceKind: registered ? 'business' : 'consumer', situation, placeOfSupply, interState, noTax: sez && !!i.sezUnderLut, problem: null };
 }
 
-/** GST inside a line amount for this supply: none on a bill of supply or to an exempt buyer. */
+/** GST inside a line amount for this supply: none on a bill of supply or an SEZ supply under LUT. */
 export function supplyLineTax(amount: DecimalInput, gstRate: DecimalInput, supply: Pick<Supply, 'interState' | 'noTax'>): InclusiveTax {
   if (supply.noTax) return { taxable: D(amount), cgst: ZERO, sgst: ZERO, igst: ZERO, tax: ZERO };
   return inclusiveTax(amount, gstRate, supply.interState);
@@ -263,13 +284,51 @@ export function isCreditNoteLate(saleDate: string, noteDate: string): boolean {
 // ---- Printing (plan 08 §2, decision 43) ----
 
 /**
- * Words a composition dealer puts at the top of a bill of supply (CGST Rules,
- * rule 5(1)(g); CBIC invoice rules https://cbic-gst.gov.in/gst-invoice-rules.html).
+ * Words a composition dealer puts at the top of a bill of supply (CGST Rules, rule 5(1)(f); read on
+ * taxinformation.cbic.gov.in on 28 October 2026).
  */
 export const BILL_OF_SUPPLY_DECLARATION = 'Composition taxable person, not eligible to collect tax on supplies';
 
-/** The title a till bill prints under. */
-export function gstDocumentTitle(billKind: 'sale' | 'return' | string, invoiceKind: string): string {
+/** CGST Rules rule 46, third proviso: the endorsement on a supply to an SEZ unit or developer. */
+export const SEZ_WITH_IGST = 'SUPPLY MEANT FOR SEZ UNIT OR SEZ DEVELOPER FOR AUTHORISED OPERATIONS ON PAYMENT OF INTEGRATED TAX';
+export const SEZ_UNDER_LUT = 'SUPPLY MEANT FOR SEZ UNIT OR SEZ DEVELOPER FOR AUTHORISED OPERATIONS UNDER BOND OR LETTER OF UNDERTAKING WITHOUT PAYMENT OF INTEGRATED TAX';
+/** Audit 4 (T9): a return note is not a credit note, so it carries no GST. */
+export const RETURN_NOTE_LINE = 'Not a credit note: no GST is reduced';
+
+/** Audit 4 (owner, 28 October 2026): what a till bill is, as the law names it. */
+export const DOCUMENT_KINDS = ['tax_invoice', 'bill_of_supply', 'invoice_cum_bill_of_supply', 'credit_note', 'return_note'] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+const DOCUMENT_TITLES: Record<DocumentKind, string> = {
+  tax_invoice: 'Tax invoice',
+  bill_of_supply: 'Bill of supply',
+  invoice_cum_bill_of_supply: 'Invoice-cum-bill of supply',
+  credit_note: 'Credit note',
+  return_note: 'Return note',
+};
+
+/**
+ * What a sale is: a bill of supply for a composition dealer (rule 49) or when every line is exempt or
+ * nil-rated (CGST Act s.31(3)(c)); an invoice-cum-bill of supply for taxable and exempt goods together
+ * to an unregistered buyer (rule 46A); otherwise a tax invoice. A registered buyer cannot get taxable
+ * and exempt goods on one document: `problem` says so (audit 4 T10).
+ */
+export function saleDocumentKind(invoiceKind: string, lineRates: DecimalInput[]): { kind: DocumentKind; problem: string | null } {
+  if (invoiceKind === 'bill_of_supply') return { kind: 'bill_of_supply', problem: null };
+  const exempt = lineRates.filter((r) => D(r).isZero()).length;
+  if (lineRates.length && exempt === lineRates.length) return { kind: 'bill_of_supply', problem: null };
+  if (exempt === 0) return { kind: 'tax_invoice', problem: null };
+  if (invoiceKind === 'business') return { kind: 'tax_invoice', problem: 'A business buyer gets exempt goods on a separate bill (a bill of supply): bill the taxable and the exempt goods apart' };
+  return { kind: 'invoice_cum_bill_of_supply', problem: null };
+}
+
+/**
+ * The title a till bill prints under. Audit 4: a return that reduces no GST (no original bill, or
+ * after the credit-note time limit) is a return note, not a credit note (CGST Act s.34, rule 53).
+ * Older bills have no stored document kind; theirs is worked out from the bill kind as before.
+ */
+export function gstDocumentTitle(billKind: 'sale' | 'return' | string, invoiceKind: string, documentKind?: string | null): string {
+  if (documentKind && documentKind in DOCUMENT_TITLES) return DOCUMENT_TITLES[documentKind as DocumentKind];
   if (billKind === 'return') return 'Credit note';
   return invoiceKind === 'bill_of_supply' ? 'Bill of supply' : 'Tax invoice';
 }

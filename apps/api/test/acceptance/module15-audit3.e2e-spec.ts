@@ -25,7 +25,7 @@ let n = 0;
 const num = () => `MAT1/2627/${String(++n).padStart(6, '0')}`;
 const T = (r: ReturnType<Agent['post']>) => r.set('x-till-token', tillToken);
 const sale = (lines: Record<string, unknown>[], amount: string) => ({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), sale: { number: num(), lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) }, payments: [{ paymentMethodId: pm.CASH, amount }] });
-const ret = (returnOfId: string, lines: Record<string, unknown>[], amount: string) => ({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId, lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) }, payments: [{ paymentMethodId: pm.CASH, amount }] });
+const ret = (returnOfId: string, lines: Record<string, unknown>[], amount: string) => ({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId, lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) }, payments: [{ paymentMethodId: pm.CASH, amount }] });
 
 async function item(name: string, price: string, extra: Record<string, unknown> = {}) {
   const i = (await owner.post('/items').send({ name, itemGroupId: groupId, baseUnitId: pcs, hsnCode: '8517', ...extra }).expect(201)).body as { id: string };

@@ -122,7 +122,7 @@ describe('9.1 daily sales by store, 9.8 store limits', () => {
     await owner
       .post('/pos/bills')
       .set('x-till-token', t.token)
-      .send({ clientId: randomUUID(), tillId: t.id, soldAt: new Date().toISOString(), ret: { number: `${t.prefix}${String(++t.n).padStart(6, '0')}`, returnOfId: first.id, lines: [{ lineNo: 1, itemId: rice.id, quantity: '2', returnOfLineId: first.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-210' }] })
+      .send({ clientId: randomUUID(), tillId: t.id, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: `${t.prefix}${String(++t.n).padStart(6, '0')}`, returnOfId: first.id, lines: [{ lineNo: 1, itemId: rice.id, quantity: '2', returnOfLineId: first.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-210' }] })
       .expect(201);
   });
 

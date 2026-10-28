@@ -78,6 +78,8 @@ export interface DraftDelivery {
   remarks: string;
   /** Plan 08 G1: the state the goods go to (place of supply); empty = the store's state. */
   stateCode?: string;
+  /** Audit 4 (T2): delivered to someone else on the buyer's behalf: the buyer's own state is the place of supply. */
+  forOther?: boolean;
 }
 
 /** Plan 08 G4, G5: the buyer written on the bill: a GSTIN makes it a business tax invoice. */
@@ -396,6 +398,8 @@ export function supplyFor(snapshot: TillSnapshot, draft: Pick<DraftBill, "custom
     buyerGstin: typed ?? own,
     buyerState: draft.buyer?.stateCode || null,
     deliveryState: draft.delivery?.stateCode || null,
+    deliveredToOther: !!draft.delivery?.forOther,
+    sezUnderLut: !!till.gst?.sezUnderLut,
     taxSituation: typed && typed !== customer?.gstin ? null : (customer?.taxSituation ?? null),
   });
 }
@@ -789,9 +793,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       const charge = deliveryChargeFor(goods, till.delivery?.charge ?? "0", till.delivery?.freeAbove ?? null);
       if (charge.gt(0)) {
         const item = till.delivery?.itemId ? findItem(snapshot, till.delivery.itemId) : undefined;
-        const rate = item ? gstRateFor(snapshot.gstRates, item.hsnCode, date) : null;
         if (!item) problems.push("The delivery charge item is not set up; ask the owner to choose it in the till settings");
-        else if (!rate) problems.push(`No GST rate is set for the delivery charge (${item.code})`);
         else {
           lines.push({
             lineNo: draft.lines.length + 1,
@@ -810,7 +812,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
             billShare: ZERO,
             discountAmount: ZERO,
             amount: charge,
-            gstRate: D(rate.rate),
+            // Set with the goods' rates below (audit 4, T4).
+            gstRate: ZERO,
             tax: blankTax(),
             isFree: false,
             isDelivery: true,
@@ -861,12 +864,24 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       }
     }
     // Plan 08 G2, G7: each line's rate on its final amount (price bands); no tax on a bill of supply or to an exempt buyer.
+    // Audit 4 (T12; CBIC circular 92/11/2019): free pieces of the same item share the price (its band); a free
+    // other item makes a mixed supply at the higher rate. (T4) Delivery takes the goods' rate, the highest.
+    const factorOf = (l: ComputedLine) => D(l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1");
     for (const l of lines) {
-      if (!l.isFree && !l.problem && l.item.hsnCode) {
-        const factor = D(l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1");
-        const r = gstRateFor(snapshot.gstRates, l.item.hsnCode, date, bandUnitPrice(l.amount, l.quantity.mul(factor)));
+      if (!l.isFree && !l.isDelivery && !l.problem && l.item.hsnCode) {
+        const sameFree = lines.filter((f) => f.isFree && f.freeOfLineNo === l.lineNo && f.item.id === l.item.id).reduce((s, f) => s.add(f.quantity.mul(factorOf(f))), ZERO);
+        const r = gstRateFor(snapshot.gstRates, l.item.hsnCode, date, bandUnitPrice(l.amount, l.quantity.mul(factorOf(l)).add(sameFree)));
         if (r) l.gstRate = D(r.rate);
       }
+    }
+    for (const l of lines.filter((x) => !x.isFree && !x.isDelivery)) {
+      const free = lines.filter((f) => f.isFree && f.freeOfLineNo === l.lineNo);
+      for (const f of free) if (f.item.id === l.item.id) f.gstRate = l.gstRate;
+      l.gstRate = free.reduce((m, f) => Decimal.max(m, f.gstRate), l.gstRate);
+    }
+    const goodsRate = lines.filter((g) => !g.isDelivery && g.item.isStockItem !== false).reduce((m, g) => Decimal.max(m, g.gstRate), ZERO);
+    for (const l of lines) {
+      if (l.isDelivery) l.gstRate = goodsRate;
       if (supply.noTax) l.gstRate = ZERO;
       l.tax = supplyLineTax(l.amount, l.gstRate, supply);
     }
@@ -888,6 +903,9 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   if (draft.ret?.lines.length) {
     const lines: ComputedLine[] = [];
     if (draft.ret.originalBillId === null && !draft.ret.approvalToken) approvals.push({ kind: "return_without_bill", lineKey: null, reason: "A return without the original bill needs a manager" });
+    // Audit 4 (T8, rule 53(1A)(f)): a credit note to a walk-in customer carries their name (the state defaults to the shop's).
+    const returnCustomer = draft.customer?.id ?? draft.ret.customerId;
+    if (draft.ret.originalBillId && !draft.ret.supply?.noTax && (!returnCustomer || returnCustomer === snapshot.till.walkInCustomerId) && !draft.buyer?.name.trim()) problems.push("A credit note needs the customer's name: add it with \"Buyer GSTIN / details\"");
     draft.ret.lines.forEach((rl, index) => {
       const lineNo = index + 1;
       if (rl.originalLineId === null) {
@@ -1155,13 +1173,14 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
       ...(d.deliverOn ? { deliverOn: d.deliverOn } : {}),
       ...(d.remarks.trim() ? { remarks: d.remarks.trim() } : {}),
       ...(d.stateCode ? { stateCode: d.stateCode } : {}),
+      ...(d.forOther ? { forOther: true } : {}),
       // Offline the server keeps the charge the till added (pos-offline §5).
       ...(o.offline ? { charge: bill.delivery.charge.toFixed(2) } : {}),
     };
   }
-  // Plan 08 G4, G5: the buyer typed at the till.
+  // Plan 08 G4, G5: the buyer typed at the till; audit 4 (T8): also on a return, for the credit note (rule 53(1A)(f)).
   const buyer = draft.buyer;
-  if (buyer && bill.sale && (buyer.gstin.trim() || buyer.name.trim() || buyer.address.trim() || buyer.stateCode)) {
+  if (buyer && (buyer.gstin.trim() || buyer.name.trim() || buyer.address.trim() || buyer.stateCode)) {
     input.buyer = {
       ...(buyer.gstin.trim() ? { gstin: buyer.gstin.trim().toUpperCase() } : {}),
       ...(buyer.name.trim() ? { name: buyer.name.trim() } : {}),

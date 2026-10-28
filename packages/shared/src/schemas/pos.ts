@@ -44,7 +44,11 @@ export const PAYMENT_ACCOUNT_ROLES: Record<PaymentKind, string> = {
 export const gstRateSchema = z.object({
   hsnCode: z.string().trim().regex(/^(\d{4}|\d{6}|\d{8})$/, 'HSN code must be 4, 6 or 8 digits'),
   rate: percent,
-  cessRate: percent.optional().nullable(),
+  /** Audit 4: bills do not work out compensation cess yet, so a rate with cess is refused rather than under-billed. */
+  cessRate: percent
+    .refine((v) => Number(v) === 0, 'Compensation cess is not worked out on bills yet; goods that carry cess (tobacco, aerated drinks, motor vehicles) cannot be sold here')
+    .optional()
+    .nullable(),
   effectiveFrom: isoDate,
   note: optionalText(300),
   /** Plan 08 G2: exempt and nil-rated are kept apart from a 0% rate (their rate is 0). */
@@ -235,6 +239,8 @@ export const deliveryDetailsSchema = z.object({
   charge: nonNegativeDecimalString.optional(),
   /** Plan 08 G1: the state the goods are delivered to (the place of supply); empty = the store's state. */
   stateCode: z.string().refine(isStateCode, 'Unknown GST state code').optional().nullable(),
+  /** Audit 4 T2: delivered to another person on the buyer's direction (IGST Act s.10(1)(b)). */
+  forOther: z.boolean().optional(),
 });
 export type DeliveryDetailsInput = z.infer<typeof deliveryDetailsSchema>;
 

@@ -24,6 +24,7 @@ interface CustomerFormValues {
   notes: string;
   customerGroupId: string;
   gstin: string;
+  taxSituation: string;
   stateCode: string;
   priceListId: string;
   paymentTermsId: string;
@@ -43,6 +44,7 @@ function fromCustomer(c: CustomerDto | null, settings: PartySettingsDto | null):
       notes: "",
       customerGroupId: settings?.defaultCustomerGroupId ?? "",
       gstin: "",
+      taxSituation: "",
       stateCode: "",
       priceListId: "",
       paymentTermsId: settings?.defaultPaymentTermsId ?? "",
@@ -60,6 +62,7 @@ function fromCustomer(c: CustomerDto | null, settings: PartySettingsDto | null):
     notes: c.notes ?? "",
     customerGroupId: c.customerGroup.id,
     gstin: c.gstin ?? "",
+    taxSituation: c.taxSituation === "sez" || c.taxSituation === "reverse_charge" ? c.taxSituation : "",
     stateCode: c.stateCode ?? "",
     priceListId: c.priceList?.id ?? "",
     paymentTermsId: c.paymentTerms?.id ?? "",
@@ -109,7 +112,7 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
       notes: blankToNull(form.notes),
       ...(form.customerGroupId ? { customerGroupId: form.customerGroupId } : {}),
       // The walk-in customer never has a GSTIN or a supplier link (the API refuses them).
-      ...(walkIn ? {} : { gstin: blankToNull(form.gstin), linkedSupplierId: form.linkedSupplier?.id ?? null }),
+      ...(walkIn ? {} : { gstin: blankToNull(form.gstin), taxSituation: form.gstin.trim() && form.taxSituation ? form.taxSituation : null, linkedSupplierId: form.linkedSupplier?.id ?? null }),
       stateCode: form.stateCode || null,
       priceListId: form.priceListId || null,
       paymentTermsId: form.paymentTermsId || null,
@@ -208,6 +211,13 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
             saved={customer ? { gstin: customer.gstin, check: customer.gstinCheck } : null}
             onUseDetails={(facts) => setForm((f) => ({ ...f, name: facts.tradeName || facts.legalName || f.name, isBusiness: true }))}
           />
+          {!walkIn && form.gstin.trim() ? (
+            <SelectInput id="cus-tax-situation" label="GST on sales to this customer" value={form.taxSituation} error={errors.taxSituation} hint="An SEZ unit buys with IGST, or without tax when you have a LUT. Exemption follows the goods, not the buyer." onChange={(e) => setForm((f) => ({ ...f, taxSituation: e.target.value }))}>
+              <option value="">Regular business (GST charged)</option>
+              <option value="sez">SEZ unit or developer</option>
+              <option value="reverse_charge">Buyer pays the tax (reverse charge)</option>
+            </SelectInput>
+          ) : null}
         </div>
       </fieldset>
 

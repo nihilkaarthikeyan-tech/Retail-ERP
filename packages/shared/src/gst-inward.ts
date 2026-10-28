@@ -341,3 +341,89 @@ export const MATCH_STATUS_LABELS: Record<MatchStatus, string> = {
   only_portal: 'Only on the portal',
   only_books: 'Only in our books',
 };
+
+// ---- Input credit allowed in a return (audit 4, T11) ----
+
+/**
+ * The last day credit on a supplier invoice can be taken: 30 November after
+ * the end of the invoice's financial year (CGST Act s.16(4); the annual return,
+ * if filed earlier, ends it sooner).
+ */
+export function creditTimeLimit(invoiceDate: string): string {
+  const y = Number(invoiceDate.slice(0, 4));
+  const m = Number(invoiceDate.slice(5, 7));
+  const fyEnd = m >= 4 ? y + 1 : y;
+  return `${fyEnd}-11-30`;
+}
+
+/** A supplier bill as the credit check needs it: its claimable tax per head. */
+export interface CreditBill {
+  id: string;
+  kind: 'invoice' | 'note';
+  reverseCharge: boolean;
+  invoiceDate: string;
+  /** The return period the bill was posted in. */
+  postingPeriod: string;
+  igst: DecimalInput;
+  cgst: DecimalInput;
+  sgst: DecimalInput;
+}
+
+export interface CreditHeads {
+  igst: Decimal;
+  cgst: Decimal;
+  sgst: Decimal;
+}
+
+export interface CreditAdjustment {
+  /** Credit of this period's bills the supplier has not reported in GSTR-2B (s.16(2)(aa)): not claimed now. */
+  notInStatement: CreditHeads;
+  /** Credit past the s.16(4) limit: never claimed. */
+  timeBarred: CreditHeads;
+  /** Credit of earlier bills held back then, now in this period's GSTR-2B: claimed now. */
+  released: CreditHeads;
+}
+
+const HEAD_KEYS = ['igst', 'cgst', 'sgst'] as const;
+const noHeads = (): CreditHeads => ({ igst: ZERO, cgst: ZERO, sgst: ZERO });
+
+/**
+ * What to take off (and add back to) the credit in the accounts for one
+ * return period. Only forward-charge invoices are checked: the shop's own
+ * reverse-charge tax and the reductions of debit notes always stand.
+ *
+ * - periodTo: the period's last day (its return is filed after it).
+ * - rows: the period's GSTR-2B matched with the books, or null when none is imported.
+ * - bills: the bills the rows and periodBills refer to, by id.
+ * - periodBills: ids of the bills posted in this period.
+ * - heldBackEarlier: whether a bill posted in that earlier period was checked against its own GSTR-2B.
+ */
+export function creditAdjustment(input: {
+  period: string;
+  periodTo: string;
+  rows: MatchRow[] | null;
+  bills: Map<string, CreditBill>;
+  periodBills: string[];
+  heldBackEarlier: (postingPeriod: string) => boolean;
+}): CreditAdjustment {
+  const out: CreditAdjustment = { notInStatement: noHeads(), timeBarred: noHeads(), released: noHeads() };
+  const checked = (b: CreditBill | undefined): b is CreditBill => !!b && b.kind === 'invoice' && !b.reverseCharge;
+  const barred = (b: CreditBill) => creditTimeLimit(b.invoiceDate) <= input.periodTo;
+  for (const id of input.periodBills) {
+    const b = input.bills.get(id);
+    if (checked(b) && barred(b)) for (const h of HEAD_KEYS) out.timeBarred[h] = out.timeBarred[h].add(D(b[h]));
+  }
+  for (const r of input.rows ?? []) {
+    const b = r.books ? input.bills.get(r.books.id) : undefined;
+    if (!checked(b) || barred(b)) continue;
+    const ownPeriod = b.postingPeriod === input.period;
+    if (ownPeriod && r.status === 'only_books') {
+      for (const h of HEAD_KEYS) out.notInStatement[h] = out.notInStatement[h].add(D(b[h]));
+    } else if (ownPeriod && r.status === 'value_difference' && r.portal) {
+      for (const h of HEAD_KEYS) out.notInStatement[h] = out.notInStatement[h].add(Decimal.max(D(b[h]).sub(D(r.portal[h])), 0));
+    } else if (!ownPeriod && b.postingPeriod < input.period && r.portal && (r.status === 'matched' || r.status === 'value_difference') && input.heldBackEarlier(b.postingPeriod)) {
+      for (const h of HEAD_KEYS) out.released[h] = out.released[h].add(Decimal.min(D(b[h]), D(r.portal[h])));
+    }
+  }
+  return out;
+}

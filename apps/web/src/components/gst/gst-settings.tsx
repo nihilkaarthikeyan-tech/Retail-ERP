@@ -22,6 +22,7 @@ export interface GstSettingsDto {
   combineSmallSales: boolean;
   freeSampleTax: "not_set" | "reverse_input_credit" | "tax_on_value";
   receiptTaxTable: boolean;
+  sezUnderLut?: boolean;
   eWayLimit: string;
   eWayStateLimits: Record<string, string>;
   defaultTransporterId: string | null;
@@ -68,6 +69,7 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
       combineSmallSales: form.combineSmallSales,
       freeSampleTax: form.freeSampleTax,
       receiptTaxTable: form.receiptTaxTable,
+      sezUnderLut: !!form.sezUnderLut,
       eWayLimit: form.eWayLimit.trim(),
       defaultTransporterId: form.defaultTransporterId?.trim() || null,
       defaultTransporterName: form.defaultTransporterName?.trim() || null,
@@ -127,7 +129,8 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
         </SelectInput>
       </div>
       <h2>Documents</h2>
-      {isOn("einvoice") ? <CheckInput id="gst-einvoice" label="E-invoicing applies to this business" description="Business invoices are registered on the e-invoice portal (turnover above ₹5 crore)." checked={form.eInvoiceApplies} disabled={!canEdit} onChange={(e) => set("eInvoiceApplies", e.target.checked)} /> : null}
+      {isOn("einvoice") ? <CheckInput id="gst-einvoice" label="E-invoicing applies to this business" description="Business invoices are registered on the e-invoice portal: required once the turnover of any year since 2017-18 was above ₹5 crore (Notification 10/2023-Central Tax)." checked={form.eInvoiceApplies} disabled={!canEdit} onChange={(e) => set("eInvoiceApplies", e.target.checked)} /> : null}
+      <CheckInput id="gst-sez-lut" label="Sell to SEZ units without GST (under a letter of undertaking)" description="Only when the business has filed a LUT on the GST portal for this year. Otherwise SEZ sales carry IGST." checked={!!form.sezUnderLut} disabled={!canEdit} onChange={(e) => set("sezUnderLut", e.target.checked)} />
       <CheckInput id="gst-tax-table" label="Show the GST table on till receipts" checked={form.receiptTaxTable} disabled={!canEdit} onChange={(e) => set("receiptTaxTable", e.target.checked)} />
       <CheckInput id="gst-small-sales" label="Show sales under ₹200 as one combined daily invoice in the reports" description="Every bill is still recorded; this only changes the report." checked={form.combineSmallSales} disabled={!canEdit} onChange={(e) => set("combineSmallSales", e.target.checked)} />
       {/* Plan 15: GSTIN checks with the GST network. */}

@@ -61,6 +61,8 @@ export interface SnapGstSettings {
   scheme: "regular" | "composition" | string;
   hsnDigits: number;
   receiptTaxTable: boolean;
+  /** Audit 4 (T6): SEZ supplies go without tax under a letter of undertaking. */
+  sezUnderLut?: boolean;
   sellerState: string;
 }
 

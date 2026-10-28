@@ -61,6 +61,9 @@ export interface EWayRow {
   expiring: boolean;
   canCancel: boolean;
   error: string | null;
+  /** Audit 4: Part A only (no vehicle yet): the goods cannot move on it, and it has no validity. */
+  partBMissing?: boolean;
+  notice?: string | null;
 }
 
 export interface EWayList {

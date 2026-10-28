@@ -917,3 +917,30 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### 15.9 Cash accounts of a new store (L10)
 - **Then** a store added in Settings has "Cash in till" and "Cash in hand" at once, before its first till shift.
+
+## Audit 4: GST and the law (28 October 2026; automated in `module15-audit4.e2e-spec.ts`)
+
+### A4.1 SEZ supply (T6)
+- **Given** a customer with a Tamil Nadu GSTIN marked "SEZ unit", the shop in Tamil Nadu
+- **Then** a ₹1,050 shirt is billed with IGST ₹50.00 (no CGST/SGST) and the SEZ endorsement; with "SEZ sales without GST (LUT)" on, taxable ₹1,050.00 and no tax. GSTR-1 lists them as SEWP and SEWOP; GSTR-3B 3.1(b) shows taxable ₹2,050.00, IGST ₹50.00.
+
+### A4.2 Taxable and exempt goods on one bill (T10)
+- **Then** a walk-in buying a shirt and milk gets an "Invoice-cum-bill of supply"; a business buyer is refused (two documents); milk alone is a "Bill of supply".
+
+### A4.3 Delivery charge (T4)
+- **Then** a ₹50 delivery with a 5% shirt is at 5%; with a 5% shirt and an 18% bag it is at 18%.
+
+### A4.4 Credit note and return note (T7–T9)
+- **Then** a return to a walk-in without a name is refused ("A credit note needs the customer's name"); with "Lakshmi" it is a credit note reducing CGST ₹25.00, state 33. A return without the bill is a "Return note" with no GST, not in GSTR-1. A return after 30 November of the next year refunds the money and returns the stock, without reducing GST.
+
+### A4.5 Filed months (T15) and IFF
+- **Then** a month can be marked filed only after it ends; an offline bill of a filed month that arrives later is reported in the next month. A quarterly filer's first or second month is an IFF with business invoices only; the third month has none.
+
+### A4.6 Composition (T3, T13)
+- **Then** a composition shop cannot bill a Karnataka buyer; GSTR-3B shows the CMP-08 figure: 0.5% CGST and 0.5% SGST of taxable turnover.
+
+### A4.7 Input credit (T11)
+- **Then** without an imported GSTR-2B, GSTR-3B says to import it; credit of bills the supplier did not report is held back and claimed when it appears; credit after the s.16(4) limit is left out (unit tests in `gst-inward.spec.ts`).
+
+### A4.8 Other checks
+- **Then** a business invoice with an item without HSN is refused; a cess rate cannot be saved; a bill with a registered IRN cannot be cancelled; HSN digits under 6 are refused above ₹5 crore turnover.

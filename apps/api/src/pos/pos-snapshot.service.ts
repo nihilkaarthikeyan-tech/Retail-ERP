@@ -96,7 +96,7 @@ export class PosSnapshotService {
         receiptFooter: till.receiptFooter,
         store: { id: store.id, code: store.code, name: store.name, address: [store.addressLine1, store.addressLine2, store.city, store.pincode].filter(Boolean).join(', '), phone: store.phone, stateCode: store.stateCode ?? company.stateCode },
         company: { legalName: company.legalName, stateCode: company.stateCode, gstin: seller.gstin },
-        gst: { scheme: gstSettings.scheme, hsnDigits: gstSettings.hsnDigits, receiptTaxTable: gstSettings.receiptTaxTable, sellerState: seller.stateCode },
+        gst: { scheme: gstSettings.scheme, hsnDigits: gstSettings.hsnDigits, receiptTaxTable: gstSettings.receiptTaxTable, sezUnderLut: gstSettings.sezUnderLut, sellerState: seller.stateCode },
         paymentMethods: till.paymentMethods.map((m) => ({ id: m.paymentMethodId, code: m.paymentMethod.code, name: m.paymentMethod.name, kind: m.paymentMethod.kind, allowRefund: m.paymentMethod.allowRefund, needsReference: m.paymentMethod.needsReference, isDefault: m.isDefault, active: m.paymentMethod.active })),
         liveAllowed: settings.liveAllowed,
         walkInCustomerId: partySettings?.walkInCustomerId ?? null,

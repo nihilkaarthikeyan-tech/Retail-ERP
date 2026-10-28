@@ -35,6 +35,8 @@ export interface PrintDocumentDto {
   printedAt: string;
   /** Plan 08 §4: a warning across the top, e.g. an e-invoice not yet registered. */
   notice?: string | null;
+  /** Audit 4 (rule 48(1)): the copy markings of a tax invoice; one printed sheet each. */
+  copies?: string[] | null;
   /** Plan 08 §4: the e-invoice's signed QR code as an SVG path (one unit per module). */
   qr?: { label: string; path: string; size: number } | null;
 }
@@ -51,6 +53,7 @@ export const PRINT_KIND_LABELS: Record<PrintKind, string> = {
   alteration_job: "Alteration job slip",
   alteration_tag: "Alteration garment tag",
   pos_bill: "Till bill: tax invoice, bill of supply or credit note (A4)",
+  rcm_self_invoice: "Self-invoice for a reverse-charge purchase",
 };
 
 /** Where a document's print page is. A statement's id is "customer:<id>" or "supplier:<id>". */

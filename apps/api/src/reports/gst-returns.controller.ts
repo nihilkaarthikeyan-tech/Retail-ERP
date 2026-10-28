@@ -2,9 +2,9 @@
 // Module 8 GST return endpoints (plan 08 §3). Each checks the permission here;
 // the GSTIN and store limits are applied in the service (rule 11). Downloads
 // for the GST portal are recorded in the history like every other export.
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { type GstReturnQuery, gstReturnQuerySchema, gstr1PortalJson, stringifyPortalJson } from 'shared';
+import { type GstFiledPeriodInput, gstFiledPeriodSchema, type GstReturnQuery, gstReturnQuerySchema, gstr1PortalJson, stringifyPortalJson } from 'shared';
 import { AuditService } from '../audit/audit.service.js';
 import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
@@ -65,6 +65,19 @@ export class GstReturnsController {
 
   @Get('payable') @RequirePermission('gst.returns') payable(@ReqUser() user: AuthUser) {
     return this.gst.payable(user);
+  }
+
+  /** Audit 4 (T15): returns marked as filed on the portal. */
+  @Get('filed') @RequirePermission('gst.returns') filed(@Query('gstRegistrationId') gstRegistrationId: string | undefined, @ReqUser() user: AuthUser) {
+    return this.gst.filedPeriods(gstRegistrationId || undefined, user);
+  }
+
+  @Post('filed') @RequirePermission('gst.returns') markFiled(@Body(new ZodValidationPipe(gstFiledPeriodSchema as never)) body: GstFiledPeriodInput, @ReqUser() user: AuthUser, @ReqActor() actor: Actor) {
+    return this.gst.markFiled(body, user, actor);
+  }
+
+  @Delete('filed/:id') @HttpCode(204) @RequirePermission('gst.returns') async unmarkFiled(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser, @ReqActor() actor: Actor) {
+    await this.gst.unmarkFiled(id, user, actor);
   }
 
   private async logExport(actor: Actor, report: string, r: { gstin: string; period: string; b2b: unknown[]; b2cl: unknown[]; b2cs: unknown[]; cdnr: unknown[]; cdnur: unknown[] }) {

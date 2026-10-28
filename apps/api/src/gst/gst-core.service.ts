@@ -42,6 +42,7 @@ export function gstSettingsDto(s: GstSettings) {
     combineSmallSales: s.combineSmallSales,
     freeSampleTax: s.freeSampleTax,
     receiptTaxTable: s.receiptTaxTable,
+    sezUnderLut: s.sezUnderLut,
     eWayLimit: s.eWayLimit.toFixed(2),
     eWayStateLimits: (s.eWayStateLimits ?? {}) as Record<string, string>,
     defaultTransporterId: s.defaultTransporterId,
@@ -90,6 +91,10 @@ export class GstCoreService {
     const company = await this.company.current();
     return this.prisma.$transaction(async (tx) => {
       const before = await ensureGstSettings(tx, company.id);
+      // Audit 4: above ₹5 crore turnover every invoice carries 6-digit HSN codes (Notification 78/2020-Central Tax).
+      const band = input.turnoverBand ?? before.turnoverBand;
+      const digits = input.hsnDigits ?? before.hsnDigits;
+      if (band !== 'up_to_5cr' && digits < 6) throw new BadRequestException('Above ₹5 crore turnover, invoices need 6-digit HSN codes: choose 6 or 8 digits');
       const data: Prisma.GstSettingsUpdateInput = { ...input, eWayStateLimits: input.eWayStateLimits as Prisma.InputJsonValue | undefined, updatedById: actor.userId };
       const after = await tx.gstSettings.update({ where: { companyId: company.id }, data });
       const { updatedAt: _a, ...b } = gstSettingsDto(before);

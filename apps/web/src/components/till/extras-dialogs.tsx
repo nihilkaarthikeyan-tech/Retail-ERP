@@ -239,6 +239,9 @@ export function DeliveryDialog({
           State
         </label>
         <StateSelect id="till-del-state" value={form.stateCode ?? ""} onChange={(v) => set("stateCode", v)} emptyLabel="This store's state" />
+        <label className="till-pin-label">
+          <input type="checkbox" checked={!!form.forOther} onChange={(e) => setForm((f) => ({ ...f, forOther: e.target.checked }))} /> Delivered to someone else on a business buyer&apos;s order (GST goes by the buyer&apos;s own state)
+        </label>
         <label className="till-pin-label" htmlFor="till-del-date">
           Deliver on
         </label>

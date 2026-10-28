@@ -20,10 +20,14 @@
 //   the place of supply from the buyer's GSTIN or state (else the
 //   registration's state), and the HSN code from the item. Each use of a
 //   fallback is counted in the warnings.
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  addDays,
   addFigures,
   businessDate,
+  creditAdjustment,
+  type CreditAdjustment,
+  type CreditBill,
   creditNoteDeadline,
   type CurrentUser,
   Decimal,
@@ -40,7 +44,9 @@ import {
   type Gstr1Item,
   type Gstr1NilRow,
   type Gstr1Note,
+  type MatchRow,
   gstReturnPeriod,
+  type GstFiledPeriodInput,
   type GstReturnQuery,
   HEADS,
   type Heads,
@@ -55,13 +61,18 @@ import {
   type PeriodTax,
   ratesInForce,
   returnPeriodOf,
+  roundMoney,
   type ReturnPeriod,
   type TaxFigures,
   uqcFor,
 } from 'shared';
 import type { GstRegistration } from '../generated/prisma/client.js';
 import { TransferGstService } from '../inventory/transfer-gst.service.js';
+import { AuditService } from '../audit/audit.service.js';
+import type { Actor } from '../common/request-context.js';
 import { OfficialHsnService } from '../gst/official-hsn.service.js';
+import { LedgerService } from '../ledger/ledger.service.js';
+import { GstInwardService } from '../purchasing/gst-inward.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, money, qty, ReportsCommon, type StoreScope, ZERO } from './reports-common.service.js';
 
@@ -95,6 +106,10 @@ export interface OutDoc {
   buyerName: string | null;
   placeOfSupply: string;
   interState: boolean;
+  /** Audit 4: a supply to an SEZ unit (GSTR-1 SEWP / SEWOP). */
+  sez?: boolean;
+  /** Audit 4: the buyer pays the tax on reverse charge. */
+  reverseCharge?: boolean;
   value: Decimal;
   figures: TaxFigures;
   section: Section;
@@ -102,6 +117,8 @@ export interface OutDoc {
   deadline: string | null;
   late: boolean;
   provisional: boolean;
+  /** Audit 4 T15: the month the bill is reported in (its own, or the next open one); transfers use their date. */
+  reportMonth?: string;
   lines: DocLine[];
 }
 
@@ -138,6 +155,9 @@ export class GstReturnsService {
     private readonly common: ReportsCommon,
     private readonly transferGst: TransferGstService,
     private readonly officialHsn: OfficialHsnService,
+    private readonly inward: GstInwardService,
+    private readonly ledger: LedgerService,
+    private readonly audit: AuditService,
   ) {}
 
   // ---- Registrations, period and settings ----
@@ -204,8 +224,19 @@ export class GstReturnsService {
     const regById = new Map(c.registrations.map((r) => [r.id, r]));
     const stores = await this.prisma.store.findMany({ where: { companyId: c.companyId }, select: { id: true, gstRegistrationId: true } });
     const storeReg = new Map(stores.map((s) => [s.id, s.gstRegistrationId ?? def.id]));
+    // Audit 4 T15: a bill is reported in its GSTR-1 month (its own, or the next open one when its month was
+    // marked filed); a return note reduces no GST and is not reported (T7, T9).
+    const months: string[] = [];
+    for (let m = c.period.from.slice(0, 7); m <= c.period.to.slice(0, 7); m = addDays(`${m}-28`, 7).slice(0, 7)) months.push(m);
     const bills = await this.prisma.posBill.findMany({
-      where: { companyId: c.companyId, businessDate: { gte: fromIso(c.period.from), lte: fromIso(c.period.to) }, ...(c.scope.ids ? { till: { storeId: { in: c.scope.ids } } } : {}) },
+      where: {
+        companyId: c.companyId,
+        AND: [
+          { OR: [{ gstPeriod: { in: months } }, { gstPeriod: null, businessDate: { gte: fromIso(c.period.from), lte: fromIso(c.period.to) } }] },
+          { OR: [{ documentKind: null }, { documentKind: { not: 'return_note' } }] },
+        ],
+        ...(c.scope.ids ? { till: { storeId: { in: c.scope.ids } } } : {}),
+      },
       include: {
         till: { select: { storeId: true } },
         lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { hsnCode: true } } } },
@@ -213,6 +244,7 @@ export class GstReturnsService {
       },
       orderBy: [{ businessDate: 'asc' }, { soldAt: 'asc' }, { number: 'asc' }],
     });
+    const situations = new Map((await this.prisma.customer.findMany({ where: { id: { in: [...new Set(bills.map((b) => b.customerId))] } }, select: { id: true, taxSituation: true } })).map((x) => [x.id, x.taxSituation]));
     const units = new Map((await this.prisma.unit.findMany({ select: { id: true, code: true } })).map((u) => [u.id, u.code]));
     const rates = (await this.prisma.gstRate.findMany({ select: { hsnCode: true, rate: true, kind: true, priceFrom: true, priceUpTo: true, effectiveFrom: true } })).map((r) => ({ ...r, effectiveFrom: iso(r.effectiveFrom)! }));
     const w: Warnings = { registrationFromStore: 0, placeOfSupplyGuessed: 0, hsnFromItem: 0, noHsn: [], longNumbers: [], headsMismatch: [], provisional: 0 };
@@ -267,7 +299,13 @@ export class GstReturnsService {
           nilKind,
         };
       });
-      const interState = pos !== sellerState;
+      // Audit 4: a supply to an SEZ is inter-state even in the seller's own state (IGST Act s.7(5)(b)).
+      // The situation saved on the bill (audit 4); older bills take the customer's.
+      const situation = b.buyerSituation ?? situations.get(b.customerId);
+      const sez = registered && situation === 'sez';
+      // A supply to an SEZ under LUT is zero-rated (IGST Act s.16), not nil-rated: it stays in B2B (SEWOP) and 3.1(b).
+      if (sez) for (const l of lines) l.nilKind = null;
+      const interState = pos !== sellerState || sez;
       const figures = addFigures(emptyFigures(), { taxable: b.taxableAmount.toString(), igst: b.igst.toString(), cgst: b.cgst.toString(), sgst: b.sgst.toString() });
       if (b.status === 'completed') {
         if ((interState && !figures.cgst.add(figures.sgst).isZero()) || (!interState && !figures.igst.isZero())) w.headsMismatch.push(b.number);
@@ -288,6 +326,8 @@ export class GstReturnsService {
         buyerName: b.buyerName,
         placeOfSupply: pos,
         interState,
+        sez,
+        reverseCharge: registered && situation === 'reverse_charge',
         value: D(b.total),
         figures,
         section,
@@ -295,6 +335,7 @@ export class GstReturnsService {
         deadline,
         late: !!original && isCreditNoteLate(original.date, date),
         provisional: b.gstProvisional,
+        reportMonth: b.gstPeriod ?? date.slice(0, 7),
         lines,
       });
     }
@@ -429,7 +470,16 @@ export class GstReturnsService {
   /** The GSTR-1 sections, each worked out from the documents, and the check that they add up to the register. */
   async gstr1(q: GstReturnQuery, user: CurrentUser) {
     const c = await this.context(q, user);
-    const { docs, warnings } = await this.documents(c);
+    // Audit 4 (C2): a quarterly filer's month is its IFF: business invoices and their credit notes only
+    // (CGST Rule 59(2)); the third month has none, its invoices go into the quarter's GSTR-1.
+    const iff = c.settings.filingFrequency === 'quarterly' && c.period.kind === 'month';
+    if (iff && Number(c.period.from.slice(5, 7)) % 3 === 0) throw new BadRequestException('The third month of a quarter has no IFF: its business invoices go into the quarter’s GSTR-1');
+    const found = await this.documents(c);
+    const warnings = found.warnings;
+    const docs = iff ? found.docs.filter((d) => d.section === 'b2b' || d.section === 'cdnr') : found.docs;
+    // The quarter's GSTR-1 leaves out the business invoices and notes already filed in an IFF of its months.
+    const iffMonths = c.period.kind === 'quarter' ? await this.filedIffMonths(c) : new Set<string>();
+    const inIff = (d: OutDoc) => (d.section === 'b2b' || d.section === 'cdnr') && iffMonths.has(d.reportMonth ?? d.date.slice(0, 7));
     const live = docs.filter((d) => !d.cancelled);
     const sellerState = c.registration.stateCode;
 
@@ -438,16 +488,26 @@ export class GstReturnsService {
       for (const l of d.lines.filter((x) => !x.nilKind)) byRate.set(rateKey(l.rate), addFigures(byRate.get(rateKey(l.rate)) ?? emptyFigures(), l));
       return [...byRate].map(([rate, f]) => ({ rate, ...f2s(f) }));
     };
-    const invoice = (d: OutDoc): Gstr1Invoice => ({ number: d.number, date: d.date, value: money(d.value), placeOfSupply: d.placeOfSupply, buyerGstin: d.buyerGstin, reverseCharge: false, items: items(d) });
+    const invoice = (d: OutDoc): Gstr1Invoice => ({
+      number: d.number,
+      date: d.date,
+      value: money(d.value),
+      placeOfSupply: d.placeOfSupply,
+      buyerGstin: d.buyerGstin,
+      reverseCharge: !!d.reverseCharge,
+      items: items(d),
+      invType: d.sez ? (d.figures.igst.isZero() ? 'SEWOP' : 'SEWP') : 'R',
+      interState: d.interState,
+    });
     const note = (d: OutDoc): Gstr1Note & { originalNumber: string | null; originalDate: string | null; late: boolean } => ({ ...invoice(d), buyerGstin: d.section === 'cdnr' ? (d.buyerGstin ?? null) : null, noteType: 'C', originalNumber: d.original?.number ?? null, originalDate: d.original?.date ?? null, late: d.late });
 
     const invoices = live.filter((d) => d.kind === 'invoice');
     const notes = live.filter((d) => d.kind === 'credit_note');
-    const b2b = invoices.filter((d) => d.section === 'b2b').map(invoice).filter((x) => x.items.length);
+    const b2b = invoices.filter((d) => d.section === 'b2b' && !inIff(d)).map(invoice).filter((x) => x.items.length);
     const b2cl = invoices.filter((d) => d.section === 'b2cl').map(invoice).filter((x) => x.items.length);
     // A credit note against a B2B invoice names the buyer of that invoice.
     const originalBuyer = new Map(docs.filter((d) => d.kind === 'invoice').map((d) => [d.number, d.buyerGstin]));
-    const cdnrDocs = notes.filter((d) => d.section === 'cdnr').map((d) => ({ ...d, buyerGstin: d.buyerGstin ?? (d.original ? (originalBuyer.get(d.original.number) ?? null) : null) }));
+    const cdnrDocs = notes.filter((d) => d.section === 'cdnr' && !inIff(d)).map((d) => ({ ...d, buyerGstin: d.buyerGstin ?? (d.original ? (originalBuyer.get(d.original.number) ?? null) : null) }));
     const cdnr = cdnrDocs.map(note).filter((x) => x.items.length);
     const cdnur = notes.filter((d) => d.section === 'cdnur').map(note).filter((x) => x.items.length);
 
@@ -506,7 +566,13 @@ export class GstReturnsService {
       ...documentSeries(reported.filter((d) => d.kind === 'credit_note').map((d) => ({ number: d.number, cancelled: d.cancelled }))).map((r) => ({ ...r, nature: 5 as const, natureLabel: 'Credit Note' })),
     ];
     // A till numbers its sales and returns in one series, so a gap is counted over the whole series, on its first row.
-    const gaps = new Map(documentSeries(reported.map((d) => ({ number: d.number, cancelled: d.cancelled }))).map((r) => [r.series, r.missing]));
+    // Audit 4: transfers of every GSTIN share one company-wide counter (numbers stay unique within each GSTIN);
+    // numbers another GSTIN used, or a transfer within one GSTIN (a challan) used, are not missing.
+    const transferNumbers = reported.some((d) => d.source === 'transfer')
+      ? (await this.prisma.stockDocument.findMany({ where: { companyId: c.companyId, kind: 'transfer_send', status: { in: ['finalised', 'cancelled'] }, postingDate: { gte: fromIso(c.period.from), lte: fromIso(c.period.to) } }, select: { number: true } })).map((s) => s.number)
+      : [];
+    const reportedNumbers = new Set(reported.map((d) => d.number));
+    const gaps = new Map(documentSeries([...reported.map((d) => ({ number: d.number, cancelled: d.cancelled })), ...transferNumbers.filter((n) => !reportedNumbers.has(n)).map((number) => ({ number, cancelled: false }))]).map((r) => [r.series, r.missing]));
     const seen = new Set<string>();
     for (const r of documents) {
       r.missing = seen.has(r.series) ? 0 : (gaps.get(r.series) ?? 0);
@@ -542,6 +608,7 @@ export class GstReturnsService {
       cdnur: sumItems(cdnur),
       nil: addFigures(emptyFigures(), { taxable: nilTotal }),
       excluded,
+      filedInIff: live.filter(inIff).reduce((t, d) => addFigures(t, addFigures(d.figures, { taxable: d.lines.filter((l) => l.nilKind).reduce((s, l) => s.add(l.taxable), ZERO) }, -1)), emptyFigures()),
     };
     const sectionsTotal = Object.values(sections).reduce((t, f) => addFigures(t, f), emptyFigures());
     const register = live.reduce((t, d) => addFigures(t, d.figures), emptyFigures());
@@ -560,18 +627,117 @@ export class GstReturnsService {
       documentsAgree: docsNet === live.filter((d) => d.section !== 'excluded').length,
     };
 
-    const figures: Gstr1Figures = { gstin: c.registration.gstin, fp: c.period.fp, b2b, b2cl, b2cs, cdnr, cdnur, nil, hsnBusiness, hsnConsumer, documents };
+    // An IFF has no nil, HSN or documents tables: those are reported for the whole quarter.
+    const figures: Omit<Gstr1Figures, 'documents'> & { documents: typeof documents } = iff
+      ? { gstin: c.registration.gstin, fp: c.period.fp, b2b, b2cl: [], b2cs: [], cdnr, cdnur: [], nil: [], hsnBusiness: [], hsnConsumer: [], documents: [] }
+      : { gstin: c.registration.gstin, fp: c.period.fp, b2b, b2cl, b2cs, cdnr, cdnur, nil, hsnBusiness, hsnConsumer, documents };
     return {
       ...this.header(c),
       workedOutAt: new Date().toISOString(),
       ...figures,
-      documents,
+      iff,
+      filedInIff: live.filter(inIff).length,
       smallSales,
       combineSmallSales: c.settings.combineSmallSales,
       excludedBills: live.filter((d) => d.section === 'excluded').length,
       reconciliation,
       warnings: this.warningTexts(warnings),
     };
+  }
+
+  // ---- Composition: the quarterly statement (CMP-08; audit 4, T13) ----
+
+  /**
+   * What a composition dealer pays each quarter: 0.5% CGST and 0.5% SGST of
+   * the turnover of taxable supplies in the State (CGST Act s.10(2), Rule 7,
+   * "any other supplier": a shop), plus the reverse-charge tax on its
+   * purchases. Exempt goods are shown but carry no tax. A month asked for
+   * gives its whole quarter.
+   */
+  private async cmp08(c: Context) {
+    const q = c.period.kind === 'quarter' ? c.period : gstReturnPeriod(returnPeriodOf(c.period.from, 'quarterly'))!;
+    const qc: Context = { ...c, period: q };
+    const { docs } = await this.documents(qc);
+    let taxable = ZERO;
+    let exempt = ZERO;
+    for (const d of docs.filter((x) => !x.cancelled && x.section !== 'excluded')) {
+      for (const l of d.lines) {
+        if (l.nilKind) exempt = exempt.add(l.taxable);
+        else taxable = taxable.add(l.taxable);
+      }
+    }
+    const half = roundMoney(taxable.mul('0.005'));
+    const ours = await this.storeRegistrations(qc);
+    const bills = (
+      await this.prisma.supplierBill.findMany({
+        where: { companyId: c.companyId, status: { notIn: ['draft', 'cancelled'] }, reverseCharge: true, postingDate: { gte: fromIso(q.from), lte: fromIso(q.to) } },
+        select: { gstRegistrationId: true, storeId: true, lines: { select: { taxableAmount: true, igst: true, cgst: true, sgst: true } } },
+      })
+    ).filter(ours);
+    let rcm = emptyFigures();
+    for (const b of bills) for (const l of b.lines) rcm = addFigures(rcm, { taxable: l.taxableAmount.toString(), igst: l.igst.toString(), cgst: l.cgst.toString(), sgst: l.sgst.toString() });
+    const pay = { igst: rcm.igst, cgst: half.add(rcm.cgst), sgst: half.add(rcm.sgst) };
+    return {
+      period: q.period,
+      periodLabel: q.label,
+      outward: { taxable: money(taxable), exempt: money(exempt), rate: '1.00', cgst: money(half), sgst: money(half) },
+      reverseCharge: f2(rcm),
+      payable: h2(pay),
+      note: 'Composition dealers file CMP-08 every quarter (and GSTR-4 once a year) instead of GSTR-1 and GSTR-3B. Interest for late payment is not included.',
+    };
+  }
+
+  // ---- Returns marked as filed (audit 4, T15) ----
+
+  private async filedIffMonths(c: Context) {
+    const months: string[] = [];
+    for (let m = c.period.from.slice(0, 7); m <= c.period.to.slice(0, 7); m = addDays(`${m}-28`, 7).slice(0, 7)) months.push(m);
+    const rows = await this.prisma.gstFiledPeriod.findMany({ where: { gstRegistrationId: c.registration.id, returnType: 'iff', period: { in: months } }, select: { period: true } });
+    return new Set(rows.map((r) => r.period));
+  }
+
+  /** The returns marked as filed for a GSTIN, newest first. */
+  async filedPeriods(gstRegistrationId: string | undefined, user: CurrentUser) {
+    const c = await this.context({ gstRegistrationId }, user);
+    const rows = await this.prisma.gstFiledPeriod.findMany({ where: { gstRegistrationId: c.registration.id }, orderBy: [{ period: 'desc' }, { returnType: 'asc' }] });
+    return rows.map((r) => ({ id: r.id, gstRegistrationId: r.gstRegistrationId, gstin: c.registration.gstin, period: r.period, returnType: r.returnType, filedOn: iso(r.filedOn), markedAt: r.createdAt }));
+  }
+
+  /**
+   * Marks a return as filed on the portal. From then on a bill that arrives
+   * for that month (an offline till syncing late) is reported in the next
+   * open month. A quarter's GSTR-1 is kept under its last month.
+   */
+  async markFiled(input: GstFiledPeriodInput, user: CurrentUser, actor: Actor) {
+    const c = await this.context({ gstRegistrationId: input.gstRegistrationId, period: input.period }, user);
+    const quarterly = c.settings.filingFrequency === 'quarterly';
+    if (input.returnType === 'iff') {
+      if (!quarterly) throw new BadRequestException('IFF is only for quarterly filers; mark the month’s GSTR-1 instead');
+      if (c.period.kind !== 'month' || Number(c.period.from.slice(5, 7)) % 3 === 0) throw new BadRequestException('An IFF is filed for the first or second month of a quarter');
+    } else if (quarterly ? c.period.kind !== 'quarter' : c.period.kind !== 'month') {
+      throw new BadRequestException(quarterly ? 'This GSTIN files GSTR-1 quarterly: choose the quarter (2026-Q2)' : 'This GSTIN files GSTR-1 monthly: choose the month (2026-09)');
+    }
+    if (input.filedOn <= c.period.to) throw new BadRequestException(`A return for ${c.period.label} can only be filed after ${c.period.to}`);
+    if (input.filedOn > businessDate()) throw new BadRequestException('The filing date cannot be in the future');
+    const period = c.period.to.slice(0, 7);
+    const exists = await this.prisma.gstFiledPeriod.findFirst({ where: { gstRegistrationId: c.registration.id, period, returnType: input.returnType } });
+    if (exists) throw new BadRequestException(`${input.returnType === 'iff' ? 'The IFF' : 'GSTR-1'} for ${c.period.label} is already marked as filed`);
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.gstFiledPeriod.create({ data: { gstRegistrationId: c.registration.id, period, returnType: input.returnType, filedOn: fromIso(input.filedOn), createdById: actor.userId } });
+      await this.audit.record(tx, actor, { action: 'create', entityType: 'gst_filed_period', entityId: row.id, changes: { gstin: c.registration.gstin, period, returnType: input.returnType, filedOn: input.filedOn } });
+      return { id: row.id, gstRegistrationId: row.gstRegistrationId, gstin: c.registration.gstin, period: row.period, returnType: row.returnType, filedOn: input.filedOn, markedAt: row.createdAt };
+    });
+  }
+
+  /** Takes a "filed" mark off (marked by mistake). Bills already moved to a later month stay there. */
+  async unmarkFiled(id: string, user: CurrentUser, actor: Actor) {
+    const row = await this.prisma.gstFiledPeriod.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Filed return not found');
+    const c = await this.context({ gstRegistrationId: row.gstRegistrationId }, user);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.gstFiledPeriod.delete({ where: { id } });
+      await this.audit.record(tx, actor, { action: 'update', entityType: 'gst_filed_period', entityId: id, changes: { gstin: c.registration.gstin, period: row.period, returnType: row.returnType, filed: [true, false] } });
+    });
   }
 
   // ---- GSTR-3B figures ----
@@ -622,8 +788,9 @@ export class GstReturnsService {
   }
 
   /** The position of each period from the first month in the accounts up to this one (credit carried forward). */
-  private async positions(c: Context) {
+  private async positions(c: Context, user: CurrentUser) {
     const months = await this.ledgerByMonth(c);
+    const checks = await this.creditChecks(c, user);
     const byPeriod = new Map<string, Record<string, Decimal>>();
     for (const [month, row] of months) {
       const p = returnPeriodOf(`${month}-01`, c.settings.filingFrequency);
@@ -634,9 +801,109 @@ export class GstReturnsService {
     byPeriod.set(c.period.period, byPeriod.get(c.period.period) ?? {});
     const ordered = [...byPeriod.keys()].sort((a, b) => gstReturnPeriod(a)!.from.localeCompare(gstReturnPeriod(b)!.from));
     const pick = (row: Record<string, Decimal>, kind: string) => ({ igst: row[`${kind}_igst`] ?? ZERO, cgst: row[`${kind}_cgst`] ?? ZERO, sgst: row[`${kind}_sgst`] ?? ZERO });
-    const periods: PeriodTax[] = ordered.map((p) => ({ period: p, output: pick(byPeriod.get(p)!, 'gst_output'), credit: pick(byPeriod.get(p)!, 'gst_input'), reverseCharge: pick(byPeriod.get(p)!, 'gst_rcm') }));
+    const adjusted = (p: string) => {
+      const books = pick(byPeriod.get(p)!, 'gst_input');
+      const a = checks.adjustments.get(p);
+      if (!a) return books;
+      const f = (h: 'igst' | 'cgst' | 'sgst') => books[h].sub(a.notInStatement[h]).sub(a.timeBarred[h]).add(a.released[h]);
+      return { igst: f('igst'), cgst: f('cgst'), sgst: f('sgst') };
+    };
+    const periods: PeriodTax[] = ordered.map((p) => ({ period: p, output: pick(byPeriod.get(p)!, 'gst_output'), credit: adjusted(p), reverseCharge: pick(byPeriod.get(p)!, 'gst_rcm') }));
     const all = gstPositions(periods);
-    return { position: all.find((x) => x.period === c.period.period)!, input: pick(byPeriod.get(c.period.period)!, 'gst_input') };
+    return { position: all.find((x) => x.period === c.period.period)!, input: adjusted(c.period.period), booksInput: pick(byPeriod.get(c.period.period)!, 'gst_input'), checks };
+  }
+
+  /**
+   * Audit 4 (T11): credit is claimed only for supplier invoices in the
+   * imported GSTR-2B (CGST Act s.16(2)(aa)) and never after the s.16(4) limit.
+   * Each period with a GSTR-2B holds back what its suppliers have not reported
+   * and claims earlier held-back bills once they appear; a period without one
+   * keeps the credit in the accounts (with a note on this period).
+   */
+  private async creditChecks(c: Context, user: CurrentUser) {
+    const freq = c.settings.filingFrequency;
+    const uploads = await this.prisma.gstReturnUpload.findMany({
+      where: { companyId: c.companyId, gstRegistrationId: c.registration.id, kind: 'gstr2b' },
+      select: { id: true, period: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    // The latest file of each portal period, grouped by our return period.
+    const latest = new Map<string, string>();
+    for (const u of uploads) if (!latest.has(u.period)) latest.set(u.period, u.id);
+    const byReturn = new Map<string, string[]>();
+    for (const [p, id] of latest) {
+      const rp = /^\d{4}-\d{2}$/.test(p) ? returnPeriodOf(`${p}-01`, freq) : freq === 'quarterly' ? p : null;
+      if (!rp || gstReturnPeriod(rp)!.from > c.period.from) continue;
+      byReturn.set(rp, [...(byReturn.get(rp) ?? []), id]);
+    }
+    const rows = new Map<string, MatchRow[]>();
+    for (const [rp, ids] of byReturn) for (const id of ids) rows.set(rp, [...(rows.get(rp) ?? []), ...(await this.inward.match(id, user)).rows]);
+
+    // Bills the rows name, and bills old enough to be past the s.16(4) limit.
+    const rowIds = [...new Set([...rows.values()].flat().flatMap((r) => (r.books ? [r.books.id] : [])))];
+    const to = c.period.to;
+    const lastBarredFy = Number(to.slice(0, 4)) - (to.slice(5) >= '11-30' ? 0 : 1);
+    const storeReg = await this.storeRegistrations(c);
+    const found = await this.prisma.supplierBill.findMany({
+      where: { companyId: c.companyId, status: { notIn: ['draft', 'cancelled'] }, postingDate: { lte: fromIso(to) }, OR: [{ id: { in: rowIds } }, { supplierBillDate: { lte: fromIso(`${lastBarredFy}-03-31`) } }] },
+      select: { id: true, kind: true, reverseCharge: true, supplierBillDate: true, postingDate: true, gstRegistrationId: true, storeId: true, lines: { select: { igst: true, cgst: true, sgst: true, creditClaimable: true } } },
+    });
+    const bills = new Map<string, CreditBill>();
+    for (const b of found) {
+      if (!storeReg(b)) continue;
+      const claim = b.lines.filter((l) => l.creditClaimable);
+      bills.set(b.id, {
+        id: b.id,
+        kind: b.kind === 'debit_note' ? 'note' : 'invoice',
+        reverseCharge: b.reverseCharge,
+        invoiceDate: iso(b.supplierBillDate)!,
+        postingPeriod: returnPeriodOf(iso(b.postingDate)!, freq),
+        igst: claim.reduce((t, l) => t.add(l.igst), ZERO),
+        cgst: claim.reduce((t, l) => t.add(l.cgst), ZERO),
+        sgst: claim.reduce((t, l) => t.add(l.sgst), ZERO),
+      });
+    }
+    const periods = new Set([...rows.keys(), ...[...bills.values()].map((b) => b.postingPeriod)]);
+    const adjustments = new Map<string, CreditAdjustment>();
+    for (const p of periods) {
+      const range = gstReturnPeriod(p);
+      if (!range || range.from > c.period.from) continue;
+      adjustments.set(p, creditAdjustment({ period: p, periodTo: range.to, rows: rows.get(p) ?? null, bills, periodBills: [...bills.values()].filter((b) => b.postingPeriod === p).map((b) => b.id), heldBackEarlier: (q) => byReturn.has(q) }));
+    }
+    return { adjustments, statementImported: byReturn.has(c.period.period) };
+  }
+
+  /** Whether a supplier bill reports under the context's registration and stores. */
+  private async storeRegistrations(c: Context) {
+    const def = c.registrations.find((r) => r.isDefault) ?? c.registrations[0];
+    const storeReg = new Map((await this.prisma.store.findMany({ where: { companyId: c.companyId }, select: { id: true, gstRegistrationId: true } })).map((s) => [s.id, s.gstRegistrationId ?? def.id]));
+    return (b: { gstRegistrationId: string | null; storeId: string | null }) =>
+      (b.gstRegistrationId ?? (b.storeId ? storeReg.get(b.storeId) : null) ?? def.id) === c.registration.id && (!c.scope.ids || !b.storeId || c.scope.ids.includes(b.storeId));
+  }
+
+  /**
+   * Rule 37: forward-charge supplier invoices still unpaid 180 days after their
+   * date, with the credit taken on them (a reminder; the shop decides).
+   */
+  private async unpaidAfter180Days(c: Context) {
+    const ours = await this.storeRegistrations(c);
+    const bills = (
+      await this.prisma.supplierBill.findMany({
+        where: { companyId: c.companyId, status: 'unpaid', kind: { not: 'debit_note' }, reverseCharge: false, supplierBillDate: { lte: fromIso(addDays(c.period.to, -180)) } },
+        select: { id: true, gstRegistrationId: true, storeId: true, lines: { where: { creditClaimable: true }, select: { igst: true, cgst: true, sgst: true } } },
+      })
+    ).filter(ours);
+    const open = await this.ledger.openAmounts(this.prisma, 'supplier_bill', bills.map((b) => b.id));
+    let count = 0;
+    let credit = ZERO;
+    for (const b of bills) {
+      if (!(open.get(b.id) ?? ZERO).gt(0)) continue;
+      const tax = b.lines.reduce((t, l) => t.add(l.igst).add(l.cgst).add(l.sgst), ZERO);
+      if (tax.lte(0)) continue;
+      count += 1;
+      credit = credit.add(tax);
+    }
+    return { count, credit };
   }
 
   async gstr3b(q: GstReturnQuery, user: CurrentUser) {
@@ -646,11 +913,14 @@ export class GstReturnsService {
 
     // 3.1 (a) taxable, (c) nil and exempt — from the bills, net of credit notes.
     let taxable = emptyFigures();
+    // 3.1 (b) zero-rated: supplies to an SEZ, with IGST or under LUT (IGST Act s.16).
+    let zeroRated = emptyFigures();
     let nilExempt = ZERO;
     const interStateConsumer = new Map<string, TaxFigures>();
     for (const d of live) {
       for (const l of d.lines) {
-        if (l.nilKind) nilExempt = nilExempt.add(l.taxable);
+        if (d.sez) zeroRated = addFigures(zeroRated, l);
+        else if (l.nilKind) nilExempt = nilExempt.add(l.taxable);
         else taxable = addFigures(taxable, l);
       }
       // 3.2 inter-state supplies to unregistered persons, by place of supply.
@@ -665,8 +935,11 @@ export class GstReturnsService {
     const stores = new Map((await this.prisma.store.findMany({ where: { companyId: c.companyId }, select: { id: true, gstRegistrationId: true } })).map((s) => [s.id, s.gstRegistrationId ?? def.id]));
     const bills = await this.prisma.supplierBill.findMany({
       where: { companyId: c.companyId, status: { not: 'draft' }, postingDate: { gte: fromIso(c.period.from), lte: fromIso(c.period.to) } },
-      select: { id: true, status: true, reverseCharge: true, gstRegistrationId: true, storeId: true, lines: { select: { taxableAmount: true, igst: true, cgst: true, sgst: true, creditClaimable: true } } },
+      select: { id: true, status: true, reverseCharge: true, gstRegistrationId: true, storeId: true, supplier: { select: { gstin: true } }, lines: { select: { taxableAmount: true, igst: true, cgst: true, sgst: true, creditClaimable: true } } },
     });
+    // 5: purchases with no tax (nil-rated, exempt, or from a composition supplier), split by the supplier's state.
+    const inwardNoTax = { interState: ZERO, intraState: ZERO };
+    const ownState = c.registration.gstin.slice(0, 2);
     let rcmInward = emptyFigures();
     let rcmCredit = emptyFigures();
     let blocked = emptyFigures();
@@ -680,21 +953,34 @@ export class GstReturnsService {
         if (b.reverseCharge) rcmInward = addFigures(rcmInward, f);
         if (b.reverseCharge && l.creditClaimable) rcmCredit = addFigures(rcmCredit, f);
         if (!l.creditClaimable) blocked = addFigures(blocked, f);
+        if (!b.reverseCharge && l.igst.isZero() && l.cgst.isZero() && l.sgst.isZero()) {
+          const inter = !!b.supplier.gstin && b.supplier.gstin.slice(0, 2) !== ownState;
+          if (inter) inwardNoTax.interState = inwardNoTax.interState.add(l.taxableAmount);
+          else inwardNoTax.intraState = inwardNoTax.intraState.add(l.taxableAmount);
+        }
       }
     }
 
-    const { position, input } = await this.positions(c);
+    const { position, input, checks } = await this.positions(c, user);
+    const adj = checks.adjustments.get(c.period.period);
+    const none = { igst: ZERO, cgst: ZERO, sgst: ZERO };
     const otherCredit = { igst: input.igst.sub(rcmCredit.igst), cgst: input.cgst.sub(rcmCredit.cgst), sgst: input.sgst.sub(rcmCredit.sgst) };
-    const billsTax = { igst: taxable.igst, cgst: taxable.cgst, sgst: taxable.sgst };
+    const billsTax = { igst: taxable.igst.add(zeroRated.igst), cgst: taxable.cgst, sgst: taxable.sgst };
     const outputDiffers = HEADS.some((h) => !billsTax[h].eq(position.liability[h]));
     const notes = this.warningTexts(warnings);
     if (outputDiffers) notes.unshift('The tax on the bills differs from the output tax in the accounts. Till bills reach the accounts when their shift is closed; close every shift of the period before filing.');
+    const sum = (h: { igst: Decimal; cgst: Decimal; sgst: Decimal }) => h.igst.add(h.cgst).add(h.sgst);
+    if (!checks.statementImported) notes.push('No GSTR-2B is imported for this period, so the credit shown is all the credit in the accounts. Import the GSTR-2B (Purchases › GST inward) before filing: only credit your suppliers have reported can be claimed (CGST Act s.16(2)(aa)).');
+    if (adj && sum(adj.notInStatement).gt(0)) notes.push(`Credit of ₹${money(sum(adj.notInStatement))} is held back: those supplier bills are not (or not fully) in this period’s GSTR-2B. It is claimed in the month the supplier reports them.`);
+    if (adj && sum(adj.timeBarred).gt(0)) notes.push(`Credit of ₹${money(sum(adj.timeBarred))} is left out: the supplier invoices are past 30 November after their financial year (CGST Act s.16(4)).`);
+    const unpaid = await this.unpaidAfter180Days(c);
+    if (unpaid.count) notes.push(`Rule 37: ${unpaid.count} supplier bill${unpaid.count === 1 ? ' is' : 's are'} still unpaid 180 days after the invoice date (credit ₹${money(unpaid.credit)}). Pay the supplier, or pay that credit back with interest in this return (table 4(B)(2)); it can be claimed again once paid.`);
     return {
       ...this.header(c),
       workedOutAt: new Date().toISOString(),
       outward: {
         taxable: f2(taxable),
-        zeroRated: f2(emptyFigures()),
+        zeroRated: f2(zeroRated),
         nilExempt: money(nilExempt),
         reverseChargeInward: f2(rcmInward),
         nonGst: '0.00',
@@ -708,6 +994,10 @@ export class GstReturnsService {
         reversed: h2({ igst: ZERO, cgst: ZERO, sgst: ZERO }),
         net: h2(input),
         ineligible: h2({ igst: blocked.igst, cgst: blocked.cgst, sgst: blocked.sgst }),
+        timeBarred: h2(adj?.timeBarred ?? none),
+        notInGstr2b: h2(adj?.notInStatement ?? none),
+        fromEarlierGstr2b: h2(adj?.released ?? none),
+        gstr2bImported: checks.statementImported,
         broughtForward: h2(position.broughtForward),
         available: h2(position.credit),
       },
@@ -716,6 +1006,8 @@ export class GstReturnsService {
         paidByCredit: h2(position.paidByCredit),
         cash: h2(position.cash),
       },
+      inwardNoTax: { interState: money(inwardNoTax.interState), intraState: money(inwardNoTax.intraState) },
+      composition: c.settings.scheme === 'composition' ? await this.cmp08(c) : null,
       reverseChargePayable: h2(position.reverseCharge),
       netPayable: h2(position.netPayable),
       totalPayable: money(position.totalPayable),
@@ -799,7 +1091,7 @@ export class GstReturnsService {
     const rows = [];
     for (const r of registrations) {
       const c = await this.context({ gstRegistrationId: r.id, period: currentPeriod }, user);
-      const { position } = await this.positions(c);
+      const { position } = await this.positions(c, user);
       payable = payable.add(position.totalPayable);
       const left = position.creditLeft.igst.add(position.creditLeft.cgst).add(position.creditLeft.sgst);
       carried = carried.add(left);

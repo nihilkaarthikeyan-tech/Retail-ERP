@@ -46,6 +46,8 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
 
   it("a return from 6.1 gives back ₹120.00 with taxable ₹114.28, CGST ₹2.86, SGST ₹2.86 (scenario 6.2, decision L8)", () => {
     const d = draft([], {
+      // Audit 4 (T8): a credit note to a walk-in names the customer.
+      buyer: { gstin: "", name: "Lakshmi", address: "", stateCode: "" },
       ret: {
         originalBillId: "b1",
         originalNumber: `${PREFIX}000042`,

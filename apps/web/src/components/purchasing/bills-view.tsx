@@ -11,6 +11,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { ACCOUNT_ROLE_LABELS, BILL_KIND_LABELS, BILL_PAYMENT_LABELS, BILL_STATUS_LABELS, purchaseRights, rupees, statusTone, type SupplierBillDto, type SupplierBillLineDto } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
 import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
+import { PrintButton } from "@/components/documents/print-button";
 import { BillCancelDialog, BillDebitNoteDialog, BillHoldDialog, heldText, PriceDifferenceDialog } from "./bills-dialogs";
 import { useUnitCodes } from "./bills-line-grid";
 
@@ -186,6 +187,8 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
         </h1>
         <BillBadges bill={bill} />
         <span className="spacer" />
+        {/* Audit 4 (T14): a purchase on reverse charge from an unregistered supplier needs our own self-invoice. */}
+        {!draft && !isNote && bill.reverseCharge ? <PrintButton kind="rcm_self_invoice" id={bill.id} label="Self-invoice" title="The tax invoice the shop issues itself for a reverse-charge purchase from an unregistered supplier (section 31(3)(f))" /> : null}
         {!draft ? <LedgerEntryButton documentType="supplier_bill" documentId={bill.id} /> : null}
       </div>
       {bill.status === "cancelled" ? <Alert kind="info">{`Cancelled${bill.cancelReason ? `: ${bill.cancelReason}` : ""}.`}</Alert> : null}

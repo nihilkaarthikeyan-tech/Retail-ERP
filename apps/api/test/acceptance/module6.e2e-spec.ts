@@ -128,11 +128,11 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
 
   it('6.2 a return of 1 Basmati: ₹120.00 back, stock at the original cost; no more than sold', async () => {
     const basLine = first.lines.find((l) => l.item.id === basmati.id)!;
-    const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: basmati.id, quantity: '1', returnOfLineId: basLine.id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-120' }] };
+    const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: basmati.id, quantity: '1', returnOfLineId: basLine.id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-120' }] };
     const res = (await T(owner.post('/pos/bills')).send(body).expect(201)).body;
     expect(res.return).toMatchObject({ total: '-120.00', taxableAmount: '-114.28', cgst: '-2.86', sgst: '-2.86' });
     expect(await position(basmati.id)).toEqual({ q: '99', cost: '90.0000' });
-    const again = { ...body, clientId: randomUUID(), ret: { ...body.ret, number: num(), lines: [{ ...body.ret.lines[0], quantity: '2' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-240' }] };
+    const again = { ...body, clientId: randomUUID(), buyer: { name: 'Walk-in customer' }, ret: { ...body.ret, number: num(), lines: [{ ...body.ret.lines[0], quantity: '2' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-240' }] };
     expect((await T(owner.post('/pos/bills')).send(again).expect(400)).body.message).toMatch(/only 1 left to return/);
   });
 
@@ -144,7 +144,7 @@ describe('6.1–6.3 and 6.5: a day at the till', () => {
           clientId: randomUUID(),
           tillId,
           soldAt: new Date().toISOString(),
-          ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: surf.id, quantity: '1', returnOfLineId: surfLine.id }] },
+          buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: surf.id, quantity: '1', returnOfLineId: surfLine.id }] },
           sale: { number: num(), lines: [{ lineNo: 1, itemId: ariel.id, quantity: '1' }] },
           payments: [{ paymentMethodId: pm.CASH, amount: '18' }],
         })
@@ -398,7 +398,7 @@ describe('go-live switch (plan 06 answer 1)', () => {
     await T(owner.post('/pos/bills')).send(sale([{ itemId: soap.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '40' }])).expect(201);
     // A bill saved as provisional before the change (simulated here) keeps that as history; its return copies the flag.
     await prisma.posBill.update({ where: { id: firstBill.sale.id }, data: { gstProvisional: true } });
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: firstBill.sale.id, lines: [{ lineNo: 1, itemId: soap.id, quantity: '1', returnOfLineId: firstBill.sale.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-40' }] };
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: firstBill.sale.id, lines: [{ lineNo: 1, itemId: soap.id, quantity: '1', returnOfLineId: firstBill.sale.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-40' }] };
     const res = (await T(owner.post('/pos/bills')).send(back).expect(201)).body;
     expect(res.return).toMatchObject({ total: '-40.00', gstProvisional: true });
     expect(res.return.checkFlags).toContain('gst_provisional');

@@ -316,7 +316,7 @@ describe('11.19 customer purchases and birthdays (C9, C10)', () => {
         tillId,
         soldAt: new Date().toISOString(),
         customerId: priya.id,
-        ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: first.lines[0].id }] },
+        buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: first.lines[0].id }] },
         payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }],
       })
       .expect(201);

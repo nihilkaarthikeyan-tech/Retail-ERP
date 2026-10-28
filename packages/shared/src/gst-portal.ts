@@ -243,7 +243,10 @@ export interface EInvoiceSource {
   typ: 'INV' | 'CRN' | 'DBN';
   number: string;
   date: string;
+  /** Audit 4 (28 October 2026): the buyer's tax situation is "reverse_charge" (RegRev "Y"). */
   reverseCharge?: boolean;
+  /** Audit 4 (28 October 2026): the buyer is a special economic zone unit or developer (tax situation "sez"). */
+  sez?: boolean;
   seller: PortalAddress & { gstin: string; legalName: string; tradeName?: string | null; phone?: string | null; email?: string | null };
   buyer: PortalAddress & { gstin: string; legalName: string; placeOfSupply: string; phone?: string | null; email?: string | null };
   lines: { description: string; isService: boolean; hsn: string; barcode?: string | null; quantity: DecimalInput; unit: string; taxable: DecimalInput; gstRate: DecimalInput; igst: DecimalInput; cgst: DecimalInput; sgst: DecimalInput; cess?: DecimalInput; cessRate?: DecimalInput }[];
@@ -256,22 +259,85 @@ export interface EInvoiceSource {
 const text = (v: string | null | undefined, max: number) => (v && v.trim() ? v.trim().slice(0, max) : null);
 const pinNumber = (pin: string | null) => (pin && /^[1-9][0-9]{5}$/.test(pin) ? ji(Number(pin)) : null);
 
+/**
+ * Audit 4 (28 October 2026): an optional text field within the official minimum and maximum
+ * length (field list, generate-irn page); shorter than the minimum it is sent as null, because
+ * the portal refuses a too-short value but accepts the field left out.
+ */
+export const optionalText = (v: string | null | undefined, min: number, max: number) => {
+  const t = text(v, max);
+  return t && t.length >= min ? t : null;
+};
+
+/** Official field lengths (https://einv-apisandbox.nic.in/version1.03/generate-irn.html, read 28 October 2026). */
+export const EINVOICE_FIELD_LENGTHS = {
+  LglNm: [3, 100],
+  TrdNm: [3, 100],
+  Addr1: [1, 100],
+  Addr2: [3, 100],
+  SellerLoc: [3, 50],
+  BuyerLoc: [3, 100],
+  Em: [6, 100],
+  PrdDesc: [3, 300],
+  Barcde: [3, 30],
+} as const satisfies Record<string, readonly [number, number]>;
+
+/** The official GSTIN pattern of the field list: 2 digits, then 13 of 0–9 and A–Z. */
+export const EINVOICE_GSTIN_RE = /^[0-9]{2}[0-9A-Z]{13}$/;
+
+/**
+ * HSN on an e-invoice (audit 4, 28 October 2026). Goods: 6 or 8 digits. Notification
+ * 78/2020-Central Tax requires 6 digits above ₹5 crore turnover, and only businesses above
+ * ₹5 crore e-invoice, so the e-invoice system blocks 4-digit goods codes. Services (SAC): 4, 6
+ * or 8 digits as the schema says. Never all zeros.
+ */
+export function eInvoiceHsnOk(hsn: string, isService: boolean): boolean {
+  if (/^0+$/.test(hsn)) return false;
+  return isService ? /^[0-9]{4}([0-9]{2}){0,2}$/.test(hsn) : /^[0-9]{6}([0-9]{2})?$/.test(hsn);
+}
+
+const hasTax = (s: EInvoiceSource) => s.lines.some((l) => !D(l.igst).isZero() || !D(l.cgst).isZero() || !D(l.sgst).isZero());
+
+/**
+ * SupTyp (audit 4, 28 October 2026). A supply to a special economic zone is always inter-state
+ * (IGST Act s.7(5)(b); field list validation 32): "SEZWP" with IGST paid, "SEZWOP" without tax
+ * under a letter of undertaking. Every other business invoice is "B2B".
+ */
+export function eInvoiceSupplyType(s: Pick<EInvoiceSource, 'sez' | 'lines'>): 'B2B' | 'SEZWP' | 'SEZWOP' {
+  if (!s.sez) return 'B2B';
+  return hasTax(s as EInvoiceSource) ? 'SEZWP' : 'SEZWOP';
+}
+
 /** Problems that would make the portal refuse the invoice; checked before a file is made. */
 export function eInvoiceProblems(s: EInvoiceSource): string[] {
   const out: string[] = [];
+  const bill = `Bill ${s.number}`;
+  const tooShort = (label: string, field: string, v: string | null | undefined, [min, max]: readonly [number, number]) => {
+    const len = (v ?? '').trim().length;
+    if (len < min) out.push(`${bill}: the ${label} (${field}) must be at least ${min} character${min === 1 ? '' : 's'} (${min} to ${max}); it is ${len ? `"${(v ?? '').trim()}"` : 'empty'}`);
+  };
   const numberProblem = eInvoiceNumberProblem(s.number);
   if (numberProblem) out.push(numberProblem);
+  // GSTINs (audit 4): the seller's is always a real GSTIN; a business or SEZ invoice needs the buyer's too
+  // ("URP" is allowed only for exports, which we do not make).
+  if (!EINVOICE_GSTIN_RE.test(s.seller.gstin ?? '')) out.push(`${bill}: the seller GSTIN (Gstin) "${s.seller.gstin ?? ''}" is not a valid GSTIN`);
+  if (!(s.buyer.gstin ?? '').trim()) out.push(`${bill}: the buyer GSTIN (Gstin) is missing; a business invoice needs the buyer's GSTIN`);
+  else if (!EINVOICE_GSTIN_RE.test(s.buyer.gstin)) out.push(`${bill}: the buyer GSTIN (Gstin) "${s.buyer.gstin}" is not a valid GSTIN`);
+  tooShort('seller legal name', 'LglNm', s.seller.legalName, EINVOICE_FIELD_LENGTHS.LglNm);
   if (!s.seller.addr1?.trim()) out.push('The seller address (GST registration or store) is missing');
-  if ((s.seller.place ?? '').trim().length < 3) out.push('The seller town or city is missing');
+  if ((s.seller.place ?? '').trim().length < 3) out.push(`${bill}: the seller town or city (Loc) is missing or shorter than 3 letters`);
   if (!pinNumber(s.seller.pincode)) out.push('The seller PIN code is missing');
-  if ((s.buyer.legalName ?? '').trim().length < 3) out.push('The buyer name must be at least 3 letters');
+  if ((s.buyer.legalName ?? '').trim().length < 3) out.push(`${bill}: the buyer name (LglNm) must be at least 3 letters`);
   if (!s.buyer.addr1?.trim()) out.push('The buyer address is missing');
-  if ((s.buyer.place ?? '').trim().length < 3) out.push('The buyer town or city is missing');
-  if (s.buyer.gstin.slice(0, 2) !== s.buyer.stateCode) out.push('The buyer state must match the first two digits of the buyer GSTIN');
+  if ((s.buyer.place ?? '').trim().length < 3) out.push(`${bill}: the buyer town or city (Loc) is missing or shorter than 3 letters`);
+  if (s.buyer.gstin && s.buyer.gstin.slice(0, 2) !== s.buyer.stateCode) out.push('The buyer state must match the first two digits of the buyer GSTIN');
   if (s.lines.length === 0) out.push('There are no lines');
   if (s.lines.length > EINVOICE_MAX_LINES) out.push(`An e-invoice takes at most ${EINVOICE_MAX_LINES} lines`);
   s.lines.forEach((l, i) => {
-    if (!/^[0-9]{4}([0-9]{2}){0,2}$/.test(l.hsn) && !(l.isService && /^[0-9]{4,6}$/.test(l.hsn))) out.push(`Line ${i + 1}: the HSN code must be 4, 6 or 8 digits`);
+    if (!eInvoiceHsnOk(l.hsn, l.isService)) out.push(l.isService ? `${bill}, line ${i + 1}: the service code (SAC) must be 4, 6 or 8 digits` : `${bill}, line ${i + 1}: the HSN code "${l.hsn}" must be 6 or 8 digits for goods on an e-invoice (the portal blocks 4-digit codes)`);
+    tooShort(`product description on line ${i + 1}`, 'PrdDesc', l.description, EINVOICE_FIELD_LENGTHS.PrdDesc);
+    // SEZ (IGST Act s.7(5)(b); field list item validation 9): IGST only, even inside the seller's own state.
+    if (s.sez && (!D(l.cgst).isZero() || !D(l.sgst).isZero())) out.push(`${bill}, line ${i + 1}: a supply to an SEZ is always inter-state, so it must carry IGST, not CGST and SGST; correct the bill`);
   });
   if (D(s.roundOff).abs().gt(99.99)) out.push('The rounding is more than ₹99.99');
   return out;
@@ -295,7 +361,7 @@ export function buildEInvoiceJson(s: EInvoiceSource): Record<string, unknown> {
       PrdDesc: text(l.description, 300),
       IsServc: l.isService ? 'Y' : 'N',
       HsnCd: l.hsn,
-      Barcde: text(l.barcode, 30),
+      Barcde: optionalText(l.barcode, ...EINVOICE_FIELD_LENGTHS.Barcde),
       Qty: jq(qty),
       FreeQty: ji(0),
       Unit: l.isService ? null : l.unit,
@@ -322,19 +388,22 @@ export function buildEInvoiceJson(s: EInvoiceSource): Record<string, unknown> {
   const roundOff = roundMoney(s.typ === 'INV' ? D(s.roundOff) : D(s.roundOff).neg());
   return {
     Version: EINVOICE_SCHEMA_VERSION,
-    TranDtls: { TaxSch: 'GST', SupTyp: 'B2B', RegRev: s.reverseCharge ? 'Y' : 'N', EcmGstin: null, IgstOnIntra: 'N' },
+    // Audit 4 (28 October 2026): SEZ is SEZWP/SEZWOP. IgstOnIntra stays "N" also for an SEZ in the seller's own
+    // state: the field list treats SEZ as always inter-state (validation 32), while "Y" is for an intra-state
+    // supply charged to IGST and then demands reverse charge (validations 29 to 31).
+    TranDtls: { TaxSch: 'GST', SupTyp: eInvoiceSupplyType(s), RegRev: s.reverseCharge ? 'Y' : 'N', EcmGstin: null, IgstOnIntra: 'N' },
     DocDtls: { Typ: s.typ, No: s.number, Dt: toPortalDate(s.date) },
     SellerDtls: {
       Gstin: s.seller.gstin,
       LglNm: text(s.seller.legalName, 100),
-      TrdNm: text(s.seller.tradeName, 100),
+      TrdNm: optionalText(s.seller.tradeName, ...EINVOICE_FIELD_LENGTHS.TrdNm),
       Addr1: text(s.seller.addr1, 100),
-      Addr2: text(s.seller.addr2, 100),
+      Addr2: optionalText(s.seller.addr2, ...EINVOICE_FIELD_LENGTHS.Addr2),
       Loc: text(s.seller.place, 50),
       Pin: pinNumber(s.seller.pincode),
       Stcd: s.seller.stateCode,
       Ph: s.seller.phone && /^[0-9]{6,12}$/.test(s.seller.phone) ? s.seller.phone : null,
-      Em: text(s.seller.email, 100),
+      Em: optionalText(s.seller.email, ...EINVOICE_FIELD_LENGTHS.Em),
     },
     BuyerDtls: {
       Gstin: s.buyer.gstin,
@@ -342,12 +411,12 @@ export function buildEInvoiceJson(s: EInvoiceSource): Record<string, unknown> {
       TrdNm: null,
       Pos: s.buyer.placeOfSupply,
       Addr1: text(s.buyer.addr1, 100),
-      Addr2: text(s.buyer.addr2, 100),
+      Addr2: optionalText(s.buyer.addr2, ...EINVOICE_FIELD_LENGTHS.Addr2),
       Loc: text(s.buyer.place, 100),
       Pin: pinNumber(s.buyer.pincode),
       Stcd: s.buyer.stateCode,
       Ph: s.buyer.phone && /^[0-9]{6,12}$/.test(s.buyer.phone) ? s.buyer.phone : null,
-      Em: text(s.buyer.email, 100),
+      Em: optionalText(s.buyer.email, ...EINVOICE_FIELD_LENGTHS.Em),
     },
     DispDtls: null,
     ShipDtls: null,
@@ -387,6 +456,18 @@ export interface EWaySource {
   transporterId?: string | null;
   transporterName?: string | null;
   vehicleNo?: string | null;
+}
+
+/**
+ * Audit 4 (28 October 2026): Part B is the vehicle. With only Part A (a transporter id, no
+ * vehicle number) the portal gives a number but the e-way bill is not valid for movement and
+ * has no validity yet; validity starts when Part B is filled in.
+ */
+export const EWAY_PART_B_MISSING = 'Part B (vehicle) not yet filled: the goods cannot move on it';
+
+/** True when the e-way bill has no vehicle number yet (Part A only). */
+export function eWayPartBMissing(vehicleNo: string | null | undefined): boolean {
+  return !(vehicleNo ?? '').replace(/[\s-]/g, '');
 }
 
 /** Problems that stop the e-way bill file being made. */
@@ -580,6 +661,10 @@ export function signedPayload(jwt: string | null | undefined): Record<string, un
 export interface EInvoiceResult {
   documentNumber: string | null;
   documentType: string | null;
+  /** Audit 4 (28 October 2026): with type and date, so the answer is matched to the right invoice. */
+  sellerGstin: string | null;
+  /** The invoice date as YYYY-MM-DD (Indian date). */
+  documentDate: string | null;
   irn: string | null;
   ackNumber: string | null;
   ackDate: Date | null;
@@ -588,6 +673,12 @@ export interface EInvoiceResult {
   outcome: 'registered' | 'cancelled' | 'failed';
   error: string | null;
   cancelledAt: Date | null;
+}
+
+/** A portal date ("18/10/2026" or "2026-10-18") as YYYY-MM-DD; null when it is not a date. */
+function portalDay(v: string | null): string | null {
+  const d = parsePortalDateTime(v);
+  return d ? new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10) : null;
 }
 
 /** Reads the e-invoice portal's result file (JSON or CSV): generated IRNs, cancellations and errors. */
@@ -607,7 +698,9 @@ export function parseEInvoiceResults(fileText: string): EInvoiceResult[] {
     const cancelled = !failed && (status === 'CNL' || status === 'CANCELLED' || !!cancelledAt);
     return {
       documentNumber,
-      documentType: pick(r, ['documenttype', 'doctyp', 'docdtlstyp', 'typ']) ?? fromClaims('doctyp'),
+      documentType: (pick(r, ['documenttype', 'doctyp', 'docdtlstyp', 'typ']) ?? fromClaims('doctyp'))?.toUpperCase() ?? null,
+      sellerGstin: (pick(r, ['sellergstin', 'sellerdtlsgstin', 'suppliergstin']) ?? fromClaims('sellergstin'))?.toUpperCase() ?? null,
+      documentDate: portalDay(pick(r, ['documentdate', 'docdate', 'docdtlsdt', 'docdt']) ?? fromClaims('docdt')),
       irn,
       ackNumber: pick(r, ['ackno', 'acknowledgementno', 'acknumber']),
       ackDate: parsePortalDateTime(pick(r, ['ackdt', 'ackdate', 'acknowledgementdate'])),

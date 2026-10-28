@@ -21,6 +21,8 @@ import {
   type EWayExportInput,
   type EWayGeneratedInput,
   eWayLimitFor,
+  EWAY_PART_B_MISSING,
+  eWayPartBMissing,
   type EWayQuery,
   eWayRequired,
   eWaySourceProblems,
@@ -39,7 +41,7 @@ import { ensureGstSettings } from '../gst/gst-core.service.js';
 import { TransferGstService } from '../inventory/transfer-gst.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { istDateTime } from './einvoices.service.js';
-import { type EWayDocument, eWayDocumentOf, isoDay } from './portal-sources.js';
+import { type EWayDocument, eWayDocumentOf } from './portal-sources.js';
 
 /** "About to expire": inside the window in which the transporter may extend it (8 hours, official FAQ). */
 const EXPIRING_HOURS = 8;
@@ -127,6 +129,20 @@ export class EWayBillsService {
 
   async update(id: string, input: EWayUpdateInput, actor: Actor, user: CurrentUser) {
     const row = await this.getRow(id, user);
+    // Audit 4 (28 October 2026): a bill made with Part A only gets its vehicle (Part B) later; validity starts then.
+    if (row.status === 'generated' && eWayPartBMissing(row.vehicleNo)) {
+      const vehicleNo = input.vehicleNo || null;
+      if (!vehicleNo) throw new BadRequestException('Enter the vehicle number (Part B), as filled in on the portal');
+      if (row.distanceKm === null) throw new BadRequestException('Enter the distance first');
+      const from = new Date();
+      await this.prisma.$transaction(async (tx) => {
+        const done = await tx.eWayBill.updateMany({ where: { id, status: 'generated', vehicleNo: row.vehicleNo }, data: { vehicleNo, validUntil: eWayValidUntil(from, row.distanceKm!), updatedById: actor.userId } });
+        if (done.count !== 1) throw new BadRequestException('This e-way bill was changed by someone else; open it again');
+        const after = await tx.eWayBill.findUniqueOrThrow({ where: { id } });
+        await this.audit.recordUpdate(tx, actor, 'e_way_bill', id, row, after);
+      });
+      return this.one(id, user);
+    }
     if (row.status !== 'draft') throw new BadRequestException('Only a draft can be changed');
     const data: Prisma.EWayBillUpdateInput = {
       ...(input.distanceKm !== undefined ? { distanceKm: input.distanceKm } : {}),
@@ -190,12 +206,15 @@ export class EWayBillsService {
   private async generate(tx: Prisma.TransactionClient, row: EWayBill, number: string, generatedAt: Date, validUntil: Date | null, actor: Actor, how: string) {
     if (row.status !== 'draft') throw new BadRequestException(`${row.documentNumber}: the e-way bill is already ${row.status}`);
     if (row.distanceKm === null) throw new BadRequestException(`${row.documentNumber}: enter the distance first`);
-    const until = validUntil ?? eWayValidUntil(generatedAt, row.distanceKm);
+    // Audit 4 (28 October 2026): with Part A only (no vehicle) the bill is not valid for movement and has no validity yet;
+    // a validity the portal gave (typed in or read from its file) means Part B was filled there.
+    const partBMissing = !validUntil && eWayPartBMissing(row.vehicleNo);
+    const until = validUntil ?? (partBMissing ? null : eWayValidUntil(generatedAt, row.distanceKm));
     const clash = await tx.eWayBill.findFirst({ where: { companyId: row.companyId, number, id: { not: row.id } } });
     if (clash) throw new BadRequestException(`E-way bill ${number} is already recorded for ${clash.documentNumber}`);
     const done = await tx.eWayBill.updateMany({ where: { id: row.id, status: 'draft' }, data: { status: 'generated', number, generatedAt, validUntil: until, error: null, updatedById: actor.userId } });
     if (done.count !== 1) throw new BadRequestException('This e-way bill was changed by someone else; open it again');
-    await this.audit.record(tx, actor, { action: 'update', entityType: 'e_way_bill', entityId: row.id, changes: { document: row.documentNumber, status: { old: 'draft', new: 'generated' }, number, generatedAt: generatedAt.toISOString(), validUntil: until.toISOString(), validityDays: eWayValidityDays(row.distanceKm), by: how } });
+    await this.audit.record(tx, actor, { action: 'update', entityType: 'e_way_bill', entityId: row.id, changes: { document: row.documentNumber, status: { old: 'draft', new: 'generated' }, number, generatedAt: generatedAt.toISOString(), validUntil: until ? until.toISOString() : null, validityDays: until ? eWayValidityDays(row.distanceKm) : null, partB: partBMissing ? EWAY_PART_B_MISSING : 'filled', by: how } });
   }
 
   /** Reads e-way bill numbers from a file saved from the portal, matched by document number. */
@@ -311,6 +330,9 @@ export class EWayBillsService {
       number: r.number,
       generatedAt: r.generatedAt,
       validUntil: r.validUntil,
+      // Audit 4 (28 October 2026): Part A only is never shown as valid for movement.
+      partBMissing: r.status === 'generated' ? !r.validUntil : eWayPartBMissing(r.vehicleNo),
+      notice: (r.status === 'generated' ? !r.validUntil : r.status === 'draft' && eWayPartBMissing(r.vehicleNo)) ? EWAY_PART_B_MISSING : null,
       expiring: r.status === 'generated' && !!r.validUntil && r.validUntil.getTime() <= soon,
       canCancel: r.status === 'draft' || (r.status === 'generated' && !!r.generatedAt && Date.now() - r.generatedAt.getTime() <= EWAY_CANCEL_HOURS * 3_600_000),
       error: r.error,
@@ -354,6 +376,8 @@ export class EWayBillsService {
   async printDetails(documentType: string, documentId: string): Promise<[string, string][]> {
     const row = await this.prisma.eWayBill.findUnique({ where: { documentType_documentId: { documentType, documentId } } });
     if (!row || !row.number || (row.status !== 'generated' && row.status !== 'expired')) return [];
+    // Audit 4 (28 October 2026): never printed as valid while Part B (vehicle) is missing.
+    if (!row.validUntil) return [['E-way bill', row.number], ['E-way bill', EWAY_PART_B_MISSING]];
     return [
       ['E-way bill', row.number],
       ['E-way bill valid until', istDateTime(row.validUntil)],

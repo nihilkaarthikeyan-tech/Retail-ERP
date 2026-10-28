@@ -20,13 +20,30 @@ interface PrintDocumentProps {
   onLogoSettled?: () => void;
 }
 
+/** Audit 4 (rule 48(1)): a tax invoice prints once per copy, each with its marking; other documents once. */
 export function PrintDocument({ doc, logoUrl, onLogoSettled }: PrintDocumentProps) {
+  const copies = doc.copies?.length ? doc.copies : [null];
+  return (
+    <>
+      {copies.map((copy, i) => (
+        <PrintSheet key={copy ?? "only"} doc={doc} logoUrl={logoUrl} onLogoSettled={i === 0 ? onLogoSettled : undefined} copy={copy} last={i === copies.length - 1} />
+      ))}
+    </>
+  );
+}
+
+function PrintSheet({ doc, logoUrl, onLogoSettled, copy, last }: PrintDocumentProps & { copy: string | null; last: boolean }) {
   const lh = doc.letterhead;
   const paper = doc.paper === "A5" ? "a5" : "a4";
   // The bottom line is in bold: the total, the amount paid, or the closing balance.
   const grand = doc.totals.findIndex(([k]) => GRAND_TOTALS.includes(k));
   return (
-    <article className={`doc-sheet doc-${paper}`} aria-label={`${doc.title}${doc.number ? ` ${doc.number}` : ""}`}>
+    <article className={`doc-sheet doc-${paper}`} aria-label={`${doc.title}${doc.number ? ` ${doc.number}` : ""}${copy ? `, ${copy.toLowerCase()}` : ""}`} style={last ? undefined : { breakAfter: "page" }}>
+      {copy ? (
+        <div className="doc-copy" style={{ textAlign: "right", fontWeight: 700, fontSize: "9pt", letterSpacing: "0.05em" }}>
+          {copy}
+        </div>
+      ) : null}
       {doc.mark ? (
         <div className={`doc-mark doc-mark-${doc.mark.toLowerCase()}`} role="note" aria-label={`Marked ${doc.mark}`}>
           {doc.mark}
@@ -65,7 +82,7 @@ export function PrintDocument({ doc, logoUrl, onLogoSettled }: PrintDocumentProp
       </div>
 
       {doc.notice ? (
-        <p className="doc-notice" role="note" aria-label="Notice" style={{ border: "2px solid currentColor", padding: "2mm 3mm", fontWeight: 700 }}>
+        <p className="doc-notice" role="note" aria-label="Notice" style={{ border: "2px solid currentColor", padding: "2mm 3mm", fontWeight: 700, whiteSpace: "pre-line" }}>
           {doc.notice}
         </p>
       ) : null}

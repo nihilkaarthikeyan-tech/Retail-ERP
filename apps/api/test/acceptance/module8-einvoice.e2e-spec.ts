@@ -159,7 +159,7 @@ describe('8.10 e-invoice and e-way bill files', () => {
   });
 
   it('a credit note against the business invoice is an e-invoice too (CRN with the original invoice)', async () => {
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: bill.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: bill.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: bill.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: bill.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
     const ret = (await T(owner.post('/pos/bills')).send(back).expect(201)).body.return;
     await prisma.posBill.update({ where: { id: ret.id }, data: { number: 'R1-2627-000001' } });
     const list = (await owner.get('/gst/e-invoices?status=waiting').expect(200)).body;
@@ -180,7 +180,7 @@ describe('8.10 e-invoice and e-way bill files', () => {
   it('a refused registration shows the portal’s error and can be queued again', async () => {
     const second = await businessInvoice(shirt.id, '2', '2100', 2);
     await owner.get('/gst/e-invoices').expect(200);
-    const csv = `Seller GSTIN,Document No.,Error Code,Error Description\r\n33AAACR1234A1ZV,${second.number},2172,Invalid buyer GSTIN\r\n`;
+    const csv = `Seller GSTIN,Document No.,Error Code,Error Description\r\n33AAACR1234A1ZA,${second.number},2172,Invalid buyer GSTIN\r\n`;
     const summary = (await owner.post('/gst/e-invoices/import').attach('file', Buffer.from(csv), 'errors.csv').expect(200)).body;
     expect(summary).toMatchObject({ failed: 1 });
     const row = await prisma.eInvoice.findFirstOrThrow({ where: { documentId: second.id } });

@@ -32,6 +32,7 @@ import type { Item, Prisma, StockDocument, StockLedgerEntry, StockLocation } fro
 import { ItemsService } from '../items/items.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { assertModuleOn } from '../modules/module-map.js';
+import { hasLiveIrn, LIVE_IRN_MESSAGE } from '../common/live-irn.js';
 import { lockRows, lockStillAt } from '../common/row-lock.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -570,6 +571,7 @@ export class StockDocumentsService {
     const after = await this.prisma.$transaction(
       async (tx) => {
         await lockStillAt(tx, 'StockDocument', id, doc.status, 'This document was just changed; open it again');
+        if (await hasLiveIrn(tx, 'stock_document', id)) throw new BadRequestException(LIVE_IRN_MESSAGE);
         const lineFor = new Map(doc.lines.map((l) => [l.id, l.id]));
         await this.engine.reverseDocument(tx, id, (e) => lineFor.get(e.documentLineId) ?? e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, doc) });
         await this.applySerials(tx, doc, 'cancel', actor);

@@ -412,6 +412,8 @@ export interface CustomerDto {
   gstin: string | null;
   /** Plan 15: what the GST network said, when last checked. */
   gstinCheck?: SavedGstinCheck | null;
+  /** Audit 4: regular, sez or reverse_charge for a business buyer; null = from the GSTIN. */
+  taxSituation?: string | null;
   stateCode: string | null;
   priceList: PartyRef | null;
   paymentTerms: PartyRef | null;

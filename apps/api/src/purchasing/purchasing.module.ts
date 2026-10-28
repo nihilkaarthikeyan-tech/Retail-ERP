@@ -29,6 +29,6 @@ import { SupplierBillsService } from './supplier-bills.service.js';
   imports: [CompanyModule, NumberingModule, FinancialYearsModule, ItemsModule, InventoryModule, PartiesModule, PricingModule, CatalogueModule, GstCoreModule],
   controllers: [PurchasingController, ConsignmentController, GstInwardController],
   providers: [PurchaseCommon, PurchasePostings, PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, LandedChargesService, ReorderService, PurchaseReportsService, PurchaseSettingsService, ConsignmentStock, ConsignmentService, GstInwardService],
-  exports: [PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, PurchasePostings],
+  exports: [GstInwardService, PurchaseOrdersService, GoodsReceiptsService, SupplierBillsService, PurchasePostings],
 })
 export class PurchasingModule {}

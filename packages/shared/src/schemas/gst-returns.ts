@@ -19,3 +19,17 @@ export const gstReturnQuerySchema = z.object({
   placeOfSupply: z.string().refine(isStateCode, 'Unknown GST state code').optional(),
 });
 export type GstReturnQuery = z.infer<typeof gstReturnQuerySchema>;
+
+/**
+ * Audit 4 (T15): a return marked as filed on the portal. Bills that arrive
+ * later for that month go into the next open month's GSTR-1. A quarterly
+ * filer marks the quarter's GSTR-1 (2026-Q2) or the IFF of its first two
+ * months (2026-04, 2026-05).
+ */
+export const gstFiledPeriodSchema = z.object({
+  gstRegistrationId: z.string().uuid(),
+  period: z.string().refine((p) => gstReturnPeriod(p) !== null, 'Choose a month (2026-09) or a quarter (2026-Q2)'),
+  returnType: z.enum(['gstr1', 'iff'], { message: 'Choose GSTR-1 or IFF' }),
+  filedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the filing date as YYYY-MM-DD'),
+});
+export type GstFiledPeriodInput = z.infer<typeof gstFiledPeriodSchema>;

@@ -27,6 +27,8 @@ export const gstSettingsSchema = z
     /** Plan 15: check GSTINs with the GST network, and again after this many days. */
     gstinChecks: z.boolean(),
     gstinRecheckDays: z.number().int().min(30, 'At least 30 days').max(365, 'At most 365 days'),
+    /** Audit 4 T6: SEZ supplies without tax under LUT. */
+    sezUnderLut: z.boolean(),
   })
   .partial();
 export type GstSettingsInput = z.infer<typeof gstSettingsSchema>;

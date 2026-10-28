@@ -101,7 +101,7 @@ function sale(lines: Record<string, unknown>[], payments: Record<string, unknown
 
 function returnOf(bill: { id: string; lines: { id: string; item: { id: string } }[] }, qty: string, payments: Record<string, unknown>[], extra: Record<string, unknown> = {}) {
   const l = bill.lines[0];
-  return { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: bill.id, lines: [{ lineNo: 1, itemId: l.item.id, quantity: qty, returnOfLineId: l.id }] }, payments, ...extra };
+  return { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: bill.id, lines: [{ lineNo: 1, itemId: l.item.id, quantity: qty, returnOfLineId: l.id }] }, payments, ...extra };
 }
 
 const cash = (amount: string) => [{ paymentMethodId: pm.CASH, amount }];

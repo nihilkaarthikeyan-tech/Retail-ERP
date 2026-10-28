@@ -10,11 +10,13 @@ import { useEffect } from "react";
 import { addDays } from "shared";
 import { formatDate } from "@/lib/format";
 import { dateTimeIn, nonZero, qty, rupees } from "@/lib/till/format";
-import type { PrintableReceipt } from "@/lib/till/receipt";
+import { type PrintableReceipt, quantityWithUnit, RETURN_NOTE_LINE, receiptTaxView } from "@/lib/till/receipt";
 
 export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
   const r = receipt;
-  const igst = r.gstTable.some((g) => nonZero(g.igst));
+  // Audit 4 (28 October 2026): tax per rate always on a tax invoice or credit note, reverse charge, SEZ endorsement, return note.
+  const view = receiptTaxView(r);
+  const igst = view.igst;
   // Plan 08 (CBIC invoice rules): title, seller and buyer GSTIN, place of supply, original bill, declaration.
   const gst = r.gst;
   const sellerGstin = gst?.sellerGstin ?? r.company.gstin;
@@ -28,8 +30,10 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         {r.store.phone ? <div>Phone: {r.store.phone}</div> : null}
       </header>
       {r.duplicate ? <p className="till-receipt-mark">DUPLICATE</p> : null}
-      <p className="till-receipt-mark">{r.title ? r.title.toUpperCase() : gst ? gst.title.toUpperCase() : r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
+      <p className="till-receipt-mark">{r.title ? r.title.toUpperCase() : r.documentTitle ? r.documentTitle.toUpperCase() : gst ? gst.title.toUpperCase() : r.kind === "return" ? "RETURN / CREDIT NOTE" : "BILL"}</p>
       {gst?.declaration ? <p className="till-receipt-small">{gst.declaration}</p> : null}
+      {view.endorsement ? <p className="till-receipt-small" data-testid="receipt-sez">{view.endorsement}</p> : null}
+      {view.returnNote ? <p className="till-receipt-small">{RETURN_NOTE_LINE}</p> : null}
       <div className="till-receipt-meta">
         <div>No: {r.number}</div>
         <div>{dateTimeIn(typeof r.soldAt === "string" ? r.soldAt : new Date(r.soldAt).toISOString())}</div>
@@ -60,7 +64,8 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
             Place of supply: {gst.placeOfSupply.name} ({gst.placeOfSupply.code})
           </div>
         ) : null}
-        {gst && gst.invoiceKind === "business" ? <div>Reverse charge: {gst.reverseCharge ? "Yes" : "No"}</div> : null}
+        {/* Rule 46(p): on every tax invoice, not only business ones. */}
+        {view.reverseCharge ? <div>Tax payable on reverse charge: {view.reverseCharge}</div> : null}
       </div>
       <table className="till-receipt-lines">
         <thead>
@@ -83,7 +88,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
                 {l.salesStaff ? <div className="till-receipt-small">Sold by {l.salesStaff}</div> : null}
                 {l.serials.length ? <div className="till-receipt-small">S/N {l.serials.join(", ")}</div> : null}
               </td>
-              <td className="num">{qty(l.quantity)}</td>
+              <td className="num">{quantityWithUnit(qty(l.quantity), l.unit)}</td>
               <td className="num">{rupees(l.price)}</td>
               <td className="num">{rupees(l.amount)}</td>
             </tr>
@@ -106,6 +111,12 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
             <dd>{rupees(r.totals.rounding)}</dd>
           </>
         ) : null}
+        {view.taxed && !view.rows.length ? (
+          <>
+            <dt>Taxable value</dt>
+            <dd>{rupees(r.totals.taxable)}</dd>
+          </>
+        ) : null}
         <dt className="till-receipt-total">Total</dt>
         <dd className="till-receipt-total">{rupees(r.totals.total)}</dd>
         {r.payments.map((p, i) => (
@@ -118,7 +129,16 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
           </>
         ) : null}
       </dl>
-      {r.gstTable.length ? (
+      {view.short ? (
+        <div className="till-receipt-meta" data-testid="receipt-gst-short">
+          {view.rows.map((g) => (
+            <div key={g.rate}>
+              GST {g.rate}%: taxable {rupees(g.taxable)}, {nonZero(g.igst) ? `IGST ${rupees(g.igst)}` : `CGST ${rupees(g.cgst)}, SGST ${rupees(g.sgst)}`}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {view.table ? (
         <table className="till-receipt-gst">
           <thead>
             <tr>
@@ -133,7 +153,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
             </tr>
           </thead>
           <tbody>
-            {r.gstTable.map((g) => (
+            {view.rows.map((g) => (
               <tr key={g.rate}>
                 <td>{g.rate}%</td>
                 <td className="num">{rupees(g.taxable)}</td>

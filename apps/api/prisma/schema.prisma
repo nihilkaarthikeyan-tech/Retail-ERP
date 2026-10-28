@@ -2182,6 +2182,12 @@ model PosBill {
   gstProvisional     Boolean       @default(false)
   /// Plan 08: consumer, business (B2B tax invoice) or bill_of_supply (composition).
   invoiceKind        String        @default("consumer")
+  /// Audit 4 T9/T10: tax_invoice, bill_of_supply, invoice_cum_bill_of_supply, credit_note or return_note; null on older bills (worked out from kind and invoiceKind).
+  documentKind       String?
+  /// Audit 4 T15: the GSTR-1 month (YYYY-MM) the bill is reported in; its own month unless that month was already filed.
+  gstPeriod          String?
+  /// Audit 4: the buyer's tax situation when the bill was made (regular, unregistered, sez, reverse_charge).
+  buyerSituation     String?
   buyerGstin         String?
   buyerName          String?
   buyerAddress       String?
@@ -3000,6 +3006,8 @@ model PosDelivery {
   /// pending, delivered or cancelled.
   status        String    @default("pending")
   chargeAmount  Decimal   @default(0) @db.Decimal(16, 2)
+  /// Audit 4 T2: delivered to another person on the buyer's direction (the buyer's state is the place of supply).
+  forOther      Boolean   @default(false)
   deliveredAt   DateTime?
   deliveredById String?   @db.Uuid
   remarks       String?
@@ -3226,6 +3234,8 @@ model GstSettings {
   /// Plan 15: check GSTINs with the GST network, and again after this many days.
   gstinChecks            Boolean   @default(true)
   gstinRecheckDays       Int       @default(90)
+  /// Audit 4 T6: supplies to SEZ units go without tax under a letter of undertaking (LUT); off = with IGST.
+  sezUnderLut            Boolean   @default(false)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3557,3 +3567,24 @@ model GstinCheck {
   @@index([companyId, gstin, createdAt])
   @@index([companyId, createdAt])
 }
+
+/// Audit 4 T15 (owner, 28 October 2026): a GSTR-1 (or IFF) month the shop marked as filed on the portal.
+/// Bills that arrive later for a filed month are reported in the next open month.
+model GstFiledPeriod {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId        String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id               String   @id @default(uuid()) @db.Uuid
+  gstRegistrationId String  @db.Uuid
+  /// YYYY-MM: a month (IFF or monthly GSTR-1) or the last month of a quarter (quarterly GSTR-1).
+  period           String
+  /// gstr1 or iff.
+  returnType       String
+  filedOn          DateTime @db.Date
+
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  @@unique([gstRegistrationId, period, returnType])
+  @@index([companyId])
+}
+

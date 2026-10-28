@@ -4,6 +4,7 @@ import {
   bandUnitPrice,
   creditNoteDeadline,
   gstDocumentTitle,
+  saleDocumentKind,
   gstinCheckCharacter,
   gstinProblem,
   hsnForPrint,
@@ -97,7 +98,7 @@ describe('rates by date and price band (G2)', () => {
 describe('place of supply and tax situation (G1, G3)', () => {
   const regular = { sellerState: '33', scheme: 'regular' };
   it('walk-in: the store state, CGST + SGST', () => {
-    expect(resolveSupply(regular)).toEqual({ invoiceKind: 'consumer', situation: 'unregistered', placeOfSupply: '33', interState: false, noTax: false });
+    expect(resolveSupply(regular)).toEqual({ invoiceKind: 'consumer', situation: 'unregistered', placeOfSupply: '33', interState: false, noTax: false, problem: null });
   });
   it('a buyer GSTIN of another state: business invoice with IGST', () => {
     expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5' })).toMatchObject({ invoiceKind: 'business', placeOfSupply: '29', interState: true });
@@ -107,13 +108,21 @@ describe('place of supply and tax situation (G1, G3)', () => {
     expect(resolveSupply({ ...regular, deliveryState: '32' })).toMatchObject({ invoiceKind: 'consumer', placeOfSupply: '32', interState: true });
     expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5', deliveryState: '33' })).toMatchObject({ placeOfSupply: '33', interState: false });
   });
-  it('an unregistered buyer’s state on the bill is the place of supply', () => {
-    expect(resolveSupply({ ...regular, buyerState: '29' })).toMatchObject({ placeOfSupply: '29', interState: true });
+  it('audit 4 T1: an unregistered buyer at the counter is taxed by the shop’s state, whatever state is written on the bill (IGST Act s.10(1)(ca) is not yet in force)', () => {
+    expect(resolveSupply({ ...regular, buyerState: '29' })).toMatchObject({ placeOfSupply: '33', interState: false });
+    // Delivered to that state: the movement ends there (s.10(1)(a)).
+    expect(resolveSupply({ ...regular, buyerState: '29', deliveryState: '29' })).toMatchObject({ placeOfSupply: '29', interState: true });
   });
-  it('SEZ is always IGST; exempt pays no tax; composition is a bill of supply', () => {
-    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG', taxSituation: 'sez' })).toMatchObject({ interState: true, situation: 'sez' });
-    expect(resolveSupply({ ...regular, taxSituation: 'exempt' })).toMatchObject({ noTax: true });
-    expect(resolveSupply({ ...regular, scheme: 'composition', buyerGstin: '29AABCK1234A1Z5' })).toMatchObject({ invoiceKind: 'bill_of_supply', noTax: true });
+  it('audit 4 T2: delivered to someone else on a registered buyer’s direction: the buyer’s own state (s.10(1)(b))', () => {
+    expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5', deliveryState: '33', deliveredToOther: true })).toMatchObject({ placeOfSupply: '29', interState: true });
+    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG', deliveryState: '29', deliveredToOther: true })).toMatchObject({ placeOfSupply: '33', interState: false });
+  });
+  it('SEZ is always inter-state, with IGST or under LUT without tax (T6); an "exempt buyer" pays tax (T5); composition: a bill of supply, never to another state (T3)', () => {
+    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG', taxSituation: 'sez' })).toMatchObject({ interState: true, situation: 'sez', noTax: false });
+    expect(resolveSupply({ ...regular, buyerGstin: '33AABCK1234A1ZG', taxSituation: 'sez', sezUnderLut: true })).toMatchObject({ interState: true, noTax: true });
+    expect(resolveSupply({ ...regular, taxSituation: 'exempt' })).toMatchObject({ noTax: false });
+    expect(resolveSupply({ ...regular, scheme: 'composition' })).toMatchObject({ invoiceKind: 'bill_of_supply', noTax: true, problem: null });
+    expect(resolveSupply({ ...regular, scheme: 'composition', buyerGstin: '29AABCK1234A1Z5' }).problem).toMatch(/cannot sell to another state/);
     expect(resolveSupply({ ...regular, buyerGstin: '29AABCK1234A1Z5', taxSituation: 'unregistered' })).toMatchObject({ invoiceKind: 'consumer', placeOfSupply: '33' });
     expect(taxSituationOf('29AABCK1234A1Z5', null)).toBe('regular');
     expect(taxSituationOf(null, undefined)).toBe('unregistered');
@@ -153,6 +162,8 @@ describe('consumer details, credit notes and printing (G5, G6)', () => {
     expect(gstDocumentTitle('sale', 'consumer')).toBe('Tax invoice');
     expect(gstDocumentTitle('sale', 'bill_of_supply')).toBe('Bill of supply');
     expect(gstDocumentTitle('return', 'business')).toBe('Credit note');
+    expect(gstDocumentTitle('return', 'consumer', 'return_note')).toBe('Return note');
+    expect(gstDocumentTitle('sale', 'consumer', 'invoice_cum_bill_of_supply')).toBe('Invoice-cum-bill of supply');
     expect(hsnForPrint('62052000', 4)).toBe('6205');
     expect(hsnForPrint('62052000', 6)).toBe('620520');
     expect(hsnForPrint('6205', 8)).toBe('6205');
@@ -174,5 +185,15 @@ describe('GST invoice numbers (rule 46(b))', () => {
     expect(tillInvoicePrefixCandidates('MAIN', 'T1')[0]).toBe('MAT1');
     expect(tillInvoicePrefixCandidates('ANNA', 'T2')[0]).toBe('ANT2');
     expect(tillInvoicePrefixCandidates('MAIN', 'COUNTR').every((p) => p.length <= 4)).toBe(true);
+  });
+});
+
+describe('audit 4 T10: what a sale is called (CGST Act s.31(3)(c), rule 46A)', () => {
+  it('all exempt: a bill of supply; taxable and exempt to a walk-in: an invoice-cum-bill of supply; to a business buyer: refused', () => {
+    expect(saleDocumentKind('consumer', ['5', '18'])).toEqual({ kind: 'tax_invoice', problem: null });
+    expect(saleDocumentKind('consumer', ['0', '0'])).toEqual({ kind: 'bill_of_supply', problem: null });
+    expect(saleDocumentKind('consumer', ['0', '18'])).toEqual({ kind: 'invoice_cum_bill_of_supply', problem: null });
+    expect(saleDocumentKind('business', ['0', '18']).problem).toMatch(/separate bill/);
+    expect(saleDocumentKind('bill_of_supply', ['5'])).toEqual({ kind: 'bill_of_supply', problem: null });
   });
 });

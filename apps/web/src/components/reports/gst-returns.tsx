@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { INDIAN_STATE_OPTIONS, type PermissionKey } from "shared";
-import { Alert, Button, SelectInput } from "@/components/ui";
+import { Alert, Button, SelectInput, TextInput } from "@/components/ui";
 import { api, downloadFile, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
@@ -288,6 +288,64 @@ function PortalDownloads({ path, gstin, fp }: { path: string; gstin: string; fp:
   );
 }
 
+interface FiledRow {
+  id: string;
+  period: string;
+  returnType: "gstr1" | "iff";
+  filedOn: string;
+}
+
+/** Audit 4 (T15): mark the period as filed, so bills that arrive later go into the next open month. */
+function FiledMark({ d }: { d: Gstr1Dto }) {
+  const returnType = d.iff ? "iff" : "gstr1";
+  const filed = useLoad(() => api.get<FiledRow[]>(`/reports/gst/filed${query({ gstRegistrationId: d.gstRegistrationId })}`), [d.gstRegistrationId]);
+  const [filedOn, setFiledOn] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mark = filed.data?.find((f) => f.period === d.to.slice(0, 7) && f.returnType === returnType);
+  const what = d.iff ? "IFF" : "GSTR-1";
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      if (mark) await api.delete(`/reports/gst/filed/${mark.id}`);
+      else await api.post("/reports/gst/filed", { gstRegistrationId: d.gstRegistrationId, period: d.period, returnType, filedOn });
+      await filed.reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (filed.loading && !filed.data) return null;
+  return (
+    <div className="toolbar report-no-print">
+      {mark ? (
+        <>
+          <span>
+            {what} for {d.periodLabel} marked as filed on {formatDate(mark.filedOn)}. Bills arriving later for it go into the next open month.
+          </span>
+          <Button size="small" variant="secondary" busy={busy} onClick={() => void save()}>
+            Remove the filed mark
+          </Button>
+        </>
+      ) : (
+        <>
+          <TextInput id="gst-filed-on" label={`Filed ${what} on`} type="date" value={filedOn} onChange={(e) => setFiledOn(e.target.value)} />
+          <Button size="small" busy={busy} disabled={!filedOn} onClick={() => void save()} title="After filing on the GST portal: bills that arrive later for this period go into the next open month">
+            Mark {what} as filed
+          </Button>
+        </>
+      )}
+      {error ? (
+        <span className="field-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function Gstr1Report() {
   const g = useGstFilters({});
   const path = query({ period: g.period, gstRegistrationId: g.gstRegistrationId });
@@ -311,7 +369,10 @@ export function Gstr1Report() {
         const agrees = rec.sectionsAgree && rec.hsnAgrees && rec.documentsAgree;
         return (
           <>
+            {d.iff ? <Alert kind="info">This month is an IFF (invoice furnishing facility): only business invoices and their credit notes. Consumer sales, nil-rated supplies, the HSN summary and documents issued go into the quarter&apos;s GSTR-1.</Alert> : null}
+            {d.filedInIff ? <Alert kind="info">{d.filedInIff} business invoice{d.filedInIff === 1 ? "" : "s"} and note{d.filedInIff === 1 ? "" : "s"} already filed in this quarter&apos;s IFF {d.filedInIff === 1 ? "is" : "are"} left out of tables 4 and 9B.</Alert> : null}
             <PortalDownloads path={path} gstin={d.gstin} fp={d.fp} />
+            <FiledMark d={d} />
             {agrees ? (
               <Alert kind="success">Every section, the HSN summary and the documents issued add up to the sales tax register.</Alert>
             ) : (
@@ -380,7 +441,10 @@ function gstr3bLines(d: Gstr3bDto) {
     hr("other", "(A)(5) All other input credit", c.allOther),
     hr("reversed", "(B) Input credit reversed", c.reversed),
     hr("net", "(C) Net input credit of the period", c.net, true),
-    hr("ineligible", "(D) Ineligible input credit (added to cost; not claimed)", c.ineligible),
+    hr("ineligible", "(D)(1) Ineligible input credit (added to cost; not claimed)", c.ineligible),
+    ...(c.timeBarred ? [hr("barred", "(D)(2) Past the time limit (section 16(4); not claimed)", c.timeBarred)] : []),
+    ...(c.notInGstr2b ? [hr("held", "Held back: not in this period’s GSTR-2B (claimed when the supplier reports it)", c.notInGstr2b)] : []),
+    ...(c.fromEarlierGstr2b ? [hr("released", "Included in (A)(5): earlier bills now in GSTR-2B", c.fromEarlierGstr2b)] : []),
     hr("bf", "Credit brought forward from the period before", c.broughtForward),
     hr("available", "Credit available for set-off", c.available, true),
   ];
@@ -402,6 +466,7 @@ function gstr3bCsv(d: Gstr3bDto): CsvOutput {
     ...credit.map((x) => ["4", x.label, "", x.igst, x.cgst, x.sgst]),
     ...d.setOff.steps.map((s) => ["Set-off", `${HEAD_NAMES[s.credit]} credit used for ${HEAD_NAMES[s.against]}`, "", "", "", s.amount]),
     ...pay.map((x) => ["6.1", x.label, "", x.igst, x.cgst, x.sgst]),
+    ...(d.inwardNoTax ? [["5", "Inward supplies with no GST: from another state", d.inwardNoTax.interState, "", "", ""], ["5", "Inward supplies with no GST: within the state", d.inwardNoTax.intraState, "", "", ""]] : []),
   ];
   return { headers: ["Table", "What", "Taxable value", "IGST", "CGST", "SGST"], rows, count: rows.length };
 }
@@ -431,6 +496,24 @@ export function Gstr3bReport() {
               GST to pay for {d.periodLabel}: <strong><Amount value={d.totalPayable} /></strong>
             </p>
             <Warnings list={d.notes} />
+            {d.composition ? (
+              <section className="report-section">
+                <h2>CMP-08 (composition) for {d.composition.periodLabel}</h2>
+                <p className="muted">{d.composition.note}</p>
+                <dl className="report-facts">
+                  <dt>Taxable turnover in the state</dt>
+                  <dd><Amount value={d.composition.outward.taxable} /></dd>
+                  <dt>Exempt supplies (no tax)</dt>
+                  <dd><Amount value={d.composition.outward.exempt} /></dd>
+                  <dt>Tax at {d.composition.outward.rate}% (CGST + SGST)</dt>
+                  <dd><Amount value={d.composition.outward.cgst} /> + <Amount value={d.composition.outward.sgst} /></dd>
+                  <dt>Purchases on reverse charge (tax)</dt>
+                  <dd><Amount value={d.composition.reverseCharge.tax} /></dd>
+                  <dt><strong>Total to pay</strong></dt>
+                  <dd><strong><Amount value={d.composition.payable.total} /></strong></dd>
+                </dl>
+              </section>
+            ) : null}
             <Section title="3.1 Outward supplies and inward supplies liable to reverse charge" columns={[{ ...col.text<(typeof outward)[number]>("label", "Nature of supplies", (x) => x.label), wide: true }, ...taxColumns<(typeof outward)[number]>()]} rows={outward} rowKey={(x) => x.key} />
             <Section
               title="3.2 Of 3.1 (a), other-state supplies to unregistered persons"
@@ -453,6 +536,14 @@ export function Gstr3bReport() {
                 </ol>
               )}
             </section>
+            {d.inwardNoTax && (
+              <section className="report-section">
+                <h2>5 Inward supplies with no GST (nil rated, exempt, composition suppliers)</h2>
+                <p>
+                  From another state: <Amount value={d.inwardNoTax.interState} /> · Within the state: <Amount value={d.inwardNoTax.intraState} />
+                </p>
+              </section>
+            )}
             <Section title="6.1 Payment of tax" columns={HEAD_COLUMNS} rows={pay} rowKey={(x) => x.key} />
           </>
         );

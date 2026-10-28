@@ -7,8 +7,12 @@ import {
   eInvoiceLastDay,
   eInvoiceNearLimit,
   eInvoiceNumberProblem,
+  eInvoiceHsnOk,
   eInvoiceProblems,
   type EInvoiceSource,
+  eInvoiceSupplyType,
+  EWAY_PART_B_MISSING,
+  eWayPartBMissing,
   eWayBulkFile,
   eWayDocumentProblems,
   eWayLimitFor,
@@ -238,5 +242,82 @@ describe('reading the portals’ answer files', () => {
     expect(parsePortalDateTime('nonsense')).toBeNull();
     expect(parseCsv('a,"b ""q"", c"\n1,2')).toEqual([['a', 'b "q", c'], ['1', '2']]);
     expect(toPortalDate('2026-04-01')).toBe('01/04/2026');
+  });
+});
+
+describe('audit 4 (28 October 2026): e-invoice fields from the official field list', () => {
+  const json = (s: EInvoiceSource) => JSON.parse(stringifyPortalJson(buildEInvoiceJson(s))) as Record<string, any>;
+  const sameStateSez: EInvoiceSource = {
+    ...source,
+    sez: true,
+    buyer: { ...source.buyer, gstin: '29AABCS1234D1Z1', stateCode: '29', placeOfSupply: '29', place: 'Bengaluru', pincode: '560100' },
+  };
+
+  it('marks an SEZ supply SEZWP with IGST and SEZWOP without tax under LUT, never B2B, IgstOnIntra "N"', () => {
+    const wp = json(sameStateSez);
+    expect(wp.TranDtls).toMatchObject({ SupTyp: 'SEZWP', IgstOnIntra: 'N' });
+    expect(wp.ValDtls).toMatchObject({ IgstVal: 797.62, CgstVal: 0, SgstVal: 0 });
+    const lut = { ...sameStateSez, lines: sameStateSez.lines.map((l) => ({ ...l, igst: '0' })) };
+    expect(json(lut).TranDtls).toMatchObject({ SupTyp: 'SEZWOP', IgstOnIntra: 'N' });
+    expect(eInvoiceSupplyType(source)).toBe('B2B');
+    expect(eInvoiceProblems(sameStateSez)).toEqual([]);
+  });
+
+  it('refuses CGST and SGST on an SEZ supply, even inside the seller state', () => {
+    const wrong = { ...sameStateSez, lines: [{ ...source.lines[0], igst: '0', cgst: '160.71', sgst: '160.72' }] };
+    expect(eInvoiceProblems(wrong).join(' | ')).toMatch(/SEZ is always inter-state.*IGST/);
+  });
+
+  it('sets RegRev "Y" under reverse charge', () => {
+    expect(json({ ...source, reverseCharge: true }).TranDtls.RegRev).toBe('Y');
+  });
+
+  it('sends optional fields shorter than the minimum as null', () => {
+    const inv = json({
+      ...source,
+      seller: { ...source.seller, tradeName: 'AB', addr2: 'X', email: 'a@b.c' },
+      buyer: { ...source.buyer, addr2: '12', email: 'buyer@example.com' },
+      lines: [{ ...source.lines[0], barcode: '12' }, { ...source.lines[1], barcode: '8901234567890' }],
+    });
+    expect(inv.SellerDtls).toMatchObject({ TrdNm: null, Addr2: null, Em: null });
+    expect(inv.BuyerDtls).toMatchObject({ Addr2: null, Em: 'buyer@example.com' });
+    expect(inv.ItemList[0].Barcde).toBeNull();
+    expect(inv.ItemList[1].Barcde).toBe('8901234567890');
+  });
+
+  it('reports mandatory fields shorter than the minimum, naming the bill and the field', () => {
+    const p = eInvoiceProblems({ ...source, seller: { ...source.seller, legalName: 'AB' }, lines: [{ ...source.lines[0], description: 'Ty' }] }).join(' | ');
+    expect(p).toMatch(/Bill B1-000045: the seller legal name \(LglNm\) must be at least 3/);
+    expect(p).toMatch(/Bill B1-000045: the product description on line 1 \(PrdDesc\) must be at least 3/);
+  });
+
+  it('checks GSTINs with the official pattern and needs the buyer GSTIN on a business invoice', () => {
+    expect(eInvoiceProblems({ ...source, buyer: { ...source.buyer, gstin: '' } }).join(' | ')).toMatch(/buyer GSTIN \(Gstin\) is missing/);
+    expect(eInvoiceProblems({ ...source, buyer: { ...source.buyer, gstin: 'URP' } }).join(' | ')).toMatch(/buyer GSTIN.*not a valid GSTIN/);
+    expect(eInvoiceProblems({ ...source, seller: { ...source.seller, gstin: '29aaacr1234a1zz' } }).join(' | ')).toMatch(/seller GSTIN.*not a valid/);
+  });
+
+  it('needs 6 or 8 digit HSN codes for goods; services as the schema says', () => {
+    expect(eInvoiceHsnOk('6205', false)).toBe(false);
+    expect(eInvoiceHsnOk('620520', false)).toBe(true);
+    expect(eInvoiceHsnOk('62052000', false)).toBe(true);
+    expect(eInvoiceHsnOk('000000', false)).toBe(false);
+    expect(eInvoiceHsnOk('9983', true)).toBe(true);
+    expect(eInvoiceHsnOk('998314', true)).toBe(true);
+    expect(eInvoiceProblems({ ...source, lines: [{ ...source.lines[0], hsn: '6205' }] }).join(' | ')).toMatch(/6 or 8 digits/);
+  });
+});
+
+describe('audit 4 (28 October 2026): e-way bill Part B and answer-file matching', () => {
+  it('knows a bill with only a transporter id (Part A) is not valid for movement', () => {
+    expect(eWayPartBMissing(null)).toBe(true);
+    expect(eWayPartBMissing(' - ')).toBe(true);
+    expect(eWayPartBMissing('KA01AB1234')).toBe(false);
+    expect(EWAY_PART_B_MISSING).toMatch(/Part B \(vehicle\) not yet filled: the goods cannot move on it/);
+  });
+
+  it('reads seller GSTIN, document type and date from the result file', () => {
+    const csv = 'Seller GSTIN,Buyer GSTIN,Document Type,Document No.,Document Date,Ack No.,Ack Date,IRN,Status,Signed QR Code\n29AAACR1234A1Z5,33AAACB5678B1Z0,INV,B1-000045,18/10/2026,1120100,"18/10/2026 03:18:00 PM",' + 'b'.repeat(64) + ',ACT,eyJ.x.y\n';
+    expect(parseEInvoiceResults(csv)[0]).toMatchObject({ sellerGstin: '29AAACR1234A1Z5', documentType: 'INV', documentNumber: 'B1-000045', documentDate: '2026-10-18' });
   });
 });

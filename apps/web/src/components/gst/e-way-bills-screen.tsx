@@ -132,6 +132,7 @@ export function EWayBillsScreen() {
           ) : null}
           {r.number ? <div className="mono">{r.number}</div> : null}
           {r.validUntil ? <div className="muted">Valid until {formatDateTime(r.validUntil)}</div> : null}
+          {r.partBMissing ? <div className="field-error">{r.notice ?? "Part B (vehicle) not yet filled: the goods cannot move on it"}</div> : null}
           {r.error ? <div className="field-error">{r.error}</div> : null}
         </>
       ),

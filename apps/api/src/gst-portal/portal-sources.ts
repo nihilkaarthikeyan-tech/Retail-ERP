@@ -3,7 +3,7 @@
 // e-invoice and e-way bill files are built from (packages/shared/src/gst-portal.ts).
 // Nothing here writes; the services decide what to do with the result.
 import { NotFoundException } from '@nestjs/common';
-import { Decimal, type EInvoiceSource, type EWaySource, eWayValue, INDIAN_STATES, pickGstRate, uqcFor } from 'shared';
+import { Decimal, type EInvoiceSource, type EWaySource, eWayValue, INDIAN_STATES, pickGstRate, type TaxSituation, taxSituationOf, uqcFor } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import type { TransferGstService } from '../inventory/transfer-gst.service.js';
 
@@ -55,7 +55,7 @@ export async function sellerOf(db: Db, storeId: string, registrationId?: string 
 }
 
 /** A store as the place goods leave from or arrive at. */
-async function storePlace(db: Db, storeId: string): Promise<PartyPlace> {
+export async function storePlace(db: Db, storeId: string): Promise<PartyPlace> {
   const s = await sellerOf(db, storeId);
   const store = await db.store.findUniqueOrThrow({ where: { id: storeId } });
   return { ...s, name: `${s.name} ${store.name}`.trim(), addr1: store.addressLine1 ?? s.addr1, addr2: store.addressLine2 ?? s.addr2, place: store.city ?? s.place, pincode: store.pincode ?? s.pincode };
@@ -77,6 +77,23 @@ async function lineFacts(db: Db, bill: LoadedBill) {
   const units = new Map((await db.unit.findMany({ where: { id: { in: [...new Set(bill.lines.map((l) => l.unitId))] } }, select: { id: true, code: true } })).map((u) => [u.id, u.code]));
   const isService = (hsn: string | null) => !!hsn && (services.has(hsn) || hsn.startsWith('99'));
   return { isService, unitCode: (id: string) => units.get(id) ?? null };
+}
+
+/**
+ * Audit 4 (28 October 2026): the buyer's tax situation on a bill (sez, reverse_charge …). The bill keeps
+ * the buyer's GSTIN but not the situation, so it is read the way the till chose it: the customer's
+ * address with that GSTIN, else the customer's own when the GSTIN is the customer's.
+ */
+export async function buyerSituationOf(db: Db, bill: LoadedBill): Promise<TaxSituation | null> {
+  const src = bill.invoiceKind === 'business' || !bill.returnOf ? bill : bill.returnOf;
+  const gstin = src.buyerGstin ?? null;
+  if (!gstin) return null;
+  // Saved on the bill since audit 4; older bills read it from the customer.
+  if (bill.buyerSituation) return taxSituationOf(gstin, bill.buyerSituation);
+  const customer = await db.customer.findUnique({ where: { id: bill.customerId }, select: { gstin: true, taxSituation: true } });
+  const a = await db.address.findFirst({ where: { partyType: 'customer', partyId: bill.customerId, active: true, gstin }, orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }], select: { taxSituation: true } });
+  const situation = a?.taxSituation ?? (customer?.gstin === gstin ? customer.taxSituation : null);
+  return taxSituationOf(gstin, situation);
 }
 
 /** The buyer of a business invoice (or of the invoice a credit note returns against). */
@@ -108,10 +125,14 @@ export async function eInvoiceSourceOf(db: Db, billId: string): Promise<{ bill: 
   const seller = await sellerOf(db, bill.till.storeId, bill.gstRegistrationId);
   const buyer = await buyerOf(db, bill);
   const facts = await lineFacts(db, bill);
+  const situation = await buyerSituationOf(db, bill);
   const source: EInvoiceSource = {
     typ: bill.kind === 'return' ? 'CRN' : 'INV',
     number: bill.number,
     date: isoDay(bill.businessDate)!,
+    // Audit 4 (28 October 2026): SupTyp SEZWP/SEZWOP for an SEZ buyer, RegRev "Y" under reverse charge.
+    sez: situation === 'sez',
+    reverseCharge: situation === 'reverse_charge',
     seller: { ...seller, gstin: seller.gstin ?? '' },
     buyer: { ...buyer, gstin: buyer.gstin ?? '', legalName: buyer.name },
     lines: bill.lines.map((l) => {
@@ -137,6 +158,52 @@ export async function eInvoiceSourceOf(db: Db, billId: string): Promise<{ bill: 
   return { bill, source };
 }
 
+/**
+ * Audit 4 (28 October 2026): a transfer to a store under another GSTIN of the company is a supply
+ * between distinct persons (CGST Act s.25(4)) on a tax invoice (TransferGstService), so it is
+ * e-invoiced like a business invoice from the till. Null when the transfer travels on a delivery
+ * challan (same GSTIN), on a bill of supply (composition), or was sent before values were frozen.
+ */
+export async function eInvoiceSourceOfTransfer(db: Db, documentId: string, transferGst: TransferGstService): Promise<{ document: { id: string; storeId: string; number: string; date: string; cancelled: boolean }; source: EInvoiceSource } | null> {
+  const d = await db.stockDocument.findUnique({ where: { id: documentId }, include: { lines: { include: { item: true }, orderBy: { lineNo: 'asc' } } } });
+  if (!d || d.kind !== 'transfer_send' || !d.toStoreId) throw new NotFoundException('Transfer not found');
+  const tax = await transferGst.forPrint(db, d);
+  if (!tax?.taxed) return null;
+  const seller = await sellerOf(db, d.storeId, tax.from.id);
+  const buyer = await sellerOf(db, d.toStoreId, tax.to.id);
+  const byLine = new Map(tax.lines.map((t) => [t.lineId, t]));
+  const units = new Map((await db.unit.findMany({ where: { id: { in: [...new Set(d.lines.map((l) => l.unitId))] } }, select: { id: true, code: true } })).map((u) => [u.id, u.code]));
+  const hsns = [...new Set(tax.lines.map((t) => t.hsnCode))];
+  const services = new Set((await db.hsnCode.findMany({ where: { code: { in: hsns }, isService: true }, select: { code: true } })).map((h) => h.code));
+  const date = isoDay(d.postingDate)!;
+  const source: EInvoiceSource = {
+    typ: 'INV',
+    number: d.number,
+    date,
+    seller: { ...seller, gstin: seller.gstin ?? '' },
+    buyer: { ...buyer, gstin: buyer.gstin ?? '', legalName: buyer.legalName, placeOfSupply: tax.placeOfSupply },
+    lines: d.lines.map((l) => {
+      const t = byLine.get(l.id);
+      const hsn = (t?.hsnCode ?? l.item.hsnCode ?? '').replace(/\D/g, '');
+      return {
+        description: l.item.name,
+        isService: services.has(hsn) || hsn.startsWith('99'),
+        hsn,
+        quantity: l.quantity.toString(),
+        unit: uqcFor(units.get(l.unitId)),
+        taxable: (t?.taxable ?? new Decimal(0)).toFixed(2),
+        gstRate: (t?.gstRate ?? new Decimal(0)).toString(),
+        igst: (t?.igst ?? new Decimal(0)).toFixed(2),
+        cgst: (t?.cgst ?? new Decimal(0)).toFixed(2),
+        sgst: (t?.sgst ?? new Decimal(0)).toFixed(2),
+      };
+    }),
+    roundOff: '0',
+    total: tax.totals.total.toFixed(2),
+  };
+  return { document: { id: d.id, storeId: d.storeId, number: d.number, date, cancelled: d.status === 'cancelled' }, source };
+}
+
 export interface EWayDocument {
   documentType: 'pos_bill' | 'stock_document';
   documentId: string;
@@ -160,7 +227,10 @@ export async function eWayFromBill(db: Db, billId: string): Promise<EWayDocument
   const bill = await loadBill(db, billId);
   if (!bill) throw new NotFoundException('Bill not found');
   const seller = await sellerOf(db, bill.till.storeId, bill.gstRegistrationId);
+  // Audit 4 (28 October 2026): goods are dispatched from the shop, not from the registration's principal address.
+  const dispatch = await storePlace(db, bill.till.storeId);
   const facts = await lineFacts(db, bill);
+  const sez = (await buyerSituationOf(db, bill)) === 'sez';
   const settings = await db.posSettings.findUnique({ where: { companyId: bill.companyId } });
   const delivery = await db.posDelivery.findUnique({ where: { billId: bill.id } });
   const customer = await db.customer.findUnique({ where: { id: bill.customerId } });
@@ -172,7 +242,10 @@ export async function eWayFromBill(db: Db, billId: string): Promise<EWayDocument
   const rateRows = rates.map((r) => ({ ...r, rate: r.rate.toString(), cessRate: r.cessRate.toString(), priceFrom: r.priceFrom?.toString() ?? null, priceUpTo: r.priceUpTo?.toString() ?? null, effectiveFrom: isoDay(r.effectiveFrom)! }));
   const freightItem = settings?.deliveryItemId ?? null;
   const goods = bill.lines.filter((l) => l.itemId !== freightItem && !facts.isService((l.hsnCode ?? l.item.hsnCode ?? '').replace(/\D/g, '')));
-  const interState = toState !== seller.stateCode;
+  // A supply to an SEZ is always inter-state (IGST Act s.7(5)(b)): IGST rates even in the seller's own state.
+  const interState = sez || toState !== seller.stateCode;
+  // An SEZ supply under a letter of undertaking carries no tax, so its rates are nil.
+  const billTaxed = !(D(bill.igst).isZero() && D(bill.cgst).isZero() && D(bill.sgst).isZero());
   const value = eWayValue(
     bill.lines.map((l) => {
       const hsn = l.hsnCode ?? l.item.hsnCode;
@@ -201,7 +274,7 @@ export async function eWayFromBill(db: Db, billId: string): Promise<EWayDocument
       docType: bill.invoiceKind === 'bill_of_supply' ? 'BIL' : 'INV',
       number: bill.number,
       date,
-      from: { ...seller, gstin: seller.gstin ?? '', name: seller.legalName },
+      from: { ...dispatch, gstin: seller.gstin ?? '', name: seller.legalName, stateCode: seller.stateCode },
       to: {
         gstin: bill.buyerGstin ?? 'URP',
         name: bill.buyerName ?? delivery?.name ?? customer?.name ?? '',
@@ -217,11 +290,14 @@ export async function eWayFromBill(db: Db, billId: string): Promise<EWayDocument
         quantity: l.quantity.toString(),
         unit: uqcFor(facts.unitCode(l.unitId)),
         taxable: l.taxableAmount.toString(),
-        igstRate: interState ? l.gstRate.toString() : '0',
+        igstRate: interState ? (sez && !billTaxed ? '0' : l.gstRate.toString()) : '0',
         cgstRate: interState ? '0' : half(l.gstRate),
         sgstRate: interState ? '0' : half(l.gstRate),
       })),
-      totals: { taxable: sum((l) => l.taxableAmount), cgst: sum((l) => l.cgst), sgst: sum((l) => l.sgst), igst: sum((l) => l.igst), total: sum((l) => l.lineTotal) },
+      // SEZ: the tax is IGST only, never CGST and SGST (audit 4).
+      totals: sez
+        ? { taxable: sum((l) => l.taxableAmount), cgst: '0', sgst: '0', igst: sum((l) => l.igst).add(sum((l) => l.cgst)).add(sum((l) => l.sgst)), total: sum((l) => l.lineTotal) }
+        : { taxable: sum((l) => l.taxableAmount), cgst: sum((l) => l.cgst), sgst: sum((l) => l.sgst), igst: sum((l) => l.igst), total: sum((l) => l.lineTotal) },
     },
   };
 }

@@ -13,6 +13,8 @@ export interface ReceiptLine {
   code?: string | null;
   hsn?: string | null;
   quantity: Amount;
+  /** Audit 4 (28 October 2026): the unit code printed after the quantity (CGST Rules rule 46(i)). */
+  unit?: string | null;
   price: Amount;
   discount?: Amount | null;
   amount: Amount;
@@ -45,6 +47,12 @@ export interface ReceiptGst {
   original?: { number: string; date?: string | null } | null;
   declaration?: string | null;
   creditNoteLate?: boolean;
+  /** Audit 4 (28 October 2026): the buyer's tax situation (regular, unregistered, sez, reverse_charge). */
+  buyerSituation?: string | null;
+  /** Audit 4: the rule 46 third-proviso SEZ endorsement, when the ERP worked it out. */
+  endorsement?: string | null;
+  /** Audit 4: tax_invoice, bill_of_supply, invoice_cum_bill_of_supply, credit_note or return_note. */
+  documentKind?: string | null;
 }
 
 /** Plan 13: the points block (earned, spent, given and taken back, balance). */
@@ -82,6 +90,11 @@ export interface Receipt {
   footer?: string | null;
   lines: ReceiptLine[];
   gstTable?: GstRow[];
+  /** Audit 4 (28 October 2026): false = the business switched the GST table off; the tax still prints, one short line per rate. */
+  taxTable?: boolean;
+  /** Audit 4: the document kind and title the ERP worked out. */
+  documentKind?: string | null;
+  documentTitle?: string | null;
   totals: { gross?: Amount; discount?: Amount; taxable?: Amount; rounding?: Amount; total: Amount };
   payments?: Payment[];
   change?: Amount | null;
@@ -104,6 +117,12 @@ export type PaperWidth = 80 | 58;
 export function columnsFor(paper: PaperWidth): number {
   return paper === 58 ? 32 : 48;
 }
+
+/** CGST Rules rule 46, third proviso: the endorsement on a supply to an SEZ unit or developer. */
+export const SEZ_WITH_IGST = 'SUPPLY MEANT FOR SEZ UNIT OR SEZ DEVELOPER FOR AUTHORISED OPERATIONS ON PAYMENT OF INTEGRATED TAX';
+export const SEZ_UNDER_LUT = 'SUPPLY MEANT FOR SEZ UNIT OR SEZ DEVELOPER FOR AUTHORISED OPERATIONS UNDER BOND OR LETTER OF UNDERTAKING WITHOUT PAYMENT OF INTEGRATED TAX';
+/** Audit 4 (28 October 2026): a return note is not a credit note and carries no GST. */
+export const RETURN_NOTE_LINE = 'Not a credit note: no GST is reduced';
 
 /** Only an older bill saved as provisional (before 22 Oct 2026) carries this note; new bills never do. */
 export const PROVISIONAL_NOTE = 'GST provisional (an older bill)';
@@ -149,7 +168,7 @@ export function checkReceipt(input: unknown): Check {
   for (const [i, l] of r.lines.entries()) {
     if (!isObj(l)) return fail(`receipt.lines[${i}] must be an object`);
     if (!isText(l.name)) return fail(`receipt.lines[${i}].name is required`);
-    if (!isOptText(l.code) || !isOptText(l.hsn)) return fail(`receipt.lines[${i}].code/hsn must be text`);
+    if (!isOptText(l.code) || !isOptText(l.hsn) || !isOptText(l.unit)) return fail(`receipt.lines[${i}].code/hsn/unit must be text`);
     if (!isAmount(l.quantity) || !isAmount(l.price) || !isAmount(l.amount) || !isOptAmount(l.discount)) {
       return fail(`receipt.lines[${i}] quantity, price, discount and amount must be numbers`);
     }
@@ -168,6 +187,8 @@ export function checkReceipt(input: unknown): Check {
     }
   }
 
+  if (r.taxTable !== undefined && typeof r.taxTable !== 'boolean') return fail('receipt.taxTable must be true or false');
+  if (!isOptText(r.documentKind) || !isOptText(r.documentTitle)) return fail('receipt.documentKind and documentTitle must be text');
   if (!isObj(r.totals) || !isAmount(r.totals.total)) return fail('receipt.totals.total is required');
   for (const k of ['gross', 'discount', 'taxable', 'rounding'] as const) {
     if (!isOptAmount(r.totals[k])) return fail(`receipt.totals.${k} must be a number`);
@@ -192,7 +213,9 @@ export function checkReceipt(input: unknown): Check {
     const g = r.gst;
     const isState = (v: unknown) => v === undefined || v === null || (isObj(v) && isText(v.code) && isText(v.name));
     if (!isObj(g) || !isText(g.title) || !g.title) return fail('receipt.gst.title is required');
-    if (!isOptText(g.invoiceKind) || !isOptText(g.sellerGstin) || !isOptText(g.declaration)) return fail('receipt.gst text fields must be text');
+    if (!isOptText(g.invoiceKind) || !isOptText(g.sellerGstin) || !isOptText(g.declaration) || !isOptText(g.buyerSituation) || !isOptText(g.endorsement) || !isOptText(g.documentKind)) {
+      return fail('receipt.gst text fields must be text');
+    }
     if (!isState(g.placeOfSupply)) return fail('receipt.gst.placeOfSupply must have code and name');
     if (g.buyer !== undefined && g.buyer !== null && (!isObj(g.buyer) || !isOptText(g.buyer.name) || !isOptText(g.buyer.gstin) || !isOptText(g.buyer.address) || !isState(g.buyer.state))) {
       return fail('receipt.gst.buyer must have name, gstin, address and state as text');
@@ -342,6 +365,42 @@ function gstTableLines(rows: GstRow[], width: number): string[] {
   return stacked;
 }
 
+/**
+ * Audit 4 (28 October 2026): what the receipt prints about tax. A tax invoice or
+ * credit note always shows its tax per rate (rule 46(k)-(m)), as the table or,
+ * with the table switched off, one short line per rate; a bill of supply and a
+ * return note show none. Every tax invoice states reverse charge (rule 46(p));
+ * a supply to an SEZ carries the rule 46 third-proviso endorsement.
+ */
+export function taxView(receipt: Receipt) {
+  const g = receipt.gst ?? null;
+  const isNote = (t: string | null | undefined) => (t ?? '').trim().toLowerCase() === 'return note';
+  const returnNote = isNote(g?.title) || isNote(receipt.documentTitle) || (g?.documentKind ?? receipt.documentKind) === 'return_note';
+  const taxed = g ? !returnNote && g.invoiceKind !== 'bill_of_supply' : true;
+  const rows = taxed ? (receipt.gstTable ?? []) : [];
+  const igst = rows.some((x) => !isZero(x.igst));
+  const taxInvoice = !!g && taxed && receipt.kind === 'sale';
+  const situation = g?.buyerSituation ?? null;
+  return {
+    returnNote,
+    rows,
+    table: rows.length > 0 && receipt.taxTable !== false,
+    short: rows.length > 0 && receipt.taxTable === false,
+    reverseCharge: taxInvoice ? (g!.reverseCharge || situation === 'reverse_charge' ? 'Yes' : 'No') : null,
+    endorsement: taxInvoice ? (g?.endorsement ?? (situation === 'sez' && rows.length ? (igst ? SEZ_WITH_IGST : SEZ_UNDER_LUT) : null)) : null,
+  };
+}
+
+/** One short line per rate: "GST 5%: taxable Rs. 1000.00, CGST Rs. 25.00, SGST Rs. 25.00" (or IGST). */
+function gstShortLines(rows: GstRow[], width: number): string[] {
+  const out: string[] = [];
+  for (const g of rows) {
+    const tax = !isZero(g.igst) ? `IGST ${rs(g.igst)}` : `CGST ${rs(g.cgst ?? '0.00')}, SGST ${rs(g.sgst ?? '0.00')}`;
+    out.push(...wrap(`GST ${showRate(g.rate)}: taxable ${rs(g.taxable)}, ${tax}`, width));
+  }
+  return out;
+}
+
 /** Turns a receipt into ESC/POS bytes for the given paper width. */
 export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   const w = columnsFor(paper);
@@ -358,6 +417,7 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   const legal = receipt.company.legalName?.trim();
   if (legal && legal !== receipt.store.name.trim()) lines(wrap(legal, w));
   const g = receipt.gst ?? null;
+  const view = taxView(receipt);
   const sellerGstin = g?.sellerGstin ?? receipt.company.gstin;
   if (sellerGstin) lines(wrap(`GSTIN: ${sellerGstin}`, w));
   if (receipt.store.address) lines(wrap(receipt.store.address, w));
@@ -365,16 +425,18 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
 
   // Title.
   p.line().bold(true);
-  const title = receipt.title?.trim() || (g ? g.title : receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE');
+  const title = receipt.title?.trim() || receipt.documentTitle?.trim() || (g ? g.title : receipt.kind === 'return' ? 'CREDIT NOTE / RETURN' : 'TAX INVOICE');
   lines(wrap(title.toUpperCase(), w));
   if (receipt.duplicate) lines(wrap('DUPLICATE', w));
   p.bold(false);
   if (g?.declaration) lines(wrap(g.declaration, w));
+  if (view.endorsement) lines(wrap(view.endorsement, w));
+  if (view.returnNote) lines(wrap(RETURN_NOTE_LINE, w));
   if (receipt.provisional) lines(wrap(PROVISIONAL_NOTE, w));
 
   // Bill number, date and till.
   p.align('left');
-  const numberLabel = receipt.kind === 'return' ? 'Credit note' : 'Bill';
+  const numberLabel = view.returnNote ? 'Return note' : receipt.kind === 'return' ? 'Credit note' : 'Bill';
   if (receipt.till) lines(leftRight(`${numberLabel}: ${receipt.number}`, `Till: ${receipt.till}`, w));
   else lines(wrap(`${numberLabel}: ${receipt.number}`, w));
   lines(wrap(`Date: ${indianDateTime(receipt.soldAt)}`, w));
@@ -388,7 +450,8 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
     if (g.buyer.state) lines(wrap(`State: ${g.buyer.state.name} (${g.buyer.state.code})`, w));
   }
   if (g?.placeOfSupply) lines(wrap(`Place of supply: ${g.placeOfSupply.name} (${g.placeOfSupply.code})`, w));
-  if (g && g.invoiceKind === 'business') lines(wrap(`Reverse charge: ${g.reverseCharge ? 'Yes' : 'No'}`, w));
+  // Rule 46(p): on every tax invoice, not only business ones.
+  if (view.reverseCharge) lines(wrap(`Tax payable on reverse charge: ${view.reverseCharge}`, w));
 
   // Items.
   p.line(rule);
@@ -396,7 +459,8 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   p.line(rule);
   for (const l of receipt.lines) {
     lines(wrap(l.name, w));
-    lines(leftRight(`  ${showQty(l.quantity)} x ${showAmount(l.price)}`, l.free ? 'FREE' : showAmount(l.amount), w));
+    const unit = l.unit?.trim();
+    lines(leftRight(`  ${showQty(l.quantity)}${unit ? ` ${unit}` : ''} x ${showAmount(l.price)}`, l.free ? 'FREE' : showAmount(l.amount), w));
     if (!isZero(l.discount)) {
       const d = showAmount(l.discount);
       lines(leftRight('  Discount', d.startsWith('-') ? d : `-${d}`, w));
@@ -408,8 +472,11 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   p.line(rule);
 
   // GST by rate.
-  if (receipt.gstTable && receipt.gstTable.length > 0) {
-    lines(gstTableLines(receipt.gstTable, w));
+  if (view.table) {
+    lines(gstTableLines(view.rows, w));
+    p.line(rule);
+  } else if (view.short) {
+    lines(gstShortLines(view.rows, w));
     p.line(rule);
   }
 
@@ -417,7 +484,7 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   const t = receipt.totals;
   if (t.gross !== undefined) lines(leftRight('Gross', showAmount(t.gross), w));
   if (!isZero(t.discount)) lines(leftRight('Discount', showAmount(t.discount), w));
-  if (t.taxable !== undefined) lines(leftRight('Taxable value', showAmount(t.taxable), w));
+  if (t.taxable !== undefined && !view.returnNote) lines(leftRight('Taxable value', showAmount(t.taxable), w));
   if (!isZero(t.rounding)) lines(leftRight('Rounding', showAmount(t.rounding), w));
   p.bold(true).doubleHeight(true);
   lines(leftRight(receipt.kind === 'return' ? 'REFUND' : 'TOTAL', rs(t.total), w));

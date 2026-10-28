@@ -198,7 +198,7 @@ describe('11.12 new offers (B3)', () => {
     expect(b.costValue).toBe('250.00');
     const back = (
       await T(owner.post('/pos/bills'))
-        .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: res.sale.id, lines: [{ lineNo: 1, itemId: topA.id, quantity: '1', returnOfLineId: a.id }] }, payments: cash('-599') })
+        .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: res.sale.id, lines: [{ lineNo: 1, itemId: topA.id, quantity: '1', returnOfLineId: a.id }] }, payments: cash('-599') })
         .expect(201)
     ).body;
     expect(back.return.total).toBe('-599.00');
@@ -310,7 +310,7 @@ describe('11.13 home delivery (B4)', () => {
   });
 
   it('a return alone cannot carry a delivery', async () => {
-    const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), lines: [{ lineNo: 1, itemId: kurta.id, quantity: '1' }] }, payments: cash('-1500'), delivery };
+    const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), lines: [{ lineNo: 1, itemId: kurta.id, quantity: '1' }] }, payments: cash('-1500'), delivery };
     expect((await T(owner.post('/pos/bills')).send(body).expect(400)).body.errors[0].message).toMatch(/Home delivery is for a sale/);
     n--;
   });
@@ -366,7 +366,7 @@ describe('11.14 salesperson (C1)', () => {
     const trouserLine = (res.sale.lines as Line[])[1];
     const back = (
       await T(owner.post('/pos/bills'))
-        .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: res.sale.id, lines: [{ lineNo: 1, itemId: trousers.id, quantity: '1', returnOfLineId: trouserLine.id }] }, payments: cash('-1499') })
+        .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: res.sale.id, lines: [{ lineNo: 1, itemId: trousers.id, quantity: '1', returnOfLineId: trouserLine.id }] }, payments: cash('-1499') })
         .expect(201)
     ).body;
     expect(back.return.lines[0].salesStaffId).toBe(arun.id);

@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { describe, expect, it } from 'vitest';
-import { documentKey, matchInward, matchSummary, parseGstr2b, periodRange, portalDate, portalPeriod, purchaseTaxSplit } from './gst-inward.js';
+import { creditAdjustment, type CreditBill, creditTimeLimit, documentKey, matchInward, matchSummary, parseGstr2b, periodRange, portalDate, portalPeriod, purchaseTaxSplit } from './gst-inward.js';
 
 describe('purchaseTaxSplit (plan 08 G7, G8)', () => {
   const line = { cgst: '900', sgst: '900', igst: '0', creditClaimable: true };
@@ -95,5 +95,40 @@ describe('parseGstr2b', () => {
     ]);
     expect(rows[1].differences).toEqual(['Reverse charge: portal yes, books no']);
     expect(matchSummary(rows)).toEqual({ matched: 1, value_difference: 1, only_portal: 0, only_books: 0 });
+  });
+});
+
+describe('creditAdjustment (audit 4 T11: s.16(2)(aa), s.16(4))', () => {
+  const bill = (id: string, over: Partial<CreditBill> = {}): CreditBill => ({ id, kind: 'invoice', reverseCharge: false, invoiceDate: '2026-09-10', postingPeriod: '2026-09', igst: '0', cgst: '90', sgst: '90', ...over });
+  const row = (id: string, status: 'matched' | 'value_difference' | 'only_books', portal: string | null) => ({
+    status, supplierGstin: '33AAAAA0000A1Z5', supplierName: null, number: id, kind: 'invoice' as const,
+    portal: portal === null ? null : { date: '2026-09-10', taxable: '1000', igst: '0', cgst: portal, sgst: portal, reverseCharge: false, itcAvailable: 'Y' },
+    books: { id, ourNumber: id, date: '2026-09-10', taxable: '1000', igst: '0', cgst: '90', sgst: '90', reverseCharge: false }, differences: [],
+  });
+  const t = (h: { igst: { toFixed(n: number): string }; cgst: { toFixed(n: number): string }; sgst: { toFixed(n: number): string } }) => [h.igst.toFixed(2), h.cgst.toFixed(2), h.sgst.toFixed(2)];
+
+  it('holds back a bill the supplier has not reported, and the short part of a lower one', () => {
+    const bills = new Map([['A', bill('A')], ['B', bill('B')], ['C', bill('C')]]);
+    const a = creditAdjustment({ period: '2026-09', periodTo: '2026-09-30', rows: [row('A', 'matched', '90'), row('B', 'only_books', null), row('C', 'value_difference', '80')], bills, periodBills: ['A', 'B', 'C'], heldBackEarlier: () => true });
+    expect(t(a.notInStatement)).toEqual(['0.00', '100.00', '100.00']);
+    expect(t(a.released)).toEqual(['0.00', '0.00', '0.00']);
+  });
+
+  it('claims an earlier held-back bill when it appears, but not one already claimed from the accounts', () => {
+    const bills = new Map([['A', bill('A', { postingPeriod: '2026-08' })], ['B', bill('B', { postingPeriod: '2026-07' })]]);
+    const a = creditAdjustment({ period: '2026-09', periodTo: '2026-09-30', rows: [row('A', 'matched', '90'), row('B', 'matched', '90')], bills, periodBills: [], heldBackEarlier: (p) => p === '2026-08' });
+    expect(t(a.released)).toEqual(['0.00', '90.00', '90.00']);
+  });
+
+  it('never claims credit after 30 November of the next year; reverse charge and notes are not checked', () => {
+    expect(creditTimeLimit('2025-03-31')).toBe('2025-11-30');
+    expect(creditTimeLimit('2025-04-01')).toBe('2026-11-30');
+    const bills = new Map([['OLD', bill('OLD', { invoiceDate: '2025-02-10', postingPeriod: '2026-09' })], ['RC', bill('RC', { reverseCharge: true })], ['N', bill('N', { kind: 'note' })]]);
+    const a = creditAdjustment({ period: '2026-09', periodTo: '2026-09-30', rows: [row('RC', 'only_books', null), row('N', 'only_books', null)], bills, periodBills: ['OLD', 'RC', 'N'], heldBackEarlier: () => true });
+    expect(t(a.timeBarred)).toEqual(['0.00', '90.00', '90.00']);
+    expect(t(a.notInStatement)).toEqual(['0.00', '0.00', '0.00']);
+    // November's return is filed after 30 November: last year's invoices are past the limit.
+    const nov = creditAdjustment({ period: '2026-11', periodTo: '2026-11-30', rows: null, bills: new Map([['X', bill('X', { invoiceDate: '2026-03-15', postingPeriod: '2026-11' })]]), periodBills: ['X'], heldBackEarlier: () => true });
+    expect(t(nov.timeBarred)).toEqual(['0.00', '90.00', '90.00']);
   });
 });

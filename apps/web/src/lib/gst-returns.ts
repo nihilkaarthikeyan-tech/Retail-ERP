@@ -86,6 +86,9 @@ export interface Gstr1DocumentRow {
 }
 
 export interface Gstr1Dto extends GstHeader {
+  /** Audit 4: a quarterly filer's month (business invoices only); invoices left out because filed in an IFF. */
+  iff?: boolean;
+  filedInIff?: number;
   b2b: Gstr1Invoice[];
   b2cl: Gstr1Invoice[];
   b2cs: Gstr1B2csRow[];
@@ -124,7 +127,31 @@ export interface Gstr3bDto extends GstHeader {
   interStateUnregistered: { placeOfSupply: string; taxable: string; igst: string }[];
   outputTaxFromBills: HeadAmounts;
   outputTaxFromAccounts: HeadAmounts;
-  credit: { reverseCharge: HeadAmounts; allOther: HeadAmounts; reversed: HeadAmounts; net: HeadAmounts; ineligible: HeadAmounts; broughtForward: HeadAmounts; available: HeadAmounts };
+  credit: {
+    reverseCharge: HeadAmounts;
+    allOther: HeadAmounts;
+    reversed: HeadAmounts;
+    net: HeadAmounts;
+    ineligible: HeadAmounts;
+    /** Audit 4 (T11): past the s.16(4) limit; not in GSTR-2B (held back); held back earlier, now in GSTR-2B. */
+    timeBarred?: HeadAmounts;
+    notInGstr2b?: HeadAmounts;
+    fromEarlierGstr2b?: HeadAmounts;
+    gstr2bImported?: boolean;
+    broughtForward: HeadAmounts;
+    available: HeadAmounts;
+  };
+  /** Audit 4 (T13): a composition dealer's quarterly statement (CMP-08) instead of GSTR-3B. */
+  composition?: {
+    period: string;
+    periodLabel: string;
+    outward: { taxable: string; exempt: string; rate: string; cgst: string; sgst: string };
+    reverseCharge: Figures;
+    payable: HeadAmounts;
+    note: string;
+  } | null;
+  /** Table 5: purchases with no GST (nil-rated, exempt, from composition suppliers). */
+  inwardNoTax?: { interState: string; intraState: string };
   setOff: { steps: { credit: "igst" | "cgst" | "sgst"; against: "igst" | "cgst" | "sgst"; amount: string }[]; paidByCredit: HeadAmounts; cash: HeadAmounts };
   reverseChargePayable: HeadAmounts;
   netPayable: HeadAmounts;

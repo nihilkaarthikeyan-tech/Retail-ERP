@@ -251,6 +251,12 @@ export const FLAG_LABELS: Record<string, string> = {
   sales_staff_changed: "Salesperson was switched off or moved to another store while the till was offline",
   delivery_charge_changed: "Delivery charge changed while the till was offline; the till's charge was kept",
   module_off: "Used a module that was switched off in Settings → My modules while the till was offline",
+  // Audit 4: GST rules the till could not check offline.
+  composition_interstate: "A composition shop billed a buyer in another state (not allowed: CGST Act section 10(2)(c)); cancel it and bill from a shop in that state",
+  mixed_exempt_business: "Taxable and exempt goods on one bill to a business buyer: they need separate documents (tax invoice and bill of supply)",
+  credit_note_buyer_missing: "Credit note to a walk-in customer without the customer’s name and state (Rule 53(1A))",
+  hsn_missing: "A business invoice has an item without an HSN code; add the code to the item",
+  return_other_gstin: "Return of a bill made under another GSTIN; the credit note must come from that GSTIN",
 };
 
 export function flagLabel(flag: string): string {

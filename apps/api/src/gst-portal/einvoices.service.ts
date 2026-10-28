@@ -5,7 +5,8 @@
 // exported as the e-invoice portal's bulk JSON, the portal's answer file is
 // imported to attach the reference number (IRN), acknowledgement and signed QR
 // code ("registered") or the errors ("failed"). Cancelling is allowed within 24
-// hours of registration; after that a credit note is needed.
+// hours of registration; after that a credit note is needed. Since audit 4 (28 October
+// 2026) transfers to a store under another GSTIN are e-invoiced too ("stock_document").
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   buildEInvoiceJson,
@@ -21,6 +22,7 @@ import {
   eInvoiceNearLimit,
   eInvoiceProblems,
   type EInvoiceQuery,
+  type EInvoiceSource,
   encodeQr,
   parseEInvoiceResults,
   parsePortalDateTime,
@@ -35,8 +37,9 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { EInvoice, Prisma } from '../generated/prisma/client.js';
 import { ensureGstSettings } from '../gst/gst-core.service.js';
+import { TransferGstService } from '../inventory/transfer-gst.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { eInvoiceSourceOf, isoDay, sellerOf } from './portal-sources.js';
+import { eInvoiceSourceOf, eInvoiceSourceOfTransfer, isoDay, sellerOf } from './portal-sources.js';
 
 const D = (v: { toString(): string } | null | undefined) => new Decimal(v ? v.toString() : '0');
 
@@ -45,6 +48,24 @@ export const istDateTime = (d: Date | null | undefined) => (d ? new Date(d.getTi
 
 /** Shown on prints and screens until the portal has registered the invoice. */
 export const NOT_REGISTERED_NOTICE = 'E-invoice not yet registered on the government portal: this is not a valid tax invoice until the reference number (IRN) and QR code are printed on it.';
+
+/**
+ * Audit 4 (28 October 2026): true when the document has an IRN registered on the portal and not
+ * cancelled. A bill with a live IRN must not be cancelled in the shop alone: cancel the IRN on the
+ * portal first (within 24 hours), or make a credit note (a return). Called by the till's bill cancel.
+ */
+export { hasLiveIrn } from '../common/live-irn.js';
+
+/** Facts about the document behind an e-invoice row (a till bill or a transfer between GSTINs). */
+interface DocFacts {
+  storeId: string;
+  date: string;
+  typ: 'INV' | 'CRN';
+  total: string | null;
+  buyerName: string | null;
+  buyerGstin: string | null;
+  cancelled: boolean;
+}
 
 export interface PrintQr {
   label: string;
@@ -60,7 +81,47 @@ export class EInvoicesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly company: CompanyService,
+    private readonly transferGst: TransferGstService,
   ) {}
+
+  /** Audit 4 (28 October 2026): store, date, type and buyer of each document, for bills and transfers alike. */
+  private async docFacts(db: Db, rows: { documentType: string; documentId: string }[]): Promise<Map<string, DocFacts>> {
+    const out = new Map<string, DocFacts>();
+    const billIds = rows.filter((r) => r.documentType === 'pos_bill').map((r) => r.documentId);
+    const bills = billIds.length
+      ? await db.posBill.findMany({
+          where: { id: { in: billIds } },
+          select: { id: true, kind: true, businessDate: true, total: true, buyerName: true, buyerGstin: true, status: true, returnOf: { select: { buyerName: true, buyerGstin: true } }, till: { select: { storeId: true } } },
+        })
+      : [];
+    for (const b of bills) {
+      out.set(b.id, {
+        storeId: b.till.storeId,
+        date: isoDay(b.businessDate)!,
+        typ: b.kind === 'return' ? 'CRN' : 'INV',
+        total: D(b.total).abs().toFixed(2),
+        buyerName: b.buyerName ?? b.returnOf?.buyerName ?? null,
+        buyerGstin: b.buyerGstin ?? b.returnOf?.buyerGstin ?? null,
+        cancelled: b.status === 'cancelled',
+      });
+    }
+    for (const r of rows.filter((x) => x.documentType === 'stock_document')) {
+      const t = await eInvoiceSourceOfTransfer(db, r.documentId, this.transferGst).catch(() => null);
+      if (t) out.set(r.documentId, { storeId: t.document.storeId, date: t.document.date, typ: 'INV', total: D(t.source.total).toFixed(2), buyerName: t.source.buyer.legalName, buyerGstin: t.source.buyer.gstin || null, cancelled: t.document.cancelled });
+    }
+    return out;
+  }
+
+  /** The e-invoice source of a row's document (a till bill or a transfer between GSTINs). */
+  private async sourceOf(db: Db, documentType: string, documentId: string): Promise<{ storeId: string; source: EInvoiceSource }> {
+    if (documentType === 'stock_document') {
+      const t = await eInvoiceSourceOfTransfer(db, documentId, this.transferGst);
+      if (!t) throw new BadRequestException('This transfer is not on a tax invoice, so it needs no e-invoice');
+      return { storeId: t.document.storeId, source: t.source };
+    }
+    const { bill, source } = await eInvoiceSourceOf(db, documentId);
+    return { storeId: bill.till.storeId, source };
+  }
 
   // ---- Keeping the list complete ----
 
@@ -89,12 +150,27 @@ export class EInvoicesService {
         const seller = await sellerOf(db, b.till.storeId, b.gstRegistrationId);
         if (seller.registrationId) rows.push({ companyId: company.id, gstRegistrationId: seller.registrationId, documentType: 'pos_bill', documentId: b.id, documentNumber: b.number });
       }
+      // Audit 4 (28 October 2026): a transfer to a store under another GSTIN is a tax invoice between
+      // distinct persons (CGST Act s.25(4)), so it is e-invoiced like a business invoice from the till.
+      const transfers = await db.stockDocument.findMany({
+        where: { companyId: company.id, kind: 'transfer_send', status: 'finalised', toStoreId: { not: null }, ...(company.goLiveDate ? { postingDate: { gte: company.goLiveDate } } : {}) },
+        select: { id: true, number: true, storeId: true, toStoreId: true },
+      });
+      const haveTransfers = new Set((await db.eInvoice.findMany({ where: { documentType: 'stock_document', documentId: { in: transfers.map((t) => t.id) } }, select: { documentId: true } })).map((e) => e.documentId));
+      for (const t of transfers.filter((x) => !haveTransfers.has(x.id))) {
+        const regs = await this.transferGst.registrations(db, t.storeId, t.toStoreId);
+        if (!regs) continue;
+        // Only a tax invoice: not a bill of supply (composition) nor a transfer sent before values were frozen.
+        const invoice = await eInvoiceSourceOfTransfer(db, t.id, this.transferGst).catch(() => null);
+        if (invoice) rows.push({ companyId: company.id, gstRegistrationId: regs.from.id, documentType: 'stock_document', documentId: t.id, documentNumber: t.number });
+      }
       if (rows.length) await db.eInvoice.createMany({ data: rows, skipDuplicates: true });
     }
-    const open = await db.eInvoice.findMany({ where: { companyId: company.id, documentType: 'pos_bill', status: { in: ['waiting', 'failed'] } }, select: { id: true, documentId: true } });
-    const cancelledBills = new Set((await db.posBill.findMany({ where: { id: { in: open.map((o) => o.documentId) }, status: 'cancelled' }, select: { id: true } })).map((b) => b.id));
-    const done = open.filter((o) => cancelledBills.has(o.documentId)).map((o) => o.id);
-    if (done.length) await db.eInvoice.updateMany({ where: { id: { in: done }, status: { in: ['waiting', 'failed'] } }, data: { status: 'cancelled', cancelledAt: new Date(), error: 'The bill was cancelled before registration' } });
+    const open = await db.eInvoice.findMany({ where: { companyId: company.id, status: { in: ['waiting', 'failed'] } }, select: { id: true, documentType: true, documentId: true } });
+    const cancelledBills = new Set((await db.posBill.findMany({ where: { id: { in: open.filter((o) => o.documentType === 'pos_bill').map((o) => o.documentId) }, status: 'cancelled' }, select: { id: true } })).map((b) => b.id));
+    const cancelledTransfers = new Set((await db.stockDocument.findMany({ where: { id: { in: open.filter((o) => o.documentType === 'stock_document').map((o) => o.documentId) }, status: 'cancelled' }, select: { id: true } })).map((d) => d.id));
+    const done = open.filter((o) => cancelledBills.has(o.documentId) || cancelledTransfers.has(o.documentId)).map((o) => o.id);
+    if (done.length) await db.eInvoice.updateMany({ where: { id: { in: done }, status: { in: ['waiting', 'failed'] } }, data: { status: 'cancelled', cancelledAt: new Date(), error: 'The document was cancelled before registration' } });
   }
 
   // ---- Lists ----
@@ -124,33 +200,26 @@ export class EInvoicesService {
   }
 
   private async dtos(rows: EInvoice[], turnoverBand: string) {
-    const bills = new Map(
-      (
-        await this.prisma.posBill.findMany({
-          where: { id: { in: rows.filter((r) => r.documentType === 'pos_bill').map((r) => r.documentId) } },
-          select: { id: true, kind: true, businessDate: true, total: true, buyerName: true, buyerGstin: true, status: true, returnOf: { select: { buyerName: true, buyerGstin: true, number: true } }, till: { select: { storeId: true } } },
-        })
-      ).map((b) => [b.id, b]),
-    );
+    const facts = await this.docFacts(this.prisma, rows);
     const stores = new Map((await this.prisma.store.findMany({ select: { id: true, code: true } })).map((s) => [s.id, s.code]));
     const today = businessDate();
     const now = new Date();
     return rows.map((r) => {
-      const b = bills.get(r.documentId);
-      const documentDate = isoDay(b?.businessDate) ?? businessDate(r.createdAt);
+      const b = facts.get(r.documentId);
+      const documentDate = b?.date ?? businessDate(r.createdAt);
       return {
         id: r.id,
         documentType: r.documentType,
         documentId: r.documentId,
         documentNumber: r.documentNumber,
-        documentKind: b?.kind === 'return' ? 'Credit note' : 'Invoice',
+        documentKind: r.documentType === 'stock_document' ? 'Transfer invoice' : b?.typ === 'CRN' ? 'Credit note' : 'Invoice',
         documentDate,
-        storeId: b?.till.storeId ?? '',
-        store: b ? (stores.get(b.till.storeId) ?? null) : null,
-        buyerName: b?.buyerName ?? b?.returnOf?.buyerName ?? null,
-        buyerGstin: b?.buyerGstin ?? b?.returnOf?.buyerGstin ?? null,
-        total: b ? D(b.total).abs().toFixed(2) : null,
-        billCancelled: b?.status === 'cancelled',
+        storeId: b?.storeId ?? '',
+        store: b ? (stores.get(b.storeId) ?? null) : null,
+        buyerName: b?.buyerName ?? null,
+        buyerGstin: b?.buyerGstin ?? null,
+        total: b?.total ?? null,
+        billCancelled: !!b?.cancelled,
         status: r.status,
         irn: r.irn,
         ackNumber: r.ackNumber,
@@ -170,8 +239,8 @@ export class EInvoicesService {
     const row = await this.prisma.eInvoice.findUnique({ where: { id } });
     const company = await this.company.current();
     if (!row || row.companyId !== company.id) throw new NotFoundException('E-invoice not found');
-    const bill = await this.prisma.posBill.findUnique({ where: { id: row.documentId }, select: { till: { select: { storeId: true } } } });
-    if (bill && !canAccessStore(user, bill.till.storeId)) throw new ForbiddenException('You are not allowed to work in this store');
+    const doc = (await this.docFacts(this.prisma, [row])).get(row.documentId);
+    if (doc && !canAccessStore(user, doc.storeId)) throw new ForbiddenException('You are not allowed to work in this store');
     return row;
   }
 
@@ -192,8 +261,8 @@ export class EInvoicesService {
         skipped.push({ id: r.id, documentNumber: r.documentNumber, problems: [`Already ${r.status}`] });
         continue;
       }
-      const { bill, source } = await eInvoiceSourceOf(this.prisma, r.documentId);
-      if (!canAccessStore(user, bill.till.storeId)) throw new ForbiddenException('You are not allowed to work in this store');
+      const { storeId, source } = await this.sourceOf(this.prisma, r.documentType, r.documentId);
+      if (!canAccessStore(user, storeId)) throw new ForbiddenException('You are not allowed to work in this store');
       const problems = eInvoiceProblems(source);
       if (gstin && source.seller.gstin !== gstin) problems.push(`One file is for one GSTIN; this invoice is under ${source.seller.gstin}, export it separately`);
       if (problems.length) {
@@ -231,15 +300,30 @@ export class EInvoicesService {
     await this.prisma.$transaction(async (tx) => {
       for (const res of results) {
         const label = res.documentNumber ?? res.irn ?? '(no document number)';
-        const row =
-          (res.documentNumber ? await tx.eInvoice.findFirst({ where: { companyId: company.id, documentNumber: { equals: res.documentNumber, mode: 'insensitive' } } }) : null) ??
-          (res.irn ? await tx.eInvoice.findFirst({ where: { companyId: company.id, irn: res.irn } }) : null);
+        // Audit 4 (28 October 2026): the portal's key is seller GSTIN + document type + number + date, so
+        // an answer is matched on all of them that the file gives, never on the number alone.
+        const byIrn = res.irn ? await tx.eInvoice.findFirst({ where: { companyId: company.id, irn: res.irn } }) : null;
+        let row = byIrn;
+        if (!row && res.documentNumber) {
+          const same = await tx.eInvoice.findMany({ where: { companyId: company.id, documentNumber: { equals: res.documentNumber, mode: 'insensitive' } } });
+          const regs = new Map((await tx.gstRegistration.findMany({ where: { id: { in: same.map((x) => x.gstRegistrationId) } }, select: { id: true, gstin: true } })).map((g) => [g.id, g.gstin]));
+          const facts = await this.docFacts(tx, same);
+          const fits = same.filter((x) => {
+            const f = facts.get(x.documentId);
+            return (!res.sellerGstin || regs.get(x.gstRegistrationId)?.toUpperCase() === res.sellerGstin) && (!res.documentType || f?.typ === res.documentType) && (!res.documentDate || f?.date === res.documentDate);
+          });
+          if (fits.length > 1) {
+            summary.problems.push(`${label}: more than one invoice has this number; the file must give the seller GSTIN, document type and date`);
+            continue;
+          }
+          row = fits[0] ?? null;
+        }
         if (!row) {
           summary.unmatched.push(label);
           continue;
         }
-        const bill = await tx.posBill.findUnique({ where: { id: row.documentId }, select: { till: { select: { storeId: true } } } });
-        if (bill && !canAccessStore(user, bill.till.storeId)) {
+        const doc = (await this.docFacts(tx, [row])).get(row.documentId);
+        if (doc && !canAccessStore(user, doc.storeId)) {
           summary.problems.push(`${row.documentNumber}: you are not allowed to work in its store`);
           continue;
         }
@@ -327,13 +411,24 @@ export class EInvoicesService {
     if (row.status === 'registered' && !eInvoiceCancellable(row.registeredAt, at)) {
       throw new BadRequestException('More than 24 hours have passed since the invoice was registered, so the portal no longer allows cancelling it. Make a credit note (a return against the invoice) instead.');
     }
+    // Audit 4 (28 October 2026), official cancel-IRN page: an IRN cannot be cancelled while a valid
+    // (active) e-way bill exists for it. A generated one with only Part A has no end date yet and is active.
+    if (row.status === 'registered') {
+      const eway = await this.prisma.eWayBill.findFirst({ where: { documentType: row.documentType, documentId: row.documentId, status: 'generated', OR: [{ validUntil: null }, { validUntil: { gte: at } }] } });
+      if (eway) throw new BadRequestException(`${eway.number ? `E-way bill ${eway.number}` : 'An e-way bill'} is still valid for ${row.documentNumber}. The portal does not allow cancelling the IRN while it is: cancel the e-way bill first, then the IRN.`);
+    }
     const reason = `${EINVOICE_CANCEL_REASONS[input.reason]}${input.remark ? `: ${input.remark}` : ''}`;
     await this.prisma.$transaction(async (tx) => {
       const done = await tx.eInvoice.updateMany({ where: { id, status: row.status }, data: { status: 'cancelled', cancelledAt: at, updatedById: actor.userId } });
       if (done.count !== 1) throw new BadRequestException('This e-invoice was changed by someone else; open it again');
       await this.audit.record(tx, actor, { action: 'update', entityType: 'e_invoice', entityId: id, changes: { document: row.documentNumber, status: { old: row.status, new: 'cancelled' }, irn: row.irn }, reason });
     });
-    return this.one(id, user);
+    // Audit 4: without its IRN the bill is no longer a valid tax invoice, so the shop must cancel it too (or make a return).
+    const message =
+      row.status === 'registered'
+        ? `The IRN of ${row.documentNumber} is cancelled. Without an IRN this ${row.documentType === 'stock_document' ? 'transfer invoice' : 'bill'} is not a valid tax invoice: now cancel the ${row.documentType === 'stock_document' ? 'transfer' : 'bill'} itself in the shop (or make a return against it).`
+        : `The e-invoice of ${row.documentNumber} is cancelled; it was never registered on the portal.`;
+    return { ...(await this.one(id, user)), message };
   }
 
   async one(id: string, user: CurrentUser) {
@@ -363,8 +458,8 @@ export class EInvoicesService {
    * portal's answer is imported, then the IRN, acknowledgement and the signed QR code.
    * Empty for bills that need no e-invoice.
    */
-  async printBlock(billId: string): Promise<{ details: [string, string][]; notice: string | null; qr: PrintQr | null }> {
-    const e = await this.forDocument('pos_bill', billId);
+  async printBlock(billId: string, documentType: 'pos_bill' | 'stock_document' = 'pos_bill'): Promise<{ details: [string, string][]; notice: string | null; qr: PrintQr | null }> {
+    const e = await this.forDocument(documentType, billId);
     if (!e) return { details: [], notice: null, qr: null };
     if (e.status === 'registered') {
       return {

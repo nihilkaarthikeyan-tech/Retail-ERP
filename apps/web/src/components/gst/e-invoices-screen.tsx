@@ -7,7 +7,7 @@
 
 import { useRef, useState } from "react";
 import { EINVOICE_CANCEL_REASONS } from "shared";
-import { Alert, Badge, Button, DataTable, Dialog, SelectInput, TextInput, TextareaInput, type Column } from "@/components/ui";
+import { Alert, Badge, Button, DataTable, Dialog, SelectInput, TextInput, TextareaInput, type Column, useToast } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { documentPrintHref, EINVOICE_STATUS, type EInvoiceList, type EInvoiceRow, type ExportResult, saveTextFile } from "@/lib/gst-portal";
@@ -238,6 +238,7 @@ export function EInvoicesScreen() {
 }
 
 function CancelDialog({ row, onClose, onDone }: { row: EInvoiceRow | null; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
   const [reason, setReason] = useState<keyof typeof EINVOICE_CANCEL_REASONS>("2");
   const [remark, setRemark] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -247,7 +248,9 @@ function CancelDialog({ row, onClose, onDone }: { row: EInvoiceRow | null; onClo
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/gst/e-invoices/${row.id}/cancel`, { reason, remark: remark.trim() || undefined });
+      const done = await api.post<{ message?: string | null }>(`/gst/e-invoices/${row.id}/cancel`, { reason, remark: remark.trim() || undefined });
+      // Audit 4: the bill or transfer itself still has to be cancelled in the shop (or a return made).
+      if (done?.message) toast?.show(done.message, "info");
       onClose();
       onDone();
     } catch (err) {

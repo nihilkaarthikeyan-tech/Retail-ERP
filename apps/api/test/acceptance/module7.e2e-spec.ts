@@ -141,7 +141,7 @@ describe('7.1 a till shift is posted when it closes (decision 39)', () => {
         clientId: randomUUID(),
         tillId,
         soldAt: new Date().toISOString(),
-        ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: rice.id, quantity: '1', returnOfLineId: riceLine.id }] },
+        buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: rice.id, quantity: '1', returnOfLineId: riceLine.id }] },
         sale: { number: num(), lines: [{ lineNo: 1, itemId: bag.id, quantity: '1' }] },
         payments: [{ paymentMethodId: pm.CASH, amount: '-57' }],
       })

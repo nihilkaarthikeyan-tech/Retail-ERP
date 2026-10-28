@@ -94,7 +94,7 @@ async function sell(lines: Record<string, unknown>[], total: string, extra: Reco
 }
 
 async function giveBack(original: Bill, itemId: string, quantity: string, refund: string): Promise<Bill> {
-  const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: original.id, lines: [{ lineNo: 1, itemId, quantity, returnOfLineId: original.lines[0].id }] }, payments: [{ paymentMethodId: pm.CARD, amount: `-${refund}`, reference: `REF${n}` }] };
+  const body = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: original.id, lines: [{ lineNo: 1, itemId, quantity, returnOfLineId: original.lines[0].id }] }, payments: [{ paymentMethodId: pm.CARD, amount: `-${refund}`, reference: `REF${n}` }] };
   const res = await T(owner.post('/pos/bills')).send(body);
   if (res.status !== 201) throw new Error(`Return refused: ${res.status} ${JSON.stringify(res.body)}`);
   return res.body.return as Bill;
@@ -148,7 +148,8 @@ describe('8.8 GSTR-1 and HSN summary for a month; 8.9 GSTR-3B', () => {
     const c = await sell([{ itemId: shirt.id, quantity: '1' }], '1050', { buyer: { gstin: KA_GSTIN, name: 'Kaveri Traders', address: '12 MG Road, Bengaluru 560001' } });
     await sell([{ itemId: shirt.id, quantity: '1' }], '1050', { buyer: { gstin: TN_GSTIN, name: 'Tamil Textiles', address: '5 Anna Salai, Chennai' } });
     // A large consumer bill to another state (above ₹2.5 lakh, so B2CL under either limit).
-    const d = await sell([{ itemId: watch.id, quantity: '1' }], '295000', { buyer: { name: 'Ravi Kumar', address: '8 Brigade Road, Bengaluru', stateCode: '29' } });
+    // Audit 4 (T1): a walk-in taking goods at the counter is taxed in the shop's state; delivered to Karnataka, it is IGST.
+    const d = await sell([{ itemId: watch.id, quantity: '1' }], '295000', { buyer: { name: 'Ravi Kumar', address: '8 Brigade Road, Bengaluru', stateCode: '29' }, delivery: { address: '8 Brigade Road, Bengaluru', stateCode: '29' } });
     // A bill cancelled with the owner's PIN: it counts only in documents issued.
     const f = await sell([{ itemId: rice.id, quantity: '1' }], '105');
     await owner.post('/pos/pin').send({ pin: '7391', currentPassword: OWNER.password }).expect(200);

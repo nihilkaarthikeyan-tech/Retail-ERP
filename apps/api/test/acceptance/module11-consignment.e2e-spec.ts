@@ -146,7 +146,7 @@ describe('11.23 supplier sale-or-return', () => {
     await sell(handbag.id, '5', '2995').expect(201);
     const second = (await sell(handbag.id, '3', '1797').expect(201)).body;
     await T(owner.post('/pos/bills'))
-      .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: second.sale.id, lines: [{ lineNo: 1, itemId: handbag.id, quantity: '1', returnOfLineId: second.sale.lines[0].id }] }, payments: cash('-599') })
+      .send({ clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: second.sale.id, lines: [{ lineNo: 1, itemId: handbag.id, quantity: '1', returnOfLineId: second.sale.lines[0].id }] }, payments: cash('-599') })
       .expect(201);
     expect((await position(handbag.id)).q).toBe('18');
     // Only goods still held on sale or return may go back: 13 are left.

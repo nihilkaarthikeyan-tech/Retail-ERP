@@ -133,7 +133,8 @@ describe("home delivery on the till (plan 11 B4, scenario 11.13)", () => {
     const bill = priceBill(d, { snapshot: snapshot(), date: DATE });
     expect(bill.net.toFixed(2)).toBe("1349.00");
     const charge = bill.sale!.lines.find((l) => l.isDelivery)!;
-    expect([charge.lineNo, charge.amount.toFixed(2), charge.gstRate.toString()]).toEqual([2, "50.00", "18"]);
+    // Audit 4 (T4): delivery with the goods is one composite supply, taxed at the goods' rate.
+    expect([charge.lineNo, charge.amount.toFixed(2), charge.gstRate.toString()]).toEqual([2, "50.00", "12"]);
     const online = buildTransaction({ ...d, payments: [{ methodId: CASH, amount: "1349", reference: "" }] }, bill, snapshot().till.paymentMethods, options(false));
     expect(online.sale!.lines.map((l) => l.itemId)).toEqual([SHIRT]);
     expect(online.delivery).toEqual({ name: "Lakshmi", address: "12 Gandhi Street", phone: "9840012345", deliverOn: DATE });

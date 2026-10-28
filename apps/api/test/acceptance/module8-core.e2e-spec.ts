@@ -186,7 +186,7 @@ describe('Module 8: GST at the till', () => {
   });
 
   it('8.5 a return of the 8.1 shirt is a credit note naming the original bill; it reverses taxable ₹1,000.00, CGST ₹25.00, SGST ₹25.00', async () => {
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: first.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: first.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: first.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
     const res = (await T(owner.post('/pos/bills')).send(back).expect(201)).body;
     expect(res.return).toMatchObject({ total: '-1050.00', taxableAmount: '-1000.00', cgst: '-25.00', sgst: '-25.00', igst: '0.00', documentTitle: 'Credit note', invoiceKind: 'consumer', placeOfSupply: '33', creditNoteLate: false, originalBill: { number: first.number, date: today() } });
     expect(res.receipts[0].gst).toMatchObject({ title: 'Credit note', original: { number: first.number, date: today() } });
@@ -204,9 +204,10 @@ describe('Module 8: GST at the till', () => {
     const old = (await T(owner.post('/pos/bills')).send(offlineSale('2025-03-15', '2024-25', [{ itemId: shirt.id, quantity: '1' }], '1050')).expect(201)).body.sale;
     expect(old.lines.map(lineTax)).toEqual([['12', '937.50', '56.25', '56.25', '0.00']]);
     const stockBefore = await prisma.stockPosition.findUniqueOrThrow({ where: { itemId_locationId: { itemId: shirt.id, locationId: loc['MAIN-FLOOR'] } } });
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: old.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: old.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: old.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: old.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
     const res = (await T(owner.post('/pos/bills')).send(back).expect(201)).body;
-    expect(res.return).toMatchObject({ total: '-1050.00', taxableAmount: '-937.50', cgst: '-56.25', sgst: '-56.25', creditNoteLate: true });
+    // Audit 4 (T7, CGST Act s.34(2)): the customer gets the money back but the GST is not reduced: a return note.
+    expect(res.return).toMatchObject({ total: '-1050.00', taxableAmount: '-1050.00', cgst: '0.00', sgst: '0.00', creditNoteLate: true, documentTitle: 'Return note' });
     expect(res.return.checkFlags).toContain('credit_note_late');
     expect(res.warnings.join(' ')).toMatch(/after 2025-11-30.*can no longer be reduced/);
     expect(res.receipts[0].gst.creditNoteLate).toBe(true);
@@ -216,7 +217,7 @@ describe('Module 8: GST at the till', () => {
 
   it('8.5 a return of the business invoice to Karnataka reverses IGST', async () => {
     const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050', { buyer: { gstin: KA_GSTIN, name: 'Kaveri Traders', address: 'Bengaluru' } })).expect(201)).body.sale;
-    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), ret: { number: num(), returnOfId: res.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: res.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
+    const back = { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), buyer: { name: 'Walk-in customer' }, ret: { number: num(), returnOfId: res.id, lines: [{ lineNo: 1, itemId: shirt.id, quantity: '1', returnOfLineId: res.lines[0].id }] }, payments: [{ paymentMethodId: pm.CASH, amount: '-1050' }] };
     const ret = (await T(owner.post('/pos/bills')).send(back).expect(201)).body.return;
     expect(ret).toMatchObject({ invoiceKind: 'business', buyerGstin: KA_GSTIN, placeOfSupply: '29', igst: '-50.00', cgst: '0.00', taxableAmount: '-1000.00' });
   });
@@ -294,14 +295,16 @@ describe('8.6 composition scheme', () => {
   });
 
   it('the same sale is a bill of supply with the declaration and no tax', async () => {
-    const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050', { buyer: { gstin: KA_GSTIN, name: 'Kaveri Traders', address: 'Bengaluru' } })).expect(201)).body;
+    // Audit 4 (T3): a composition shop sells only within its state, so the buyer is a Tamil Nadu business.
+    const res = (await T(owner.post('/pos/bills')).send(sale([{ itemId: shirt.id, quantity: '1' }], '1050', { buyer: { gstin: withCheck('33AABCK1234A1Z'), name: 'Kaveri Traders', address: 'Chennai' } })).expect(201)).body;
     expect(res.sale).toMatchObject({ invoiceKind: 'bill_of_supply', documentTitle: 'Bill of supply', taxableAmount: '1050.00', cgst: '0.00', sgst: '0.00', igst: '0.00', total: '1050.00' });
     expect(res.sale.lines[0]).toMatchObject({ gstRate: '0', cgst: '0.00' });
     expect(res.receipts[0].gst).toMatchObject({ title: 'Bill of supply', declaration: 'Composition taxable person, not eligible to collect tax on supplies' });
     expect(res.receipts[0].gstTable).toEqual([]);
     const a4 = (await owner.get(`/print/pos_bill/${res.sale.id}`).expect(200)).body;
     expect(a4.title).toBe('Bill of supply');
-    expect(a4.details[0]).toEqual(['Declaration', 'Composition taxable person, not eligible to collect tax on supplies']);
+    // Audit 4 (rule 5(1)(f)): the declaration is at the top of the bill.
+    expect(a4.notice).toContain('Composition taxable person, not eligible to collect tax on supplies');
     expect(a4.columns.map((c: { key: string }) => c.key)).not.toContain('cgst');
     expect(a4.totals.map((t: string[]) => t[0])).toEqual(['Value', 'Total']);
   });
