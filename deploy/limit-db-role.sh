@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] || { echo "No deploy/.env"; exit 1; }
 # Read only the two names needed (the file holds values a shell cannot read as a script).
-val() { grep -m1 "^$1=" .env | cut -d= -f2- | tr -d ''; }
+val() { grep -m1 "^$1=" .env | cut -d= -f2- | tr -d '\r'; }
 POSTGRES_USER=$(val POSTGRES_USER); POSTGRES_DB=$(val POSTGRES_DB)
 [ -n "$POSTGRES_USER" ] && [ -n "$POSTGRES_DB" ] || { echo "POSTGRES_USER / POSTGRES_DB missing in deploy/.env"; exit 1; }
 PW=$(openssl rand -hex 24)
