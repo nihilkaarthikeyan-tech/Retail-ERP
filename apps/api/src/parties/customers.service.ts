@@ -18,6 +18,7 @@ import { CompanyService } from '../company/company.service.js';
 import type { Customer, Prisma } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { assertModuleOn } from '../modules/module-map.js';
+import { GstinCheckService } from '../gst/gstin-check/gstin-check.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ContactsService } from './contacts.service.js';
 import { PartyMastersService } from './party-masters.service.js';
@@ -43,6 +44,7 @@ export class CustomersService {
     private readonly masters: PartyMastersService,
     private readonly settings: PartySettingsService,
     private readonly contacts: ContactsService,
+    private readonly gstinCheck: GstinCheckService,
   ) {}
 
   // ---- Reading ----
@@ -106,6 +108,7 @@ export class CustomersService {
     await this.checkRefs(input);
     if (input.code && (await this.prisma.customer.findFirst({ where: { code: input.code } }))) throw new ConflictException(`Customer code ${input.code} already exists`);
     if (input.mobile) await this.checkDuplicateMobile(company.id, input.mobile, null, input.confirmDuplicate ?? false);
+    await this.gstinCheck.checkBeforeSave(input.gstin, actor);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const code = input.code ?? (await this.numbering.allocate(tx, { companyId: company.id, documentKind: CUSTOMER_NUMBER_SERIES.documentKind }));
@@ -145,6 +148,10 @@ export class CustomersService {
         await this.contacts.createContactIn(tx, 'customer', customer.id, { name: input.name, mobile: input.mobile ?? null, email: input.email ?? null, isMain: true }, actor);
       }
       if (input.address) await this.contacts.createAddressIn(tx, 'customer', customer.id, { ...input.address, isMain: true }, actor);
+      if (customer.gstin) {
+        await this.gstinCheck.applyToParty(tx, 'customer', customer.id, customer.gstin);
+        return tx.customer.findUniqueOrThrow({ where: { id: customer.id }, include: customerInclude });
+      }
       return customer;
     });
     return toCustomerDto(created);
@@ -159,10 +166,14 @@ export class CustomersService {
     if (input.mobile && input.mobile !== before.mobile) await this.checkDuplicateMobile(before.companyId, input.mobile, id, input.confirmDuplicate ?? false);
     const { confirmDuplicate: _c, ...data } = input;
     const dates = this.checkDates(input, before);
+    const gstinChanged = input.gstin !== undefined && (input.gstin ?? null) !== before.gstin;
+    if (gstinChanged) await this.gstinCheck.checkBeforeSave(input.gstin, actor);
     const updated = await this.prisma.$transaction(async (tx) => {
       const after = await tx.customer.update({ where: { id }, data: { ...data, ...dates, stateCode, updatedById: actor.userId }, include: customerInclude });
       await this.audit.recordUpdate(tx, actor, 'customer', id, summarise(before), summarise(after));
-      return after;
+      if (!gstinChanged) return after;
+      await this.gstinCheck.applyToParty(tx, 'customer', id, after.gstin);
+      return tx.customer.findUniqueOrThrow({ where: { id }, include: customerInclude });
     });
     return toCustomerDto(updated);
   }
@@ -330,6 +341,8 @@ export function toCustomerDto(c: CustomerRow) {
     anniversaryYear: c.anniversaryYear,
     customerGroup: c.customerGroup,
     gstin: c.gstin,
+    /** Plan 15: what the GST network said, when last checked (null: not checked yet). */
+    gstinCheck: c.gstinStatus ? { status: c.gstinStatus, legalName: c.gstinLegalName, tradeName: c.gstinTradeName, cancelledOn: c.gstinCancelledOn ? c.gstinCancelledOn.toISOString().slice(0, 10) : null, checkedAt: c.gstinCheckedAt } : null,
     taxSituation: c.taxSituation,
     stateCode: c.stateCode,
     priceList: c.priceList,

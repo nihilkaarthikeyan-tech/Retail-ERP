@@ -44,6 +44,8 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       LEAD_ALERT_TO: ${LEAD_ALERT_TO:-}
+      # Plan 15: GSTIN checks (set with deploy/set-gstin-key.sh).
+      GSTINAPI_KEY: ${GSTINAPI_KEY:-}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-4061}:4000"
 

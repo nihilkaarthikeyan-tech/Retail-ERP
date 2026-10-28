@@ -50,8 +50,12 @@ Size: one session.
 
 Supplier return filing status (Stage 2), e-invoices and e-way bills sent directly (Stage 3), bulk checks of an imported list (can come later with the import screen).
 
-## For the owner to decide
+## Decided (owner, 28 October 2026)
 
-1. Approve this plan.
-2. When a GSTIN is cancelled: **warn but allow saving** (recommended, as above), or refuse?
-3. Re-check every **90 days** (recommended), or another interval?
+The owner asked to proceed and to launch as soon as possible, leaving the choices to the recommendations:
+
+1. Plan approved; built the same day.
+2. A cancelled, suspended or unknown GSTIN is **warned about, never refused**: the record can always be saved.
+3. GSTINs are checked again every **90 days** (Settings, GST: 30 to 365 days), at night, at most 50 records per shop per night; at most 300 paid checks per shop per day.
+
+Built as planned, with two simplifications: each check is kept in its own table (`GstinCheck`) instead of the change history, and the till's buyer box and an address's own GSTIN are left for a later small step.

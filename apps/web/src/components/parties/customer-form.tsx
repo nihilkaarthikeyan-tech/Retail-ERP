@@ -199,7 +199,15 @@ export function CustomerForm({ customer, groups, priceLists, terms, settings, re
         <legend>GST</legend>
         {walkIn ? <p className="muted">The walk-in customer has no GSTIN.</p> : null}
         <div className="form-grid">
-          <GstinStateFields idPrefix="cus" values={{ gstin: form.gstin, stateCode: form.stateCode }} onChange={(v) => setForm((f) => ({ ...f, ...v }))} errors={errors} withoutGstin={walkIn} />
+          <GstinStateFields
+            idPrefix="cus"
+            values={{ gstin: form.gstin, stateCode: form.stateCode }}
+            onChange={(v) => setForm((f) => ({ ...f, ...v }))}
+            errors={errors}
+            withoutGstin={walkIn}
+            saved={customer ? { gstin: customer.gstin, check: customer.gstinCheck } : null}
+            onUseDetails={(facts) => setForm((f) => ({ ...f, name: facts.tradeName || facts.legalName || f.name, isBusiness: true }))}
+          />
         </div>
       </fieldset>
 

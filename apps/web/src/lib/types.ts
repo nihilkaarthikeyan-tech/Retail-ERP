@@ -408,6 +408,8 @@ export interface CustomerDto {
   anniversaryYear: number | null;
   customerGroup: PartyRef;
   gstin: string | null;
+  /** Plan 15: what the GST network said, when last checked. */
+  gstinCheck?: SavedGstinCheck | null;
   stateCode: string | null;
   priceList: PartyRef | null;
   paymentTerms: PartyRef | null;
@@ -452,6 +454,8 @@ export interface SupplierDto {
   supplierGroup: PartyRef;
   isTransporter: boolean;
   gstin: string | null;
+  /** Plan 15: what the GST network said, when last checked. */
+  gstinCheck?: SavedGstinCheck | null;
   pan: string | null;
   stateCode: string | null;
   priceList: PartyRef | null;
@@ -696,4 +700,13 @@ export interface InventorySettingsDto {
   batchPickOrder: "earliest_expiry" | "oldest_first";
   transitLocationId?: string | null;
   updatedAt: string;
+}
+
+/** Plan 15: what a saved customer or supplier record says about its GSTIN (the GST network's last answer). */
+export interface SavedGstinCheck {
+  status: string;
+  legalName: string | null;
+  tradeName: string | null;
+  cancelledOn: string | null;
+  checkedAt: string | null;
 }

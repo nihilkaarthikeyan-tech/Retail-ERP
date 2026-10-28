@@ -4934,3 +4934,48 @@ button.shell-nav-heading[aria-expanded="false"] .shell-nav-chevron {
   color: var(--muted);
   margin-top: 2px;
 }
+
+/* Plan 15: the GST network's answer under a GSTIN. */
+.gstin-check {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  margin: -4px 0 12px;
+}
+
+.gstin-check-result {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.gstin-check-result p {
+  margin: 0 0 6px;
+}
+
+.gstin-check-result.is-good {
+  border-left-color: var(--ok, #1a7f4b);
+}
+
+.gstin-check-result.is-bad {
+  border-left-color: var(--danger);
+}
+
+.gstin-check-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 0 0 8px;
+}
+
+.gstin-check-facts dt {
+  color: var(--muted);
+}
+
+.gstin-check-facts dd {
+  margin: 0;
+}

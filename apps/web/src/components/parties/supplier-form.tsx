@@ -169,7 +169,14 @@ export function SupplierForm({ supplier, groups, priceLists, terms, settings, re
       <fieldset disabled={readOnly}>
         <legend>Tax</legend>
         <div className="form-grid">
-          <GstinStateFields idPrefix="sup" values={{ gstin: form.gstin, stateCode: form.stateCode }} onChange={(v) => setForm((f) => ({ ...f, ...v, pan: panInGstin(v.gstin) ?? f.pan }))} errors={errors} />
+          <GstinStateFields
+            idPrefix="sup"
+            values={{ gstin: form.gstin, stateCode: form.stateCode }}
+            onChange={(v) => setForm((f) => ({ ...f, ...v, pan: panInGstin(v.gstin) ?? f.pan }))}
+            errors={errors}
+            saved={supplier ? { gstin: supplier.gstin, check: supplier.gstinCheck } : null}
+            onUseDetails={(facts) => setForm((f) => ({ ...f, name: facts.tradeName || facts.legalName || f.name, isBusiness: true }))}
+          />
           <TextInput id="sup-pan" label="PAN" value={panFromGstin ?? form.pan} onChange={set("pan")} error={errors.pan} className="mono" autoComplete="off" maxLength={10} readOnly={panFromGstin !== null} hint={panFromGstin ? "Taken from the GSTIN." : "10 characters. For suppliers without a GSTIN."} />
         </div>
       </fieldset>

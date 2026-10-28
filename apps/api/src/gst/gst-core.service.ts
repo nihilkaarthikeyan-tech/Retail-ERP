@@ -46,6 +46,8 @@ export function gstSettingsDto(s: GstSettings) {
     eWayStateLimits: (s.eWayStateLimits ?? {}) as Record<string, string>,
     defaultTransporterId: s.defaultTransporterId,
     defaultTransporterName: s.defaultTransporterName,
+    gstinChecks: s.gstinChecks,
+    gstinRecheckDays: s.gstinRecheckDays,
     updatedAt: s.updatedAt,
   };
 }

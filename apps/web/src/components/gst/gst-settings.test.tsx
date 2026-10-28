@@ -16,6 +16,8 @@ const user = (permissions: string[]) => ({ id: "u1", firstName: "Ravi", lastName
 
 const settings = (over: Partial<GstSettingsDto> = {}): GstSettingsDto => ({
   scheme: "regular",
+  gstinChecks: true,
+  gstinRecheckDays: 90,
   filingFrequency: "quarterly",
   turnoverBand: "up_to_5cr",
   hsnDigits: 4,

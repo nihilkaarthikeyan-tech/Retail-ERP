@@ -2,6 +2,7 @@
 "use client";
 
 import { StateOptions } from "@/components/address-fields";
+import { type GstinFactsDto, GstinCheckBox, type SavedGstinCheck } from "@/components/parties/gstin-check-box";
 import { SelectInput, TextInput } from "@/components/ui";
 import { stateFromGstin } from "@/lib/parties";
 import type { FieldErrors } from "@/lib/validation";
@@ -21,13 +22,17 @@ interface GstinStateFieldsProps {
   withoutGstin?: boolean;
   stateRequired?: boolean;
   gstinHint?: string;
+  /** Plan 15: what the saved record said about its GSTIN, shown while the GSTIN is unchanged. */
+  saved?: { gstin: string | null; check: SavedGstinCheck | null | undefined } | null;
+  /** Plan 15: fill the form from the GST network's answer. */
+  onUseDetails?: (facts: GstinFactsDto) => void;
 }
 
 /**
  * GSTIN and state together: the state is read from the GSTIN's first two
  * digits and cannot be changed while a GSTIN is typed (the API checks the same).
  */
-export function GstinStateFields({ idPrefix, values, onChange, errors = {}, disabled, withoutGstin, stateRequired, gstinHint }: GstinStateFieldsProps) {
+export function GstinStateFields({ idPrefix, values, onChange, errors = {}, disabled, withoutGstin, stateRequired, gstinHint, saved, onUseDetails }: GstinStateFieldsProps) {
   const hasGstin = values.gstin.trim() !== "";
   return (
     <>
@@ -48,6 +53,9 @@ export function GstinStateFields({ idPrefix, values, onChange, errors = {}, disa
           disabled={disabled}
           hint={gstinHint ?? "15 characters; the state is read from its first two digits."}
         />
+      ) : null}
+      {!withoutGstin ? (
+        <GstinCheckBox gstin={values.gstin} saved={saved && saved.gstin === values.gstin.trim().toUpperCase() ? saved.check : null} onUseDetails={onUseDetails} disabled={disabled} />
       ) : null}
       <SelectInput
         id={`${idPrefix}-stateCode`}

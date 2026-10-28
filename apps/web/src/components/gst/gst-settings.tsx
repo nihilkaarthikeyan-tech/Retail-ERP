@@ -26,6 +26,8 @@ export interface GstSettingsDto {
   eWayStateLimits: Record<string, string>;
   defaultTransporterId: string | null;
   defaultTransporterName: string | null;
+  gstinChecks: boolean;
+  gstinRecheckDays: number;
 }
 
 export const TURNOVER_LABELS: Record<GstSettingsDto["turnoverBand"], string> = {
@@ -69,6 +71,8 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
       eWayLimit: form.eWayLimit.trim(),
       defaultTransporterId: form.defaultTransporterId?.trim() || null,
       defaultTransporterName: form.defaultTransporterName?.trim() || null,
+      gstinChecks: form.gstinChecks,
+      gstinRecheckDays: Number(form.gstinRecheckDays),
     };
     const parsed = gstSettingsSchema.safeParse(input);
     setErrors(issuesToFieldErrors(parsed));
@@ -126,6 +130,11 @@ function Form({ s, canEdit, onSaved }: { s: GstSettingsDto; canEdit: boolean; on
       {isOn("einvoice") ? <CheckInput id="gst-einvoice" label="E-invoicing applies to this business" description="Business invoices are registered on the e-invoice portal (turnover above ₹5 crore)." checked={form.eInvoiceApplies} disabled={!canEdit} onChange={(e) => set("eInvoiceApplies", e.target.checked)} /> : null}
       <CheckInput id="gst-tax-table" label="Show the GST table on till receipts" checked={form.receiptTaxTable} disabled={!canEdit} onChange={(e) => set("receiptTaxTable", e.target.checked)} />
       <CheckInput id="gst-small-sales" label="Show sales under ₹200 as one combined daily invoice in the reports" description="Every bill is still recorded; this only changes the report." checked={form.combineSmallSales} disabled={!canEdit} onChange={(e) => set("combineSmallSales", e.target.checked)} />
+      {/* Plan 15: GSTIN checks with the GST network. */}
+      <CheckInput id="gst-gstin-checks" label="Check customers' and suppliers' GSTINs with the GST network" description="Shows the legal name and whether the GSTIN is active or cancelled. Saving is never stopped." checked={form.gstinChecks} disabled={!canEdit} onChange={(e) => set("gstinChecks", e.target.checked)} />
+      {form.gstinChecks ? (
+        <TextInput id="gst-gstin-recheck" label="Check each GSTIN again after (days)" type="number" min={30} max={365} value={String(form.gstinRecheckDays)} disabled={!canEdit} onChange={(e) => set("gstinRecheckDays", Number(e.target.value))} error={errors.gstinRecheckDays} hint="Re-checked at night, a few at a time. 90 days is usual." />
+      ) : null}
       <SelectInput id="gst-free-samples" label="Free samples" value={form.freeSampleTax} disabled={!canEdit} error={errors.freeSampleTax} onChange={(e) => set("freeSampleTax", e.target.value as GstSettingsDto["freeSampleTax"])}>
         {Object.entries(FREE_SAMPLE_LABELS).map(([k, v]) => (
           <option key={k} value={k}>

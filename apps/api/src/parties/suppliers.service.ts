@@ -6,6 +6,7 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import type { Prisma, Supplier } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
+import { GstinCheckService } from '../gst/gstin-check/gstin-check.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ContactsService } from './contacts.service.js';
 import { PartyMastersService } from './party-masters.service.js';
@@ -31,6 +32,7 @@ export class SuppliersService {
     private readonly masters: PartyMastersService,
     private readonly settings: PartySettingsService,
     private readonly contacts: ContactsService,
+    private readonly gstinCheck: GstinCheckService,
   ) {}
 
   async list(q: SupplierQuery) {
@@ -74,6 +76,7 @@ export class SuppliersService {
     const { stateCode, pan } = this.checkTax(input.gstin ?? null, input.pan ?? null, input.stateCode ?? null);
     await this.checkRefs(input);
     if (input.code && (await this.prisma.supplier.findFirst({ where: { code: input.code } }))) throw new ConflictException(`Supplier code ${input.code} already exists`);
+    await this.gstinCheck.checkBeforeSave(input.gstin, actor);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const code = input.code ?? (await this.numbering.allocate(tx, { companyId: company.id, documentKind: SUPPLIER_NUMBER_SERIES.documentKind }));
@@ -108,6 +111,7 @@ export class SuppliersService {
         await this.contacts.createContactIn(tx, 'supplier', supplier.id, { name: input.name, mobile: input.mobile ?? null, email: input.email ?? null, isMain: true }, actor);
       }
       if (input.address) await this.contacts.createAddressIn(tx, 'supplier', supplier.id, { ...input.address, isMain: true }, actor);
+      if (supplier.gstin) await this.gstinCheck.applyToParty(tx, 'supplier', supplier.id, supplier.gstin);
       return tx.supplier.findUniqueOrThrow({ where: { id: supplier.id }, include: supplierInclude });
     });
     return toSupplierDto(created);
@@ -141,12 +145,15 @@ export class SuppliersService {
     if (input.supplierGroupId && input.supplierGroupId !== before.supplierGroupId) await this.masters.assertLeafSupplierGroup(this.prisma, input.supplierGroupId);
     await this.checkRefs(input);
     const { linkedCustomerId, ...data } = input;
+    const gstinChanged = input.gstin !== undefined && (input.gstin ?? null) !== before.gstin;
+    if (gstinChanged) await this.gstinCheck.checkBeforeSave(input.gstin, actor);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.supplier.update({
         where: { id },
         data: { ...data, ...(tax ? { stateCode: tax.stateCode, pan: tax.pan } : {}), updatedById: actor.userId },
       });
       if (linkedCustomerId !== undefined) await this.linkCustomer(tx, id, linkedCustomerId, actor);
+      if (gstinChanged) await this.gstinCheck.applyToParty(tx, 'supplier', id, input.gstin ?? null);
       const after = await tx.supplier.findUniqueOrThrow({ where: { id }, include: supplierInclude });
       await this.audit.recordUpdate(tx, actor, 'supplier', id, summarise(before), summarise(after));
       return after;
@@ -267,6 +274,8 @@ export function toSupplierDto(s: SupplierRow) {
     supplierGroup: s.supplierGroup,
     isTransporter: s.isTransporter,
     gstin: s.gstin,
+    /** Plan 15: what the GST network said, when last checked (null: not checked yet). */
+    gstinCheck: s.gstinStatus ? { status: s.gstinStatus, legalName: s.gstinLegalName, tradeName: s.gstinTradeName, cancelledOn: s.gstinCancelledOn ? s.gstinCancelledOn.toISOString().slice(0, 10) : null, checkedAt: s.gstinCheckedAt } : null,
     pan: s.pan,
     stateCode: s.stateCode,
     priceList: s.priceList,

@@ -66,6 +66,7 @@ model Company {
   catalogueSettings CatalogueSettings?
   customers         Customer[]
   suppliers         Supplier[]
+  gstinChecks       GstinCheck[]
   partySettings     PartySettings?
   stockLocations    StockLocation[]
 }
@@ -965,6 +966,12 @@ model Customer {
   notes                 String?
   customerGroupId       String      @db.Uuid
   gstin                 String?
+  /// Plan 15: what the GST network said about the GSTIN when last checked: active, cancelled, suspended, inactive, not_found.
+  gstinStatus           String?
+  gstinLegalName        String?
+  gstinTradeName        String?
+  gstinCancelledOn      DateTime?   @db.Date
+  gstinCheckedAt        DateTime?
   /// Plan 08 G3: regular, unregistered, sez, exempt or reverse_charge; empty = worked out from the GSTIN.
   taxSituation          String?
   stateCode             String?
@@ -1037,6 +1044,12 @@ model Supplier {
   supplierGroupId         String      @db.Uuid
   isTransporter           Boolean     @default(false)
   gstin                   String?
+  /// Plan 15: what the GST network said about the GSTIN when last checked: active, cancelled, suspended, inactive, not_found.
+  gstinStatus             String?
+  gstinLegalName          String?
+  gstinTradeName          String?
+  gstinCancelledOn        DateTime?   @db.Date
+  gstinCheckedAt          DateTime?
   /// Plan 08 G3: regular, unregistered, sez, exempt or reverse_charge; empty = worked out from the GSTIN.
   taxSituation            String?
   pan                     String?
@@ -3202,6 +3215,9 @@ model GstSettings {
   approvedAt             DateTime?
   approvedById           String?   @db.Uuid
   approvalNote           String?
+  /// Plan 15: check GSTINs with the GST network, and again after this many days.
+  gstinChecks            Boolean   @default(true)
+  gstinRecheckDays       Int       @default(90)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3505,4 +3521,28 @@ model ReferenceDataVersion {
   key      String   @id
   version  String
   loadedAt DateTime @default(now())
+}
+
+/// Plan 15 (owner, 28 October 2026): each GSTIN check with the GST network, for the history,
+/// for reusing a fresh answer instead of paying twice, and for counting checks per shop.
+model GstinCheck {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId   String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id          String   @id @default(uuid()) @db.Uuid
+  gstin       String
+  /// gstinapi.in, fake (tests).
+  provider    String
+  /// active, cancelled, suspended, inactive, not_found, or unavailable (could not ask).
+  status      String
+  /// What the provider said, in our words (GstinFacts); null when it could not be asked.
+  facts       Json?
+  /// Why it could not be asked (not_configured, out_of_credits, busy, down, refused).
+  problem     String?
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, gstin, createdAt])
+  @@index([companyId, createdAt])
 }

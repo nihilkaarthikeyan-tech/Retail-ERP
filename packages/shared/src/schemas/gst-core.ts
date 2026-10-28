@@ -24,6 +24,9 @@ export const gstSettingsSchema = z
     eWayStateLimits: z.record(stateCode, nonNegativeDecimalString),
     defaultTransporterId: optionalText(20),
     defaultTransporterName: optionalText(120),
+    /** Plan 15: check GSTINs with the GST network, and again after this many days. */
+    gstinChecks: z.boolean(),
+    gstinRecheckDays: z.number().int().min(30, 'At least 30 days').max(365, 'At most 365 days'),
   })
   .partial();
 export type GstSettingsInput = z.infer<typeof gstSettingsSchema>;
