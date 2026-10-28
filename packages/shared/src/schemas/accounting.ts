@@ -244,15 +244,16 @@ export const paymentSchema = z
     partyId: uuid.optional().nullable(),
     fromAccountId: uuid.optional().nullable(),
     toAccountId: uuid.optional().nullable(),
-    amount: positiveDecimalString,
+    // Audit 2 (28 October 2026): whole paise, so the checks against what is owed compare like with like.
+    amount: moneyAmount,
     reference: optionalText(60),
     referenceDate: isoDate.optional().nullable(),
     clearedOn: isoDate.optional().nullable(),
     remark: optionalText(300),
     /** Bills it settles; omitted = settle oldest first. */
-    allocations: z.array(z.object({ billType: z.string().trim().max(40), billId: uuid, amount: positiveDecimalString })).max(200).optional(),
+    allocations: z.array(z.object({ billType: z.string().trim().max(40), billId: uuid, amount: moneyAmount })).max(200).optional(),
     autoSettle: z.boolean().default(true),
-    deductions: z.array(z.object({ accountId: uuid, amount: positiveDecimalString, remark: optionalText(200) })).max(10).default([]),
+    deductions: z.array(z.object({ accountId: uuid, amount: moneyAmount, remark: optionalText(200) })).max(10).default([]),
   })
   .refine((p) => p.kind === 'transfer' || (!!p.partyType && !!p.partyId), 'Choose the customer or supplier')
   .refine((p) => p.kind !== 'receipt' || p.partyType === 'customer', 'A receipt is money from a customer')

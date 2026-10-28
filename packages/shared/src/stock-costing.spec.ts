@@ -157,3 +157,28 @@ import { Decimal } from './rounding.js';
 function d(v: string) {
   return new Decimal(v);
 }
+
+describe('audit 3 (28 October 2026): costing edge cases', () => {
+  it('a fixed-cost out that empties the shelf takes the whole remaining value, so the shelf matches its movements', () => {
+    // 5 @ 80, 10 @ 100, 5 sold at the average, then the 10 left go back to the supplier at the receipt's 100.
+    const r = replay(EMPTY_STATE, [
+      { kind: 'in', quantity: '5', incomingCost: '80' },
+      { kind: 'in', quantity: '10', incomingCost: '100' },
+      { kind: 'out', quantity: '5' },
+      { kind: 'out', quantity: '10', fixedCost: '100' },
+    ]);
+    const total = r.lines.reduce((s, l) => s.add(l.valueChange), d('0'));
+    expect(r.end.quantity.toString()).toBe('0');
+    expect(r.end.value.toString()).toBe('0');
+    expect(total.toFixed(2)).toBe('0.00');
+    expect(r.lines[3].valueChange.toFixed(2)).toBe('-933.33');
+  });
+
+  it('free goods in stock (cost 0) are sold at 0, not at the fallback cost', () => {
+    const r = replay(EMPTY_STATE, [{ kind: 'in', quantity: '10', incomingCost: '0' }, { kind: 'out', quantity: '3' }], '50');
+    expect(r.lines[1].valueChange.toFixed(2)).toBe('0.00');
+    expect(r.end.value.toFixed(2)).toBe('0.00');
+    // Beyond stock with no cost known, the fallback cost still applies.
+    expect(apply(EMPTY_STATE, { kind: 'out', quantity: '1' }, '50').valueChange.toFixed(2)).toBe('-50.00');
+  });
+});

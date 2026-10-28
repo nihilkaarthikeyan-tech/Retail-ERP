@@ -79,8 +79,10 @@ export class EmailLinksService {
 
   /** Always answers the same; sends a link only to an active account in an active shop. */
   async forgotPassword(input: ForgotPasswordInput, ipAddress: string | null): Promise<void> {
-    const found = await this.system.user.findUnique({ where: { email: input.email }, select: { id: true, companyId: true, active: true, firstName: true, company: { select: { active: true } } } });
-    if (!found || !found.active || !found.company.active) {
+    const found = await this.system.user.findUnique({ where: { email: input.email }, select: { id: true, companyId: true, active: true, firstName: true, emailVerifiedAt: true, lastLoginAt: true, company: { select: { active: true } } } });
+    // Audit 1 #19 (owner, 28 October 2026): only to an email that was confirmed or whose account has
+    // been used; someone added with an address that never did either asks the Owner for a new password.
+    if (!found || !found.active || !found.company.active || (!found.emailVerifiedAt && !found.lastLoginAt)) {
       this.log.warn(`Password reset asked for an unknown or switched-off account from ${ipAddress ?? 'unknown address'}`);
       return;
     }

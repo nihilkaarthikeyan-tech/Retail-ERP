@@ -252,9 +252,23 @@ export class LedgerService {
         const delta = D(e.valueChange).sub(D(e.postedValue));
         const loc = locations.get(e.locationId)!;
         const stockLine: LedgerLineInput = loc.kind === 'transit' ? { role: 'goods_in_transit' } : { role: 'stock', storeId: loc.storeId };
-        const counter = opts.counterRole?.get(e.id) ?? ROLE_ALIASES[e.accountRole] ?? e.accountRole;
+        const override = opts.counterRole?.get(e.id);
+        const counter = override ?? ROLE_ALIASES[e.accountRole] ?? e.accountRole;
+        // Audit 3 #8 (owner, 28 October 2026): goods arriving into minus stock re-price the pieces already
+        // sold; that part is cost of goods sold, not the arrival's own account (transfer clearing, a
+        // stock-in reason, goods received not billed), as goods receipts already do. New: the arrival's
+        // own value is quantity × its cost and the rest is that correction. Later re-costing of an
+        // arrival whose cost is its own (not taken from another movement) only changes the correction.
+        let correction = new Decimal(0);
+        if (!override && e.kind === 'in' && loc.storeId && counter !== 'cost_of_goods_sold') {
+          // Only when the arrival met minus stock: otherwise its whole value is its own.
+          const before = D(e.quantityAfter).sub(D(e.quantityChange));
+          if (mode === 'new') correction = before.lt(0) ? D(e.valueChange).sub(roundMoney(D(e.quantityChange).mul(D(e.unitCost)))) : new Decimal(0);
+          else if (e.costSourceId === null) correction = delta;
+        }
         lines.push({ ...stockLine, debit: delta });
-        lines.push({ role: counter, storeId: loc.storeId, credit: delta });
+        lines.push({ role: counter, storeId: loc.storeId, credit: delta.sub(correction) });
+        if (!correction.isZero()) lines.push({ role: 'cost_of_goods_sold', storeId: loc.storeId, credit: correction, remark: 'Pieces sold before these arrived, at the new cost' });
       }
       await this.post(tx, {
         companyId: group[0].companyId,

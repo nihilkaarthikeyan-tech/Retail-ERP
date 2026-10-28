@@ -72,6 +72,7 @@ import { LedgerService } from '../ledger/ledger.service.js';
 import { type CardSpend, GiftCardsService } from '../loyalty/gift-cards.service.js';
 import { LoyaltyService, type RedeemPlan, type RestorePlan } from '../loyalty/loyalty.service.js';
 import { assertModuleOn, currentModuleMap, moduleOffError, moduleOn } from '../modules/module-map.js';
+import { lockRows } from '../common/row-lock.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
 import { D, fromIso, iso, type PendingApproval, PosCommon, type TillWithRefs } from './pos-common.service.js';
@@ -272,13 +273,26 @@ export class PosBillsService {
     if (already.length) return this.transactionDto(already, user, true);
 
     try {
-      return await this.save(input, till, actor, user);
+      try {
+        return await this.save(input, till, actor, user);
+      } catch (first) {
+        // Audit 3 (28 October 2026): two bills taking the same stock rows in opposite order (two exchanges
+        // at once) can deadlock; the database cancels one, which is tried once more (safe: same client id).
+        const code = (first as { code?: string; meta?: { code?: string } }).code;
+        const deadlock = code === 'P2034' || String((first as { message?: string }).message ?? '').includes('deadlock detected');
+        if (!deadlock) throw first;
+        return await this.save(input, till, actor, user);
+      }
     } catch (err) {
       // Two copies at the same moment: the unique rule keeps one; answer with it.
       const raced = await this.prisma.posBill.findMany({ where: { tillId: till.id, clientId: input.clientId }, include: billInclude, orderBy: { kind: 'desc' } });
       if (raced.length) return this.transactionDto(raced, user, true);
-      if (input.offline && err instanceof BadRequestException) await this.recordSyncProblem(till, input, err.message);
-      throw err;
+      // Audit 3 (28 October 2026): a bill number already used by another bill is a plain refusal (and a
+      // sync problem for the office to resolve), not a server error the till would retry for ever.
+      const e = err as { code?: string; meta?: unknown };
+      const problem = e.code === 'P2002' && JSON.stringify(e.meta ?? '').includes('number') ? new BadRequestException(`Bill number ${input.sale?.number ?? input.ret?.number ?? ''} is already used by another bill; the till's numbering needs checking`) : err;
+      if (input.offline && problem instanceof BadRequestException) await this.recordSyncProblem(till, input, problem.message);
+      throw problem;
     }
   }
 
@@ -300,6 +314,9 @@ export class PosBillsService {
       if (!input.offline) throw new BadRequestException(`This till’s shift is from ${iso(shift.businessDate)}; close it and open a new one`);
       flags.add('shift_date');
     }
+    // Audit 2 (28 October 2026): an offline bill of a day the books were locked since is kept (the sale
+    // happened), but its accounts go to the next open day, so it is listed for the Accountant.
+    if (company.lockDate && date <= iso(company.lockDate)!) flags.add('after_books_locked');
     const cashierId = await this.common.cashierFor(this.prisma, till.id, input.cashierToken, user);
     const customer = await this.customerFor(company.id, input, actor, flags);
     // Plan 11 A6 (blueprint 05): a blocked customer is refused except for the credit controller; offline bills are kept and flagged.
@@ -388,6 +405,10 @@ export class PosBillsService {
 
     const saved = await this.prisma.$transaction(
       async (tx) => {
+        // Audit 2 (28 October 2026): the shift cannot close while this bill is being saved (closing takes
+        // the same row for update); if it closed meanwhile, the bill is refused instead of missing the accounts.
+        const [open] = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS status FROM "Shift" WHERE "id" = ${shift.id}::uuid FOR SHARE`;
+        if (open?.status !== 'open') throw new BadRequestException('This shift was closed just now; open a new shift and save the bill again');
         const exchangeId = ret && sale ? input.clientId : null;
         const holder = net.gte(0) ? (sale ? 'sale' : 'return') : ret ? 'return' : 'sale';
         const created: string[] = [];
@@ -449,13 +470,25 @@ export class PosBillsService {
             },
             include: billInclude,
           });
-          await this.postStock(tx, bill, b, till, actor, flags);
           if (b.kind === 'return' && b.returnOfId) {
+            // Audit 3 (28 October 2026): the original bill and its lines are locked and what is left to
+            // return is checked again, so the same goods returned at two tills at once are refunded once.
+            const [orig] = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS status FROM "PosBill" WHERE "id" = ${b.returnOfId}::uuid FOR SHARE`;
+            if (orig?.status !== 'completed') throw new BadRequestException('The original bill was cancelled; nothing can be returned from it');
+            const lineIds = [...new Set(b.lines.map((l) => l.returnOfLineId).filter((x): x is string => !!x))].sort();
+            if (lineIds.length) await tx.$queryRaw`SELECT 1 FROM "PosBillLine" WHERE "id" = ANY(${lineIds}::uuid[]) ORDER BY "id" FOR UPDATE`;
             for (const l of b.lines) {
               if (!l.returnOfLineId) continue;
-              const orig = await tx.posBillLine.findUniqueOrThrow({ where: { id: l.returnOfLineId } });
-              await tx.posBillLine.update({ where: { id: orig.id }, data: { returnedQuantity: D(orig.returnedQuantity).add(l.basicQuantity.abs()).toString() } });
+              const ol = await tx.posBillLine.findUniqueOrThrow({ where: { id: l.returnOfLineId }, include: { item: { select: { code: true } } } });
+              const after = D(ol.returnedQuantity).add(l.basicQuantity.abs());
+              if (after.gt(D(ol.basicQuantity).abs().add(QUANTITY_TOLERANCE))) {
+                throw new BadRequestException(`${ol.item.code}: only ${Decimal.max(0, D(ol.basicQuantity).abs().sub(D(ol.returnedQuantity))).toString()} left to return from this bill (another return was saved just now)`);
+              }
+              await tx.posBillLine.update({ where: { id: ol.id }, data: { returnedQuantity: after.toString() } });
             }
+          }
+          await this.postStock(tx, bill, b, till, actor, flags);
+          if (b.kind === 'return' && b.returnOfId) {
           }
           if (b.couponId) await this.offers.countCouponUse(tx, b.couponId, 1);
           if (b.delivery) await this.saveDelivery(tx, bill, b.delivery, till, customer, actor);
@@ -961,6 +994,9 @@ export class PosBillsService {
       } else if (l.price !== undefined && !D(l.price).eq(listPrice)) {
         if (input.offline) {
           price = D(l.price);
+          // Audit 1 (28 October 2026): approvals need the connection, so an offline price that differs
+          // from the list is kept as sold (pos-offline §5) but always goes on "Offline bills to check".
+          if (!cashierMayChangePrice) flags.add('price_changed');
         } else {
           if (!cashierMayChangePrice) {
             approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`, ctx.pending);
@@ -1386,7 +1422,17 @@ export class PosBillsService {
         const candidates = await this.prisma.batch.findMany({ where: { itemId: item.id, active: true }, include: { positions: { where: { locationId: till.locationId } } }, orderBy: [{ expiryDate: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }] });
         const usable = candidates.filter((b) => !isExpiredOn(iso(b.expiryDate), date));
         const withStock = usable.find((b) => b.positions.some((p) => D(p.quantity).gte(basic)));
-        const pick = withStock ?? usable[0];
+        // Audit 3 (28 October 2026): when no batch has enough, the one with the most on this shelf (not
+        // simply the first, which may have none) goes below zero, so a count settles the smallest gap.
+        const held = (b: (typeof usable)[number]) => b.positions.reduce((s, p) => s.add(D(p.quantity)), new Decimal(0));
+        const most = usable.reduce<(typeof usable)[number] | undefined>((m, b) => (!m || held(b).gt(held(m)) ? b : m), undefined);
+        let pick = withStock ?? most;
+        if (!pick && offline && candidates.length) {
+          // Offline the till could not see expiry dates; the sale happened, so it is kept with the batch
+          // that expired last, and flagged for the office (pos-offline §5) instead of failing at sync.
+          pick = [...candidates].sort((a, b) => (iso(b.expiryDate) ?? '').localeCompare(iso(a.expiryDate) ?? ''))[0];
+          flags.add('expired_batch');
+        }
         if (!pick) throw new BadRequestException(`${item.code}: no batch that has not expired`);
         batchId = pick.id;
       }
@@ -1492,6 +1538,16 @@ export class PosBillsService {
         if (!found.found || found.rate === null) throw new BadRequestException(`${b.item.code} has no price in the till’s price list`);
         const price = l.price !== undefined ? D(l.price) : D(found.rate);
         const gst = await this.common.gstRateFor(this.prisma, b.item, date, b.factor.isZero() ? price : price.div(b.factor));
+        // Audit 3 (28 October 2026): goods tracked by batch come back into a batch of that item (the one
+        // named, else the one expiring last), so batch totals keep matching the item's stock.
+        let batchId: string | null = null;
+        if (b.item.isStockItem && b.item.trackBatches) {
+          const named = l.batchId ? await this.prisma.batch.findUnique({ where: { id: l.batchId } }) : null;
+          if (l.batchId && (!named || named.itemId !== b.item.id)) throw new BadRequestException(`${b.item.code}: batch not found`);
+          const chosen = named ?? (await this.prisma.batch.findFirst({ where: { itemId: b.item.id, active: true }, orderBy: [{ expiryDate: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }] }));
+          if (!chosen) throw new BadRequestException(`${b.item.code}: choose the batch the goods come back into`);
+          batchId = chosen.id;
+        } else if (l.batchId) throw new BadRequestException(`${b.item.code} is not tracked by batch`);
         lines.push({
           lineNo: l.lineNo,
           item: b.item,
@@ -1500,7 +1556,7 @@ export class PosBillsService {
           quantity: b.quantity.neg(),
           basicQuantity: b.basicQuantity.neg(),
           barcode: l.barcode ?? null,
-          batchId: l.batchId ?? null,
+          batchId,
           serialNumbers: (l.serialNumbers ?? []).map((s) => s.trim()),
           mrp: b.mrp,
           listPrice: D(found.rate),
@@ -1590,8 +1646,23 @@ export class PosBillsService {
     // Serial numbers leave with the sale and come back with the return.
     for (const l of bill.lines) {
       if (!l.serialNumbers.length) continue;
-      if (built.kind === 'sale') await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: l.serialNumbers } }, data: { status: 'out', locationId: null, outDocumentId: bill.id, updatedById: actor.userId } });
-      else await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: l.serialNumbers } }, data: { status: 'in_stock', locationId: till.locationId, outDocumentId: null, updatedById: actor.userId } });
+      if (built.kind === 'sale') {
+        // Audit 3 (28 October 2026): online, only serials still in stock at this till are taken, so the
+        // same IMEI scanned on two bills at once is sold once. Offline bills keep their "not in stock" flag.
+        const strict = !flags.has('serial_not_in_stock');
+        const r = await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: l.serialNumbers }, ...(strict ? { status: 'in_stock', locationId: till.locationId } : {}) }, data: { status: 'out', locationId: null, outDocumentId: bill.id, updatedById: actor.userId } });
+        if (strict && r.count !== l.serialNumbers.length) throw new BadRequestException(`${l.item.code}: serial ${l.serialNumbers.join(', ')} was just sold on another bill`);
+      }
+      else {
+        // Audit 3: a serial comes back only if it is out, sold on the bill being returned (when there is
+        // one), so a phone sold again since, or never sold here, cannot be put back by mistake.
+        const strict = !flags.has('serial_not_in_stock');
+        const r = await tx.serialNumber.updateMany({
+          where: { itemId: l.itemId, serial: { in: l.serialNumbers }, ...(strict ? { status: 'out', ...(bill.returnOfId ? { outDocumentId: bill.returnOfId } : {}) } : {}) },
+          data: { status: 'in_stock', locationId: till.locationId, outDocumentId: null, updatedById: actor.userId },
+        });
+        if (strict && r.count !== l.serialNumbers.length) throw new BadRequestException(`${l.item.code}: serial ${l.serialNumbers.join(', ')} was not sold ${bill.returnOfId ? 'on this bill' : 'by this shop'}, or was returned already`);
+      }
     }
     void lineIds;
   }
@@ -1626,6 +1697,17 @@ export class PosBillsService {
     const managerId = await this.common.useApproval(this.prisma, approvalToken, till.id, ['cancel_bill'], bill.number);
     const after = await this.prisma.$transaction(
       async (tx) => {
+        // Audit 2 (28 October 2026): checked again under lock, so a shift closing or a second cancel at the same moment cannot slip through.
+        const [open] = await tx.$queryRaw<{ status: string }[]>`SELECT "status"::text AS status FROM "Shift" WHERE "id" = ${bill.shiftId}::uuid FOR SHARE`;
+        if (open?.status !== 'open') throw new BadRequestException('The shift of this bill is closed; make a return instead');
+        for (const b of pair) {
+          await tx.$queryRaw`SELECT 1 FROM "PosBill" WHERE "id" = ${b.id}::uuid FOR UPDATE`;
+          if ((await tx.posBill.findUniqueOrThrow({ where: { id: b.id }, select: { status: true } })).status === 'cancelled') throw new BadRequestException('Already cancelled');
+          // Audit 3: a return saved just now (it holds this bill while saving) stops the cancel too.
+          if (b.kind === 'sale' && (await tx.posBill.count({ where: { returnOfId: b.id, status: 'completed', id: { notIn: pair.map((x) => x.id) } } }))) {
+            throw new BadRequestException(`Goods from bill ${b.number} were returned just now; cancel the return first`);
+          }
+        }
         for (const b of pair) {
           await this.engine.reverseDocument(tx, b.id, (e) => e.documentLineId, { allowNegative: true, actorId: actor.userId });
           for (const l of b.lines) {
@@ -1634,6 +1716,7 @@ export class PosBillsService {
               else await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: l.serialNumbers } }, data: { status: 'out', locationId: null } });
             }
             if (b.kind === 'return' && l.returnOfLineId) {
+              await lockRows(tx, 'PosBillLine', [l.returnOfLineId]);
               const orig = await tx.posBillLine.findUniqueOrThrow({ where: { id: l.returnOfLineId } });
               await tx.posBillLine.update({ where: { id: orig.id }, data: { returnedQuantity: Decimal.max(0, D(orig.returnedQuantity).sub(D(l.basicQuantity).abs())).toString() } });
             }

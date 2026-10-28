@@ -32,7 +32,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      # Audit 1 #18: an ordinary login that owns the tables (deploy/limit-db-role.sh), not the superuser.
+      DATABASE_URL: postgresql://${DB_APP_USER:-${POSTGRES_USER}}:${DB_APP_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public
       API_PORT: "4000"
       WEB_ORIGIN: ${PUBLIC_URL}
       COOKIE_SECURE: "true"

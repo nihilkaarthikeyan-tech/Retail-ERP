@@ -56,7 +56,10 @@ export class NumberCounter {
       await this.store.set(this.key(prefix), n);
       return formatNumber(prefix, n);
     };
-    const result = this.chain.then(run, run);
+    // Audit 3 (28 October 2026): two tabs of one till share the counter, so the browser's lock (one
+    // holder at a time across every tab of this site) is held while it is read and written.
+    const locked = (): Promise<string> => (typeof navigator !== "undefined" && navigator.locks ? (navigator.locks.request(`retail-erp-${this.key(prefix)}`, run) as unknown as Promise<string>) : run());
+    const result = this.chain.then(locked, locked);
     this.chain = result.catch(() => undefined);
     return result;
   }

@@ -275,12 +275,18 @@ export class TillEngine {
   }
 
   /** The server's open shift wins; a shift opened here and not yet sent is kept. */
+  /** Why the server's shift could not be read, when it was not a lost connection. */
+  private shiftProblem: string | null = null;
+
   async syncShift(): Promise<ServerShift | null> {
     let server: ServerShift | null;
     try {
       server = await this.api.currentShift();
+      this.shiftProblem = null;
     } catch (err) {
       if (isOfflineError(err)) this.set({ online: false });
+      // Audit 1 (28 October 2026): keep the server's reason (for example a till of another shop) to show it.
+      else this.shiftProblem = err instanceof Error ? err.message : String(err);
       return null;
     }
     const local = this.state.shift;
@@ -482,7 +488,7 @@ export class TillEngine {
     if (waiting > 0) throw new Error(`${waiting} ${waiting === 1 ? "entry is" : "entries are"} still waiting to be sent; the shift can be closed once they are sent`);
     if (!this.state.online) throw new Error("Closing a shift needs the connection");
     const shift = await this.syncShift();
-    if (!shift) throw new Error("This till has no open shift on the server");
+    if (!shift) throw new Error(this.shiftProblem ?? "This till has no open shift on the server");
     const settings = await this.api.settings().catch(() => ({ cashDifferenceApprovalAmount: "100.00" }));
     return { shift, approvalAmount: settings.cashDifferenceApprovalAmount };
   }

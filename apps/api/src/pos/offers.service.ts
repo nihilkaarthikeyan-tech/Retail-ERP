@@ -87,6 +87,8 @@ export class OffersService {
     if (input.kind === 'buy_get' && input.freeItemId) {
       const free = await db.item.findUnique({ where: { id: input.freeItemId } });
       if (!free || !free.canSell || free.isParentStyle) throw new BadRequestException('The free item must be an item that can be sold (a size or colour, not the style)');
+      // Audit 3 (28 October 2026): the till adds the free piece by itself, with no serial number to scan.
+      if (free.trackSerials) throw new BadRequestException(`${free.code} has serial numbers, so it cannot be the free item; give a discount on it instead`);
     }
     // Blueprint 04: a percentage offer cannot exceed a listed item's maximum discount.
     if (input.appliesTo === 'items' && input.kind === 'percent') {

@@ -8,6 +8,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { lockedStatus, lockStillAt } from '../common/row-lock.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AccountingCommon, D, fromIso, iso } from './accounting-common.service.js';
 
@@ -90,6 +91,7 @@ export class JournalsService {
     await this.validate(this.prisma, company.id, input, user);
     const fy = await this.common.yearFor(this.prisma, company.id, input.journalDate);
     const after = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'Journal', id, 'draft', 'This journal was just posted or cancelled; open it again');
       await tx.journalLine.deleteMany({ where: { journalId: id } });
       const j = await tx.journal.update({
         where: { id },
@@ -121,8 +123,11 @@ export class JournalsService {
     await this.validate(this.prisma, company.id, input, user);
     const posted = await this.prisma.$transaction(
       async (tx) => {
+        await lockedStatus(tx, 'Journal', id);
         const fresh = await tx.journal.findUniqueOrThrow({ where: { id } });
         if (fresh.status !== 'draft') throw new BadRequestException(`The journal is already ${fresh.status}`);
+        // Posted from the draft read above: refuse if someone changed it in between (audit 2).
+        if (fresh.updatedAt.getTime() !== j.updatedAt.getTime()) throw new BadRequestException('This journal was just changed; open it again');
         const number = await this.common.allocate(tx, company.id, 'journal', iso(j.journalDate)!);
         // Re-check what is owed inside the transaction, with the bills locked.
         await this.checkAgainst(tx, company.id, input.lines);
@@ -168,6 +173,7 @@ export class JournalsService {
     this.checkRights(this.inputOf(j), user);
     this.assertStores(user, j);
     const after = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'Journal', id, j.status, 'This journal was just changed; open it again');
       if (j.status === 'posted') {
         await this.ledger.undoLinks(tx, 'journal', id, actor.userId);
         await this.ledger.reverseDocument(tx, 'journal', id, actor.userId, `Cancelled: ${reason}`);

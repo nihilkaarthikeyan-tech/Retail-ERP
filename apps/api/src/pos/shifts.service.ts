@@ -168,30 +168,39 @@ export class ShiftsService {
     await this.common.assertDevice(this.prisma, till.id, deviceToken);
     if (shift.status !== 'open') throw new BadRequestException(`The shift is already ${shift.status}`);
     const settings = await this.common.settings(this.prisma, till.companyId);
-    const expected = await this.expected(this.prisma, shift);
     let cashCounted: Decimal;
     try {
       cashCounted = denominationTotal(input.denominations);
     } catch (err) {
       throw new BadRequestException(err instanceof Error ? err.message : String(err));
     }
-    const cashMethods = expected.filter((e) => e.kind === 'cash');
-    const lines = expected.map((e) => {
-      const given = input.counted.find((c) => c.paymentMethodId === e.paymentMethodId);
-      // All cash in the drawer is counted against the (first) cash method; card slips and UPI confirmations are typed.
-      const counted = e.kind === 'cash' ? (e.paymentMethodId === cashMethods[0]?.paymentMethodId ? cashCounted : new Decimal(0)) : D(given?.amount ?? e.expected);
-      return { ...e, counted: counted.toFixed(2), difference: counted.sub(D(e.expected)).toFixed(2) };
-    });
-    const biggest = lines.reduce((m, l) => Decimal.max(m, D(l.difference).abs()), new Decimal(0));
+    const countAgainst = (expected: Awaited<ReturnType<ShiftsService['expected']>>) => {
+      const cashMethods = expected.filter((e) => e.kind === 'cash');
+      return expected.map((e) => {
+        const given = input.counted.find((c) => c.paymentMethodId === e.paymentMethodId);
+        // All cash in the drawer is counted against the (first) cash method; card slips and UPI confirmations are typed.
+        const counted = e.kind === 'cash' ? (e.paymentMethodId === cashMethods[0]?.paymentMethodId ? cashCounted : new Decimal(0)) : D(given?.amount ?? e.expected);
+        return { ...e, counted: counted.toFixed(2), difference: counted.sub(D(e.expected)).toFixed(2) };
+      });
+    };
+    const biggestOf = (lines: ReturnType<typeof countAgainst>) => lines.reduce((m, l) => Decimal.max(m, D(l.difference).abs()), new Decimal(0));
+    const biggest = biggestOf(countAgainst(await this.expected(this.prisma, shift)));
     let approvedById: string | null = null;
     if (biggest.gt(D(settings.cashDifferenceApprovalAmount))) {
       if (!input.remarks?.trim()) throw new BadRequestException(`The difference is more than ₹${D(settings.cashDifferenceApprovalAmount).toFixed(2)}; write a remark`);
       approvedById = await this.common.useApproval(this.prisma, input.approvalToken, till.id, ['cash_difference'], `shift ${shift.id}`);
     }
-    const summary = await this.summary(this.prisma, shift.id);
     const closed = await this.prisma.$transaction(async (tx) => {
+      // Audit 2 (28 October 2026): the shift row is locked first, so a bill being saved at this moment
+      // either finishes before (and is counted, posted and expected in the drawer) or is refused after.
+      await tx.$queryRaw`SELECT 1 FROM "Shift" WHERE "id" = ${shiftId}::uuid FOR UPDATE`;
       const fresh = await tx.shift.findUniqueOrThrow({ where: { id: shiftId } });
       if (fresh.status !== 'open') throw new BadRequestException(`The shift is already ${fresh.status}`);
+      const lines = countAgainst(await this.expected(tx, shift));
+      if (biggestOf(lines).gt(D(settings.cashDifferenceApprovalAmount)) && !approvedById) {
+        throw new BadRequestException('A bill was saved while closing; count again');
+      }
+      const summary = await this.summary(tx, shift.id);
       await tx.shiftClosing.create({
         data: {
           shiftId,
@@ -224,9 +233,9 @@ export class ShiftsService {
         changes: { status: { old: 'open', new: 'closed' }, till: till.code, differences: lines.map((l) => `${l.code}:${l.difference}`) },
         reason: input.remarks ?? null,
       });
-      return this.getRow(tx, shiftId);
+      return { row: await this.getRow(tx, shiftId), lines };
     });
-    return { ...this.toDto(closed), expected: lines };
+    return { ...this.toDto(closed.row), expected: closed.lines };
   }
 
   /**

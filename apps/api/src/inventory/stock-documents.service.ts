@@ -32,6 +32,8 @@ import type { Item, Prisma, StockDocument, StockLedgerEntry, StockLocation } fro
 import { ItemsService } from '../items/items.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { assertModuleOn } from '../modules/module-map.js';
+import { lockRows, lockStillAt } from '../common/row-lock.js';
+import { LedgerService } from '../ledger/ledger.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { seriesKind } from './location-defaults.js';
 import { type Movement, StockEngine } from './stock-engine.service.js';
@@ -51,6 +53,17 @@ export const documentInclude = {
   },
 } satisfies Prisma.StockDocumentInclude;
 export type DocumentRow = Prisma.StockDocumentGetPayload<{ include: typeof documentInclude }>;
+
+/**
+ * Audit 3 (28 October 2026): a draft dated today whose time was never typed was stamped with the
+ * moment it was made; finalised later it would sit before the sales made in between. Such a draft
+ * takes the moment it is finalised instead. (A typed time is kept.)
+ */
+export function untypedToday(row: { postingDate: Date; postingAt: Date; createdAt: Date; updatedAt: Date }): boolean {
+  if (row.postingDate.toISOString().slice(0, 10) !== businessDate()) return false;
+  const near = (d: Date) => Math.abs(row.postingAt.getTime() - d.getTime()) < 2000;
+  return near(row.createdAt) || near(row.updatedAt);
+}
 
 /** Indian date + "HH:MM" → the instant (rule 15). Defaults: today, now. */
 export function postingInstant(date: string, time?: string): Date {
@@ -87,6 +100,7 @@ export class StockDocumentsService {
     private readonly items: ItemsService,
     private readonly engine: StockEngine,
     private readonly transferGst: TransferGstService,
+    private readonly ledger: LedgerService,
   ) {}
 
   // ---- Reading ----
@@ -180,6 +194,7 @@ export class StockDocumentsService {
     const lines = input.lines ? await this.resolveLines(this.prisma, before.kind, input.lines, false) : null;
     const postingDate = input.postingDate ?? iso(before.postingDate)!;
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'StockDocument', id, 'draft', 'Only drafts can be changed; it was just finalised or cancelled');
       const after = await tx.stockDocument.update({
         where: { id },
         data: {
@@ -276,6 +291,7 @@ export class StockDocumentsService {
     const lines = input.lines ? await this.resolveCountLines(this.prisma, input.lines) : null;
     const postingDate = input.postingDate ?? iso(before.postingDate)!;
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'StockDocument', id, 'draft', 'Only drafts can be changed; it was just finalised or cancelled');
       const after = await tx.stockDocument.update({
         where: { id },
         data: {
@@ -307,7 +323,13 @@ export class StockDocumentsService {
 
     const finalised = await this.prisma.$transaction(
       async (tx) => {
-        const fresh = await this.getRow(tx, id);
+        await lockStillAt(tx, 'StockDocument', id, 'draft', 'This document was just finalised or cancelled');
+        let fresh = await this.getRow(tx, id);
+        // Not a count: a count keeps the moment the shelf was counted, and the sales after it replay on top.
+        if (fresh.kind !== 'count' && untypedToday(fresh)) {
+          await tx.stockDocument.update({ where: { id }, data: { postingAt: new Date() } });
+          fresh = await this.getRow(tx, id);
+        }
         if (fresh.status !== 'draft') throw new BadRequestException(`Document is already ${fresh.status}`);
         await this.checkBackdating(tx, fresh, user);
         const describe = await this.describer(tx, fresh);
@@ -356,6 +378,68 @@ export class StockDocumentsService {
       .map((s) => this.toDto(s, user));
   }
 
+  /**
+   * Audit 3 #16 (owner, 28 October 2026): goods that never arrived (lost or damaged on the way) are
+   * written off from transit, so a part-received transfer can be finished. At their transit cost,
+   * against Write-off in the sending store; their serials are marked out; nothing more can be received.
+   */
+  async closeShort(sendId: string, reason: string, actor: Actor, user: CurrentUser) {
+    this.requireRight(user, 'stock.adjust_finalise');
+    const doc = await this.getRow(this.prisma, sendId);
+    if (doc.kind !== 'transfer_send') throw new BadRequestException('Only a transfer can be closed short');
+    this.assertDocAccess(doc, user, 'change');
+    const today = businessDate();
+    const done = await this.prisma.$transaction(
+      async (tx) => {
+        await lockStillAt(tx, 'StockDocument', sendId, 'finalised', 'Only a sent transfer can be closed short');
+        await lockRows(tx, 'StockDocumentLine', doc.lines.map((l) => l.id));
+        const lines = await tx.stockDocumentLine.findMany({ where: { documentId: sendId }, include: { item: true } });
+        const open = lines.map((l) => ({ l, q: D(l.basicQuantity).sub(D(l.receivedQuantity)) })).filter((x) => x.q.gt(QUANTITY_TOLERANCE));
+        if (!open.length) throw new BadRequestException('Nothing of this transfer is still on the way');
+        const transitId = await this.transitId(tx, doc.companyId);
+        const movements: Movement[] = [];
+        for (const { l, q } of open) {
+          const source = await tx.stockLedgerEntry.findFirst({ where: { documentId: sendId, documentLineId: l.id, kind: 'in', locationId: transitId, isCancellation: false } });
+          movements.push({ companyId: doc.companyId, documentId: sendId, documentLineId: l.id, itemId: l.itemId, locationId: transitId, batchId: l.batchId, postingDate: today, postingAt: new Date(), kind: 'out', quantity: q.toString(), costSourceId: source?.id ?? null, accountRole: 'write_off', ledger: 'held' });
+        }
+        const entries = await this.engine.post(tx, movements, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, doc) });
+        const value = entries.reduce((s, e) => s.sub(D(e.valueChange)), new Decimal(0));
+        await this.ledger.post(tx, {
+          companyId: doc.companyId,
+          date: today,
+          documentType: 'transfer_short',
+          documentId: sendId,
+          documentNumber: doc.number,
+          storeId: doc.storeId,
+          actorId: actor.userId,
+          remark: `Not received: ${reason}`,
+          lines: [
+            { role: 'write_off', storeId: doc.storeId, debit: value },
+            { role: 'goods_in_transit', credit: value },
+          ],
+        });
+        await this.ledger.markPosted(tx, entries.map((e) => e.id));
+        for (const { l, q } of open) {
+          await tx.stockDocumentLine.update({ where: { id: l.id }, data: { receivedQuantity: D(l.basicQuantity).toString() } });
+          if (l.item.trackSerials && l.serialNumbers.length) {
+            await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: l.serialNumbers }, status: 'in_transit' }, data: { status: 'out', locationId: null, outDocumentId: sendId, updatedById: actor.userId } });
+          }
+          void q;
+        }
+        await this.audit.record(tx, actor, {
+          action: 'update',
+          entityType: 'stock_document',
+          entityId: sendId,
+          changes: { closedShort: open.map(({ l, q }) => `${l.item.code} × ${q.toString()}`), value: value.toFixed(2) },
+          reason,
+        });
+        return this.getRow(tx, sendId);
+      },
+      { timeout: 60_000, maxWait: 30_000 },
+    );
+    return this.toDto(done, user);
+  }
+
   async receive(sendId: string, input: ReceiveTransferInput, actor: Actor, user: CurrentUser) {
     this.requireRight(user, 'stock.move');
     const send = await this.getRow(this.prisma, sendId);
@@ -382,6 +466,9 @@ export class StockDocumentsService {
         serials = w.serialNumbers ?? (quantity.eq(open) ? line.serialNumbers.filter(Boolean) : []);
         const inTransit = await this.prisma.serialNumber.findMany({ where: { itemId: line.itemId, serial: { in: serials }, status: 'in_transit' } });
         if (inTransit.length !== serials.length || !quantity.eq(serials.length)) throw new BadRequestException(`${line.item.code}: list the ${quantity.toString()} serial numbers being received`);
+        // Audit 3 (28 October 2026): only serials that were sent on this transfer.
+        const notSent = serials.filter((s) => line.serialNumbers.length && !line.serialNumbers.includes(s));
+        if (notSent.length) throw new BadRequestException(`${line.item.code}: serial ${notSent.join(', ')} was not sent on this transfer`);
       }
       receiveLines.push({ send: line, quantity, serials });
     }
@@ -393,6 +480,8 @@ export class StockDocumentsService {
 
     const received = await this.prisma.$transaction(
       async (tx) => {
+        // Audit 3 (28 October 2026): the send cannot be cancelled while it is being received.
+        await lockStillAt(tx, 'StockDocument', send.id, 'finalised', 'This transfer was just cancelled');
         const number = await this.numbering.allocate(tx, { companyId: company.id, documentKind: seriesKind('transfer_receive'), storeId: send.toStoreId!, date: postingDate });
         const doc = await tx.stockDocument.create({
           data: {
@@ -462,6 +551,7 @@ export class StockDocumentsService {
     if (doc.status === 'draft') {
       this.requireDraftRight(doc.kind, user);
       const after = await this.prisma.$transaction(async (tx) => {
+        await lockStillAt(tx, 'StockDocument', id, 'draft', 'This document was just changed; open it again');
         const a = await tx.stockDocument.update({ where: { id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason }, include: documentInclude });
         await this.audit.record(tx, actor, { action: 'update', entityType: 'stock_document', entityId: id, changes: { status: { old: 'draft', new: 'cancelled' } }, reason });
         return a;
@@ -479,11 +569,13 @@ export class StockDocumentsService {
     }
     const after = await this.prisma.$transaction(
       async (tx) => {
+        await lockStillAt(tx, 'StockDocument', id, doc.status, 'This document was just changed; open it again');
         const lineFor = new Map(doc.lines.map((l) => [l.id, l.id]));
         await this.engine.reverseDocument(tx, id, (e) => lineFor.get(e.documentLineId) ?? e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, doc) });
         await this.applySerials(tx, doc, 'cancel', actor);
         if (doc.kind === 'transfer_send') await this.transferGst.onCancel(tx, id, actor.userId);
         if (doc.kind === 'transfer_receive') {
+          await lockRows(tx, 'StockDocumentLine', doc.lines.map((l) => l.sendLineId));
           for (const l of doc.lines) {
             if (!l.sendLineId) continue;
             const sendLine = await tx.stockDocumentLine.findUniqueOrThrow({ where: { id: l.sendLineId } });
@@ -818,6 +910,12 @@ export class StockDocumentsService {
       select: { id: true },
     });
     if (!later) return;
+    // Audit 3 (28 October 2026): a count of today keeps the moment the shelf was counted; the sales
+    // after it are replayed on top. That is not back-dating a document, so the count right is enough.
+    if (doc.kind === 'count' && iso(doc.postingDate) === businessDate()) {
+      doc.isBackDated = true;
+      return;
+    }
     if (!hasPermission(user, 'stock.backdate')) {
       throw new ForbiddenException('Later movements of these items exist; only the Accountant may post an earlier date');
     }
@@ -870,6 +968,7 @@ export class StockDocumentsService {
   }
 
   private async applySerials(tx: Db, doc: DocumentRow, mode: 'finalise' | 'cancel', actor: Actor) {
+    if (doc.kind === 'count' && mode === 'cancel') return this.undoCountSerials(tx, doc, actor);
     for (const l of doc.lines) {
       if (!l.item.trackSerials || !l.serialNumbers.length) continue;
       const serials = l.serialNumbers;
@@ -913,20 +1012,31 @@ export class StockDocumentsService {
             break;
         }
       } else {
+        // Audit 3 (28 October 2026): each serial must still be where this document put it (a phone sold
+        // since cannot be brought back by cancelling the document that brought it in).
+        const still = 'was moved or sold since; it cannot be put back';
         switch (doc.kind) {
           case 'stock_in':
+            await expect('in_stock', doc.toLocationId, still);
             await set({ status: 'out', locationId: null, outDocumentId: doc.id });
             break;
-          case 'stock_out':
+          case 'stock_out': {
+            const rows = await find();
+            const bad = serials.filter((s) => !rows.some((r) => r.serial === s && r.status === 'out' && r.outDocumentId === doc.id));
+            if (bad.length) throw new BadRequestException(`${l.item.code}: serial ${bad.join(', ')} ${still}`);
             await set({ status: 'in_stock', locationId: doc.fromLocationId, outDocumentId: null });
             break;
+          }
           case 'move':
+            await expect('in_stock', doc.toLocationId, still);
             await set({ locationId: doc.fromLocationId });
             break;
           case 'transfer_send':
+            await expect('in_transit', null, still);
             await set({ status: 'in_stock', locationId: doc.fromLocationId });
             break;
           case 'transfer_receive':
+            await expect('in_stock', doc.toLocationId, still);
             await set({ status: 'in_transit', locationId: doc.fromLocationId });
             break;
         }
@@ -935,10 +1045,27 @@ export class StockDocumentsService {
   }
 
   /** Serial counts: the listed serials are the full set at the location; missing ones go out, new ones come in. */
+  /** Audit 3 (28 October 2026): cancelling a count undoes what it did to serials, where they are still as it left them. */
+  private async undoCountSerials(tx: Db, doc: DocumentRow, actor: Actor) {
+    for (const l of doc.lines) {
+      if (!l.item.trackSerials) continue;
+      // Marked missing by the count: back on the shelf.
+      await tx.serialNumber.updateMany({ where: { itemId: l.itemId, status: 'out', outDocumentId: doc.id }, data: { status: 'in_stock', locationId: doc.toLocationId, outDocumentId: null, updatedById: actor.userId } });
+      // Found by the count and still on that shelf: gone again.
+      await tx.serialNumber.updateMany({ where: { itemId: l.itemId, status: 'in_stock', locationId: doc.toLocationId, inDocumentId: doc.id }, data: { status: 'out', locationId: null, updatedById: actor.userId } });
+    }
+  }
+
   private async applyCountSerials(tx: Db, doc: DocumentRow, actor: Actor) {
     for (const l of doc.lines) {
       if (!l.item.trackSerials) continue;
       const listed = new Set(l.serialNumbers);
+      // Audit 3 (28 October 2026): a serial recorded at another shelf or store, or on its way in a
+      // transfer, is moved or received there first; a count never pulls it here silently.
+      const elsewhere = await tx.serialNumber.findMany({ where: { itemId: l.itemId, serial: { in: [...listed] }, OR: [{ status: 'in_transit' }, { status: 'in_stock', locationId: { not: doc.toLocationId } }] }, select: { serial: true, status: true } });
+      if (elsewhere.length) {
+        throw new BadRequestException(`${l.item.code}: serial ${elsewhere.map((s) => s.serial).join(', ')} is recorded ${elsewhere.some((s) => s.status === 'in_transit') ? 'on its way in a transfer' : 'at another place'}; move or receive it there first`);
+      }
       const here = await tx.serialNumber.findMany({ where: { itemId: l.itemId, locationId: doc.toLocationId, status: 'in_stock' } });
       const missing = here.filter((s) => !listed.has(s.serial)).map((s) => s.serial);
       if (missing.length) await tx.serialNumber.updateMany({ where: { itemId: l.itemId, serial: { in: missing } }, data: { status: 'out', locationId: null, outDocumentId: doc.id, updatedById: actor.userId } });

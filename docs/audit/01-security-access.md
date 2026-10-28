@@ -33,17 +33,17 @@ How: four read-only helpers each read one area (routes, shop separation, logins 
 | 15 | Low | `users/users.service.ts` | Adding a user whose email is used in another shop gave a server error | "Something went wrong" | ✔️ Fixed: "A user with email … already exists" |
 | 16 | Low | `main.ts` | API answers had no security headers and named the server software; a form-style body reader was on but never used | — | ✔️ Fixed: nosniff, no framing, referrer and resource policy; form bodies off |
 | 17 | Low | `pos/pos-common.service.ts` | A cashier switch (12 hours) kept working after that cashier was switched off | — | ✔️ Fixed |
-| 18 | Medium | `deploy/docker-compose.prod.yml` | The live database login is the database superuser. Shop separation still holds (every shop query switches to the limited `retail_erp_app` role), but system work runs with full rights | — | ☐ Session 12 (launch check #77): a dedicated owner role and a narrower system role |
-| 19 | Medium | `reports/summary-email.service.ts` | Users are created with any email, never confirmed; summary emails go to them from no-reply@rademics.ai. A free sign-up could send mail to strangers | Our mail domain marked as spam | ☐ Owner: confirm a new user's email before any email goes to it (recommended) |
-| 20 | Medium | `auth.service.ts` | Someone can keep re-locking a real user's account (5 wrong passwords, 15 minutes) | A cashier locked out all day | ☐ Later: lock per connection as well as per account |
-| 21 | Medium | `pos/pos-bills.service.ts:961` | An offline bill keeps whatever price the till sends, without an approval | — | ☐ Session 5 (offline): check against the offline design (prices changed while offline are expected) and the check report |
-| 22 | Low | various | Which accounts exist can be guessed from timing and messages (sign-up says an email is taken; login differs for a locked account) | — | ☐ Accepted for now; sign-up must say it |
-| 23 | Low | `auth.service.ts` | Changing a password does not cancel a reset link still open (30 minutes) | — | ☐ Small fix later |
-| 24 | Low | `users.service.ts` | "Users" shows staff of every store to a store manager with the right to view users | — | ☐ Owner to decide |
-| 25 | Low | items, logo | Picture type is taken from the browser, not read from the file | — | ☐ Later (nosniff now set) |
-| 26 | Low | `accounting/ledger-reports.service.ts` | Ageing for one store still adds a customer's bills from other stores | — | ☐ Session 2 |
-| 27 | Medium | till (browser test) | A computer set up as another shop's till gives an unclear message | — | ☐ Launch check #93 |
-| — | — | Prisma | A helper suspected that Prisma could merge lookups of two shops' requests made at the same instant | Never another shop's row (lookups use the requester's own values); at worst "not found" | ☐ Unsure; Session 8 (speed) to try it under load |
+| 18 | Medium | `deploy/docker-compose.prod.yml` | The live database login is the database superuser. Shop separation still holds (every shop query switches to the limited `retail_erp_app` role), but system work runs with full rights | — | ✔️ Owner approved 28 Oct: an ordinary login `retail_erp_owner` owns the tables and the API connects with it (`deploy/limit-db-role.sql`, `limit-db-role.sh`); tried first on a copy: tables, new tables, row-level security and migrations all work, and it cannot run programs on the server or read database passwords. Applied on the live server with the deploy |
+| 19 | Medium | `reports/summary-email.service.ts` | Users are created with any email, never confirmed; summary emails go to them from no-reply@rademics.ai. A free sign-up could send mail to strangers | Our mail domain marked as spam | ✔️ Owner approved 28 Oct: daily summary emails and "forgot password" go only to an email that was confirmed or whose account has been used; test in `module14-audit1b` |
+| 20 | Medium | `auth.service.ts` | Someone can keep re-locking a real user's account (5 wrong passwords, 15 minutes) | A cashier locked out all day | ✔️ Fixed: the lock stops everyone except a connection the person logged in from in the last 90 days; test in `module14-audit1b` |
+| 21 | Medium | `pos/pos-bills.service.ts:961` | An offline bill keeps whatever price the till sends, without an approval | — | ✔️ Fixed: an offline price that differs from the list is kept as sold (offline plan §5) and always goes on "Offline bills to check"; test in `module14-audit1b` |
+| 22 | Low | various | Which accounts exist can be guessed from timing and messages (sign-up says an email is taken; login differs for a locked account) | — | ✔️ Owner decided 28 Oct: keep (sign-up must say it) |
+| 23 | Low | `auth.service.ts` | Changing a password does not cancel a reset link still open (30 minutes) | — | ✔️ Fixed: changing or resetting a password cancels any open "forgot password" link; test in `module14-audit1b` |
+| 24 | Low | `users.service.ts` | "Users" shows staff of every store to a store manager with the right to view users | — | ✔️ Owner approved 28 Oct: a store manager sees only the staff of their own stores; test in `module14-audit1b` |
+| 25 | Low | items, logo | Picture type is taken from the browser, not read from the file | — | ✔️ Fixed: a picture's type is read from its own bytes (`common/image-type.ts`, unit test) |
+| 26 | Low | `accounting/ledger-reports.service.ts` | Ageing for one store still adds a customer's bills from other stores | — | ✔️ Fixed in audit 2 (#7) |
+| 27 | Medium | till (browser test) | A computer set up as another shop's till gives an unclear message | — | ✔️ Fixed: the till shows the server's reason, which now says the computer is a till of another shop and how to register it again |
+| 28 | Critical | `prisma/prisma.service.ts` | Found by testing the helper's "unsure" note: Prisma merges single-record lookups made at the same instant into one query, run as the first shop. Two shops asking for the same record id at that instant could both get the first shop's row; different ids came back "not found". Needs another shop's record id (a random 36-character code) and exact timing, so very unlikely, but it is a crossing between shops. Proved: the test failed on the old code | One shop shown another's record (rare); random "not found" under load | ✔️ Fixed: every single-record lookup also asks for the requesting shop itself, so a merged query can only match each shop's own rows; one that finds nothing is asked once more on its own. Test in `module14-sweep` (20 rounds, same instant) |
 
 ## Fixed today, with the tests that prove it
 
@@ -53,8 +53,8 @@ How: four read-only helpers each read one area (routes, shop separation, logins 
 
 ## Left for later
 
-Items 18–27: three need the owner (19, 22, 24), the rest belong to later sessions (2, 5, 8, 12) or are small and low.
+Nothing. Every item is fixed, applied with the deploy (#18), or decided by the owner (#22). The helper's "unsure" Prisma note was tested and turned out to be a real (rare) crossing between shops: #28, fixed.
 
 ## Result
 
-No Critical: no way was found for one shop to see another's data or for a stranger to get in. Every High was fixed today with a test. Session 1 is **done**; next is Session 2 (money and accounts).
+One Critical (#28, found by testing a helper's "unsure" note, fixed); otherwise no way was found for one shop to see another's data or for a stranger to get in. Every High was fixed today with a test. Session 1 is **done**: every finding closed on 28 October 2026.

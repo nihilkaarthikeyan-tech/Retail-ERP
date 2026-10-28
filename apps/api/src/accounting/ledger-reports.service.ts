@@ -70,10 +70,13 @@ export class LedgerReportsService {
     const where: Prisma.LedgerLineWhereInput = {
       companyId: company.id,
       ...this.storeWhere(user, q.storeId),
-      ...this.liveEntries(q.includeCancelled),
       ...(q.accountId ? { accountId: { in: this.descendants(list, q.accountId) } } : {}),
       ...(q.partyId ? { partyId: q.partyId, ...(q.partyType ? { partyType: q.partyType } : {}) } : {}),
-      ...(q.documentId ? { entry: { documentId: q.documentId, ...(q.documentType ? { documentType: q.documentType } : {}) } } : {}),
+      // Audit 2 (28 October 2026): one entry filter, so choosing a document no longer brings cancelled entries back.
+      entry: {
+        ...(this.liveEntries(q.includeCancelled).entry as Prisma.LedgerEntryWhereInput | undefined),
+        ...(q.documentId ? { documentId: q.documentId, ...(q.documentType ? { documentType: q.documentType } : {}) } : {}),
+      },
     };
     const opening = q.from
       ? await this.prisma.ledgerLine.aggregate({ where: { ...where, entryDate: { lt: fromIso(q.from) } }, _sum: { debit: true, credit: true } })
@@ -286,7 +289,10 @@ export class LedgerReportsService {
     const gl = await this.generalLedger({ partyType, partyId, from: q.from, to: q.to, includeCancelled: false, pageSize: 100_000 }, user);
     const sign = partyType === 'customer' ? 1 : -1;
     const flip = (v: string) => money(D(v).mul(sign));
-    const items = await this.ledger.openItems(this.prisma, partyType, partyId);
+    // Audit 2 (28 October 2026): open items worked out across the company (a payment at one store
+    // settles a bill at another), then only the person's stores shown, like the ledger rows above.
+    const allowed = this.common.storeFilter(user);
+    const items = (await this.ledger.openItems(this.prisma, partyType, partyId)).filter((i) => !allowed || !i.storeId || allowed.includes(i.storeId));
     void company;
     return {
       opening: flip(gl.opening),
@@ -314,7 +320,9 @@ export class LedgerReportsService {
     const totals = new Map(labels.map((l) => [l, ZERO]));
     let unused = ZERO;
     for (const p of parties) {
-      const items = await this.ledger.openItems(this.prisma, partyType, p.partyId!, q.asOf);
+      // Audit 2: the chosen (or allowed) stores' bills only; settlements still count across the company.
+      const stores = q.storeId ? [q.storeId] : allowed;
+      const items = (await this.ledger.openItems(this.prisma, partyType, p.partyId!, q.asOf)).filter((i) => !stores || !i.storeId || stores.includes(i.storeId));
       if (!items.length) continue;
       const byBand = new Map(labels.map((l) => [l, ZERO]));
       let advance = ZERO;

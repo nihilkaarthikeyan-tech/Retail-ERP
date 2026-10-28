@@ -9,7 +9,7 @@ import {
   updateUserSchema,
 } from 'shared';
 import { RequirePermission } from '../auth/decorators.js';
-import { type Actor, ReqActor } from '../common/request-context.js';
+import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { UsersService } from './users.service.js';
 
@@ -19,14 +19,14 @@ export class UsersController {
 
   @Get()
   @RequirePermission('users.view')
-  list() {
-    return this.users.list();
+  list(@ReqUser() user: AuthUser) {
+    return this.users.list(user);
   }
 
   @Get(':id')
   @RequirePermission('users.view')
-  get(@Param('id', ParseUUIDPipe) id: string) {
-    return this.users.get(id);
+  get(@Param('id', ParseUUIDPipe) id: string, @ReqUser() user: AuthUser) {
+    return this.users.get(id, user);
   }
 
   @Post()

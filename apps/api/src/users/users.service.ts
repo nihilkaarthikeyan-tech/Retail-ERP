@@ -7,11 +7,13 @@ import {
 } from '@nestjs/common';
 import {
   type CreateUserInput,
+  type CurrentUser,
   type ResetPasswordInput,
   SYSTEM_ROLES,
   type UpdateUserInput,
 } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import {
   AuthService,
   userAccessInclude,
@@ -35,17 +37,27 @@ export class UsersService {
     private readonly auth: AuthService,
   ) {}
 
-  async list() {
+  /**
+   * Audit 1 #24 (owner, 28 October 2026): someone working in some stores sees only the staff of those
+   * stores (and themselves); the Owner and people in every store see everyone.
+   */
+  private visibleTo(viewer: CurrentUser): Prisma.UserWhereInput {
+    if (viewer.isOwnerAdmin || viewer.allStores) return {};
+    return { OR: [{ id: viewer.id }, { allStores: false, stores: { some: { storeId: { in: viewer.stores.map((s) => s.id) } } } }] };
+  }
+
+  async list(viewer: CurrentUser) {
     const users = await this.prisma.user.findMany({
+      where: this.visibleTo(viewer),
       include: userAccessInclude,
       orderBy: [{ active: 'desc' }, { firstName: 'asc' }],
     });
     return users.map(toDto);
   }
 
-  async get(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+  async get(id: string, viewer?: CurrentUser) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, ...(viewer ? this.visibleTo(viewer) : {}) },
       include: userAccessInclude,
     });
     if (!user) throw new NotFoundException('User not found');
@@ -260,6 +272,8 @@ export class UsersService {
         entityId: id,
       });
       await this.auth.endAllSessions(tx, id, actor);
+      // Audit 1 (28 October 2026): an emailed "forgot password" link still open no longer works.
+      await tx.userToken.updateMany({ where: { userId: id, purpose: 'password_reset', usedAt: null }, data: { usedAt: new Date() } });
     });
   }
 

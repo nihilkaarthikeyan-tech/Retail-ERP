@@ -10,6 +10,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js';
+import { lockedStatus, lockStillAt } from '../common/row-lock.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AccountingCommon, D, fromIso, iso } from './accounting-common.service.js';
 
@@ -105,6 +106,7 @@ export class PaymentsService {
     await this.validate(this.prisma, company.id, input, user);
     const fy = await this.common.yearFor(this.prisma, company.id, input.paymentDate);
     await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'Payment', id, 'draft', 'This payment was just posted or cancelled; open it again');
       await tx.paymentAllocation.deleteMany({ where: { paymentId: id } });
       await tx.paymentDeduction.deleteMany({ where: { paymentId: id } });
       await tx.payment.update({
@@ -141,8 +143,11 @@ export class PaymentsService {
     await this.validate(this.prisma, company.id, this.inputOf(p), user);
     const posted = await this.prisma.$transaction(
       async (tx) => {
+        await lockedStatus(tx, 'Payment', id);
         const fresh = await tx.payment.findUniqueOrThrow({ where: { id } });
         if (fresh.status !== 'draft') throw new BadRequestException(`The payment is already ${fresh.status}`);
+        // Posted from the draft read above: refuse if someone changed it in between (audit 2).
+        if (fresh.updatedAt.getTime() !== p.updatedAt.getTime()) throw new BadRequestException('This payment was just changed; open it again');
         const date = iso(p.paymentDate)!;
         const number = await this.common.allocate(tx, company.id, p.kind, date);
         const deductions = p.deductions.reduce((s, d) => s.add(D(d.amount)), new Decimal(0));
@@ -192,6 +197,7 @@ export class PaymentsService {
     this.checkRights(p.kind as PaymentInput['kind'], user);
     this.common.assertStore(user, p.storeId);
     const after = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'Payment', id, p.status, 'This payment was just changed; open it again');
       if (p.status === 'posted') {
         await this.ledger.undoLinks(tx, 'payment', id, actor.userId);
         await this.ledger.reverseDocument(tx, 'payment', id, actor.userId, `Cancelled: ${reason}`);

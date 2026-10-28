@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Till reports (blueprint 09 "Reports"; decision 66; plan 06 §1 item 12).
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { type CurrentUser, Decimal, type PosReportQuery, type SalespersonReportQuery } from 'shared';
 import type { Prisma } from '../generated/prisma/client.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -41,8 +41,12 @@ export class PosReportsService {
 
   /** Every bill: date, number, till, cashier, kind, total, payments. */
   async register(q: PosReportQuery, user: CurrentUser) {
+    const where = await this.where(q, user);
+    // Audit 2 (28 October 2026): never cut off silently (plan 11 A4).
+    const count = await this.prisma.posBill.count({ where });
+    if (count > 5000) throw new BadRequestException(`There are ${count} bills in this period; choose a shorter period (up to 5,000 bills)`);
     const bills = await this.prisma.posBill.findMany({
-      where: await this.where(q, user),
+      where,
       include: { till: { select: { code: true } }, payments: { include: { paymentMethod: { select: { name: true } } } } },
       orderBy: { soldAt: 'asc' },
       take: 5000,
@@ -80,6 +84,32 @@ export class PosReportsService {
       }
       g.count++;
       groups.set(key, g);
+    }
+    // Audit 2 (28 October 2026): money taken at the till for gift cards (not a bill) is in the drawer and
+    // the card settlement too. A cashier's own report leaves it out (loads keep no cashier).
+    if (!q.cashierId) {
+      const stores = user.allStores ? undefined : user.stores.map((s) => s.id);
+      const storeIds = q.storeId ? (stores && !stores.includes(q.storeId) ? [] : [q.storeId]) : stores;
+      const loads = await this.prisma.giftCardEntry.findMany({
+        where: {
+          kind: 'load',
+          paymentMethodId: { not: null },
+          tillId: q.tillId ? q.tillId : { not: null },
+          ...(storeIds ? { storeId: { in: storeIds } } : {}),
+          ...(q.from || q.to ? { entryDate: { ...(q.from ? { gte: fromIso(q.from) } : {}), ...(q.to ? { lte: fromIso(q.to) } : {}) } } : {}),
+        },
+        select: { amount: true, entryDate: true, paymentMethodId: true },
+      });
+      const methods = new Map((await this.prisma.paymentMethod.findMany({ where: { id: { in: [...new Set(loads.map((l) => l.paymentMethodId!))] } }, select: { id: true, code: true, name: true, kind: true } })).map((m) => [m.id, m]));
+      for (const l of loads) {
+        const m = methods.get(l.paymentMethodId!);
+        if (!m) continue;
+        const key = `${iso(l.entryDate)}|${m.code}`;
+        const g = groups.get(key) ?? { date: iso(l.entryDate)!, method: m.name, kind: m.kind, amount: new Decimal(0), count: 0 };
+        g.amount = g.amount.add(D(l.amount));
+        g.count++;
+        groups.set(key, g);
+      }
     }
     return [...groups.values()].sort((a, b) => a.date.localeCompare(b.date) || a.method.localeCompare(b.method)).map((g) => ({ ...g, amount: g.amount.toFixed(2) }));
   }

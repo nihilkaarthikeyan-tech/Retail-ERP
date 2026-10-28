@@ -17,6 +17,7 @@ import { TransferGstService } from '../inventory/transfer-gst.service.js';
 import { EInvoicesService, type PrintQr } from '../gst-portal/einvoices.service.js';
 import { EWayBillsService } from '../gst-portal/eway-bills.service.js';
 import type { Prisma } from '../generated/prisma/client.js';
+import { imageTypeOf } from '../common/image-type.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 type Amount = { toString(): string } | null | undefined;
@@ -124,6 +125,7 @@ export class PrintService {
     if (!file) throw new BadRequestException('Choose an image file');
     if (!['image/png', 'image/jpeg'].includes(file.mimetype)) throw new BadRequestException('The logo must be a PNG or JPEG image');
     if (file.size > 300_000) throw new BadRequestException('The logo must be smaller than 300 KB');
+    if (imageTypeOf(file.buffer) !== file.mimetype) throw new BadRequestException('This file is not a PNG or JPEG picture');
     const company = await this.company.current();
     await this.prisma.$transaction(async (tx) => {
       await tx.company.update({ where: { id: company.id }, data: { logo: new Uint8Array(file.buffer), logoMimeType: file.mimetype, updatedById: actor.userId } });

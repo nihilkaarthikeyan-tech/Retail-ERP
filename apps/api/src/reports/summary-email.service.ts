@@ -133,7 +133,9 @@ export class SummaryEmailService {
 
   private async deliver(runId: string, companyId: string, recipientIds: string[], figures: SummaryFigure[], now = new Date()) {
     try {
-      const people = await this.prisma.user.findMany({ where: { id: { in: recipientIds }, active: true }, select: { email: true } });
+      // Audit 1 #19 (owner, 28 October 2026): only to people who confirmed their email or have used their
+      // account, so a shop cannot make our mail server write to addresses that never agreed to it.
+      const people = await this.prisma.user.findMany({ where: { id: { in: recipientIds }, active: true, OR: [{ emailVerifiedAt: { not: null } }, { lastLoginAt: { not: null } }] }, select: { email: true } });
       const to = people.map((p) => p.email);
       const content = await this.compose(companyId, figures, now);
       await this.mailer.send({ to, ...content });

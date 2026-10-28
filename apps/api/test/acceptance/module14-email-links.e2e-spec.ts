@@ -34,6 +34,8 @@ describe('14.7 Forgot password', () => {
   beforeAll(async () => {
     await resetDatabase(prisma);
     await http().post('/setup').send(SETUP_INPUT).expect(201);
+    // Audit 1 #19: links go only to an email that was confirmed or whose account was used.
+    await login(app, OWNER.email, OWNER.password);
   });
   // Each test starts with no links, so the three-an-hour limit counts only its own.
   beforeEach(async () => {

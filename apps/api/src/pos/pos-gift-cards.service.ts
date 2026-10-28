@@ -87,6 +87,8 @@ export class PosGiftCardsService {
           debit: method.kind === 'cash' ? { role: 'cash_in_hand' } : { role: method.accountRole },
           receiptNumber,
           methodName: method.name,
+          paymentMethodId: method.id,
+          tillId: till.id,
         });
         if (method.kind === 'cash') {
           await tx.cashMovement.create({ data: { shiftId: shift.id, clientId: input.clientId, direction: 'in', amount: amount.toFixed(2), reason: `Gift card ${maskGiftCardNumber(card.number)} ${isNew ? 'sold' : 'reloaded'} (${receiptNumber})`, byId: user.id, at: new Date() } });

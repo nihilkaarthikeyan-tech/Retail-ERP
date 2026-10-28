@@ -76,8 +76,15 @@ export class AuthService {
     actor.userId = user.id;
 
     if (user.lockedUntil && user.lockedUntil > now) {
-      await this.audit.recordNow(actor, { action: 'login_locked', entityType: 'user', entityId: user.id });
-      throw new UnauthorizedException('Account is locked after too many failed attempts. Try again later.');
+      // Audit 1 (28 October 2026): a stranger typing wrong passwords must not keep the real person out
+      // all day. The lock stops everyone except a connection this person logged in from in the last 90 days.
+      const known = actor.ipAddress
+        ? await this.prisma.auditLog.count({ where: { action: 'login', entityType: 'user', entityId: user.id, ipAddress: actor.ipAddress, at: { gt: new Date(now.getTime() - 90 * 86_400_000) } } })
+        : 0;
+      if (!known) {
+        await this.audit.recordNow(actor, { action: 'login_locked', entityType: 'user', entityId: user.id });
+        throw new UnauthorizedException('Account is locked after too many failed attempts. Try again later.');
+      }
     }
 
     const settings = await this.securitySettings();
@@ -222,8 +229,10 @@ export class AuthService {
         data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date(), updatedById: user.id },
       });
       await this.audit.record(tx, actor, { action: 'password_change', entityType: 'user', entityId: user.id });
-      // A password change ends every other session of this user.
+      // A password change ends every other session of this user, and (audit 1, 28 October 2026) any
+      // "forgot password" link still open, so an old emailed link cannot change it back.
       await this.endAllSessions(tx, user.id, actor, user.sessionId);
+      await tx.userToken.updateMany({ where: { userId: user.id, purpose: 'password_reset', usedAt: null }, data: { usedAt: new Date() } });
     });
   }
 

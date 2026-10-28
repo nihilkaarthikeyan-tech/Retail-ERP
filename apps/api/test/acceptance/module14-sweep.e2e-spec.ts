@@ -6,7 +6,8 @@ import type { INestApplication } from '@nestjs/common';
 import { addDays, businessDate } from 'shared';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
-import { SystemPrisma } from '../../src/prisma/prisma.service.js';
+import { PrismaService, SystemPrisma } from '../../src/prisma/prisma.service.js';
+import { runForCompany } from '../../src/prisma/tenancy.js';
 import { type Agent, createTestApp, login, setUpCompany, SETUP_INPUT } from '../helpers.js';
 
 let app: INestApplication<App>;
@@ -122,6 +123,31 @@ describe('audit 1: no list of the API ever shows another shop’s rows', () => {
       if (res.status === 200 && [...ids].some((id) => (res.text ?? '').includes(id))) own++;
     }
     expect(own).toBeGreaterThan(30);
+  });
+
+  it('two shops looking up their own rows at the very same instant each find their own (the client may batch them)', async () => {
+    const shop = app.get(PrismaService);
+    const [a, b] = await Promise.all([prisma.company.findUniqueOrThrow({ where: { id: companyA } }), prisma.company.findUniqueOrThrow({ where: { id: companyB } })]);
+    void a;
+    void b;
+    const itemsA = await prisma.item.findMany({ where: { companyId: companyA }, select: { id: true } });
+    const storesB = await prisma.store.findMany({ where: { companyId: companyB }, select: { id: true } });
+    for (let round = 0; round < 20; round++) {
+      // Started in the same tick, so Prisma may put both lookups into one query.
+      const [ia, sb] = await Promise.all([
+        runForCompany(companyA, () => shop.item.findUnique({ where: { id: itemsA[0].id } })),
+        runForCompany(companyB, () => shop.store.findUnique({ where: { id: storesB[0].id } })),
+      ]);
+      expect(ia?.id).toBe(itemsA[0].id);
+      expect(sb?.id).toBe(storesB[0].id);
+      const [ia2, ib2] = await Promise.all([
+        runForCompany(companyA, () => shop.item.findUnique({ where: { id: itemsA[0].id } })),
+        runForCompany(companyB, () => shop.item.findUnique({ where: { id: itemsA[0].id } })),
+      ]);
+      expect(ia2?.id).toBe(itemsA[0].id);
+      // Shop B never sees shop A's item, batched or not.
+      expect(ib2).toBeNull();
+    }
   });
 
   it("a store manager of Anna Nagar calls every GET route; none carries a Main store document", async () => {

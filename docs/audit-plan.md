@@ -312,9 +312,9 @@ To add before many shops (owner to choose; each needs a short plan first):
 
 | Session | Status | Date | Results |
 | --- | --- | --- | --- |
-| 1. Security and access | **Done**: 27 findings, no Critical, all 7 High fixed with tests | 28 Oct 2026 | `docs/audit/01-security-access.md`, route table `docs/audit/01-routes.md` |
-| 2. Money and accounts | Not started | | |
-| 3. Stock | Not started | | |
+| 1. Security and access | **Done**: 28 findings, all closed (2 Critical, 7 High) | 28 Oct 2026 | `docs/audit/01-security-access.md`, route table `docs/audit/01-routes.md` |
+| 2. Money and accounts | **Done**: 18 findings, all closed (1 Critical, 6 High) | 28 Oct 2026 | `docs/audit/02-money-accounts.md` |
+| 3. Stock | **Done**: 17 findings, 3 Critical and 5 High fixed with tests | 28 Oct 2026 | `docs/audit/03-stock.md` |
 | 4. GST | Not started | | |
 | 5. Billing counter and offline | Not started | | |
 | 6. Dates | Not started | | |
@@ -327,4 +327,4 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 2 (money and accounts). Open items from Session 1 for later sessions: #18 (Session 12), #21 (Session 5), #26 (Session 2), #20 and #23 (small, any time); owner decisions #19, #22, #24.
+**Next step:** Session 4 (GST and the law). Carried to Session 8: stock re-costing speed (03 #14).

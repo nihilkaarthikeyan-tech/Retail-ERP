@@ -28,10 +28,11 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import { assertStoreAccess } from '../auth/store-access.js';
 import type { Actor } from '../common/request-context.js';
 import type { GoodsReceipt, Prisma, StockLedgerEntry, Supplier } from '../generated/prisma/client.js';
-import { postingInstant, StockDocumentsService } from '../inventory/stock-documents.service.js';
+import { postingInstant, StockDocumentsService, untypedToday } from '../inventory/stock-documents.service.js';
 import { type Movement, StockEngine } from '../inventory/stock-engine.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { assertModuleOn, moduleOn } from '../modules/module-map.js';
+import { lockedStatus, lockRows, lockStillAt } from '../common/row-lock.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { PurchasePostings } from './purchase-postings.service.js';
@@ -178,6 +179,7 @@ export class GoodsReceiptsService {
     const lineInputs = input.lines ?? before.lines.map((l) => lineInputOf(l));
     const { lines } = await this.resolve(this.prisma, before.companyId, header, lineInputs, user);
     const after = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'GoodsReceipt', id, 'draft', 'Only draft goods receipts can be changed; it was just finalised or cancelled');
       await tx.goodsReceipt.update({
         where: { id },
         data: {
@@ -394,8 +396,14 @@ export class GoodsReceiptsService {
 
   /** Posts a draft receipt to stock and its orders; used by finalise and by bills that receive goods. */
   async post(tx: Db, id: string, actor: Actor, user: CurrentUser): Promise<{ receipt: ReceiptRow; warnings: string[] }> {
-    const r = await this.getRow(tx, id);
+    await lockedStatus(tx, 'GoodsReceipt', id);
+    let r = await this.getRow(tx, id);
     if (r.status !== 'draft') throw new BadRequestException(`The goods receipt is already ${r.status}`);
+    // Audit 3: a draft of today with no typed time takes the moment it is posted.
+    if (untypedToday(r)) {
+      await tx.goodsReceipt.update({ where: { id }, data: { postingAt: new Date() } });
+      r = await this.getRow(tx, id);
+    }
     const postingDate = iso(r.postingDate)!;
     const settings = await this.common.settings(tx, r.companyId);
     const warnings: string[] = [];
@@ -531,6 +539,8 @@ export class GoodsReceiptsService {
 
   /** Goods leave at the original cost (not today's), from the shelf or the Rejected location. */
   async returnGoods(tx: Db, originalId: string, input: PurchaseReturnInput, actor: Actor, user: CurrentUser): Promise<ReceiptRow> {
+    // Audit 3 (28 October 2026): the receipt cannot be cancelled while goods are being returned from it.
+    await lockedStatus(tx, 'GoodsReceipt', originalId);
     const original = await this.getRow(tx, originalId);
     if (original.isReturn) throw new BadRequestException('A return cannot be returned');
     if (['draft', 'cancelled'].includes(original.status)) throw new BadRequestException(`A ${original.status} receipt cannot be returned`);
@@ -662,7 +672,14 @@ export class GoodsReceiptsService {
     }
     const entries = await this.engine.post(tx, movements, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, original) });
     await this.applySerials(tx, ret, 'finalise', actor);
-    await this.postings.returnFreight(tx, ret, await this.freightShare(tx, plan), roleOf(original), actor.userId);
+    // Goods received not billed must be left holding exactly the goods' value, which the supplier's
+    // debit note clears: the freight share goes back to Freight inward (decision L5), and what the
+    // moving average makes different from the receipt's cost (audit 3) goes to cost of goods sold.
+    // GST not claimable that a bill added to the cost is settled by the debit note's own lines, so it stays.
+    const { freight, blockedTax } = await this.freightShare(tx, plan);
+    const removed = entries.reduce((s, e) => s.sub(D(e.valueChange)), new Decimal(0));
+    const goods = lineData.reduce((s, l) => s.sub(D(l.taxableAmount)), new Decimal(0));
+    await this.postings.returnFreight(tx, ret, freight, removed.sub(goods).sub(freight).sub(blockedTax), roleOf(original), actor.userId);
 
     for (const p of plan) {
       await tx.goodsReceiptLine.update({
@@ -689,8 +706,9 @@ export class GoodsReceiptsService {
    * Decision L5 (owner, 28 October 2026): the returned pieces' share of the freight added to their
    * cost. GST not claimable that a bill added to the same cost (`extraCharges`) is not freight.
    */
-  private async freightShare(tx: Db, plan: { line: ReceiptRow['lines'][number]; basicAcc: Decimal; basicRej: Decimal }[]): Promise<Decimal> {
+  private async freightShare(tx: Db, plan: { line: ReceiptRow['lines'][number]; basicAcc: Decimal; basicRej: Decimal }[]): Promise<{ freight: Decimal; blockedTax: Decimal }> {
     let freight = new Decimal(0);
+    let blockedTax = new Decimal(0);
     for (const p of plan) {
       const charges = D(p.line.extraCharges);
       if (charges.isZero()) continue;
@@ -701,8 +719,9 @@ export class GoodsReceiptsService {
       const tax = blocked.reduce((s, b) => s.add(D(b.cgst)).add(D(b.sgst)).add(D(b.igst)), new Decimal(0));
       const received = D(p.line.basicAcceptedQuantity).add(D(p.line.basicRejectedQuantity));
       freight = freight.add(roundMoney(Decimal.max(0, charges.sub(tax)).mul(p.basicAcc.add(p.basicRej)).div(received)));
+      blockedTax = blockedTax.add(roundMoney(Decimal.min(charges, tax).mul(p.basicAcc.add(p.basicRej)).div(received)));
     }
-    return freight;
+    return { freight, blockedTax };
   }
 
   // ---- Cancelling ----
@@ -717,6 +736,7 @@ export class GoodsReceiptsService {
   }
 
   async cancelInTx(tx: Db, id: string, reason: string, actor: Actor, user: CurrentUser, opts: { forBillId?: string } = {}): Promise<ReceiptRow> {
+    await lockedStatus(tx, 'GoodsReceipt', id);
     const r = await this.getRow(tx, id);
     if (r.status === 'cancelled') throw new BadRequestException('Already cancelled');
     if (r.status === 'draft') {
@@ -749,12 +769,16 @@ export class GoodsReceiptsService {
     if (r.isReturn) {
       // A return to the supplier posted itself through the engine (goods received not billed against stock).
       await this.engine.reverseDocument(tx, id, (e) => e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, r) });
+      await this.postings.cancelReturnFreight(tx, id, actor.userId);
     } else {
       const reversals = await this.engine.reverseDocument(tx, id, (e) => e.documentLineId, { allowNegative: false, actorId: actor.userId, describe: await this.describer(tx, r), ledger: 'held' });
       await this.postings.cancelGoodsReceipt(tx, id, reversals.map((e) => e.id), actor.userId);
     }
     await this.applySerials(tx, r, 'cancel', actor);
 
+    // Audit 3 (28 October 2026): the counters written back below are locked first.
+    await lockRows(tx, 'PurchaseOrderLine', r.lines.map((l) => l.orderLineId));
+    if (r.isReturn) await lockRows(tx, 'GoodsReceiptLine', r.lines.map((l) => l.returnOfLineId));
     for (const l of r.lines) {
       const basic = D(l.basicAcceptedQuantity).add(D(l.basicRejectedQuantity)); // negative on returns
       if (l.orderLineId) {

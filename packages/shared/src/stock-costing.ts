@@ -26,7 +26,7 @@ export const EMPTY_STATE: StockState = { quantity: new Decimal(0), unitCost: new
  * - `reverse`: undoes another line's quantity and value exactly (cancelling).
  */
 export type StockIntent =
-  | { kind: 'in'; quantity: DecimalInput; incomingCost: DecimalInput }
+  | { kind: 'in'; quantity: DecimalInput; incomingCost: DecimalInput; incomingValue?: DecimalInput | null }
   | { kind: 'out'; quantity: DecimalInput; fixedCost?: DecimalInput | null }
   | { kind: 'set'; targetQuantity: DecimalInput; targetCost?: DecimalInput | null }
   | { kind: 'reverse'; quantityChange: DecimalInput; valueChange: DecimalInput };
@@ -59,7 +59,10 @@ function stateFrom(quantity: Decimal, value: Decimal, fallbackCost: Decimal): St
  * position has no cost yet (selling beyond stock, blueprint 08 "fallback cost").
  */
 export function apply(before: StockState, intent: StockIntent, fallbackCost?: DecimalInput | null): AppliedLine {
-  const currentCost = before.unitCost.gt(0) ? before.unitCost : fallbackCost != null ? new Decimal(fallbackCost) : null;
+  // Goods in stock leave at their own cost, even when it is 0 (free goods; audit 3, 28 October 2026);
+  // the fallback cost is only for selling beyond stock with no cost known.
+  const inStock = before.quantity.gt(QUANTITY_TOLERANCE);
+  const currentCost = inStock || before.unitCost.gt(0) ? before.unitCost : fallbackCost != null ? new Decimal(fallbackCost) : null;
 
   switch (intent.kind) {
     case 'in': {
@@ -75,7 +78,9 @@ export function apply(before: StockState, intent: StockIntent, fallbackCost?: De
         const after = isZero(quantity) ? { quantity: new Decimal(0), unitCost: c, value: new Decimal(0) } : { quantity, unitCost: c, value };
         return { quantityChange: q, valueChange: after.value.sub(before.value), unitCost: c, after };
       }
-      value = before.value.add(roundMoney(q.mul(c)));
+      // Audit 3 (28 October 2026): goods coming from another movement (a transfer) bring exactly the
+      // value that left there, not quantity × the rounded unit cost, so no paise stay in clearing.
+      value = before.value.add(intent.incomingValue != null ? roundMoney(new Decimal(intent.incomingValue)) : roundMoney(q.mul(c)));
       return { quantityChange: q, valueChange: value.sub(before.value), unitCost: c, after: stateFrom(quantity, value, c) };
     }
 
@@ -85,8 +90,10 @@ export function apply(before: StockState, intent: StockIntent, fallbackCost?: De
       const cost = intent.fixedCost != null ? roundCost(new Decimal(intent.fixedCost)) : currentCost;
       if (cost === null) throw new Error('MISSING_COST');
       const quantity = roundQuantity(before.quantity.sub(q));
-      // Taking out the last units takes out the whole remaining value (no paise left behind).
-      const valueChange = isZero(quantity) && intent.fixedCost == null ? before.value.neg() : roundMoney(q.mul(cost)).neg();
+      // Taking out the last units takes out the whole remaining value (no paise left behind). Audit 3
+      // (28 October 2026): at a fixed cost too (a return to the supplier, goods out of transit), or the
+      // position would show nothing left while its movements still add up to a value.
+      const valueChange = isZero(quantity) ? before.value.neg() : roundMoney(q.mul(cost)).neg();
       const value = before.value.add(valueChange);
       return { quantityChange: q.neg(), valueChange, unitCost: cost, after: stateFrom(quantity, value, cost) };
     }

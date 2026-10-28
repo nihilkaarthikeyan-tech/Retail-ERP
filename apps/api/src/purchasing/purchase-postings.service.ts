@@ -8,6 +8,8 @@ import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js
 
 type Amount = { toString(): string };
 const D = (v: Amount) => new Decimal(v.toString());
+/** Decision L5: the freight share of goods returned, a ledger entry of its own beside the return's stock entries. */
+const RETURN_FREIGHT = 'goods_return_freight';
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 @Injectable()
@@ -57,25 +59,33 @@ export class PurchasePostings {
   /**
    * Decision L5 (owner, 28 October 2026): goods going back to the supplier leave stock at their full
    * cost, freight included, against goods received not billed; the supplier's debit note clears only
-   * the goods. The freight share goes back to Freight inward, so nothing is left behind. Cancelling
-   * the return reverses it with the rest of the return's entries.
+   * the goods. The freight share goes back to Freight inward, so nothing is left behind. It is kept
+   * as its own document type, so cancelling the return reverses it (`cancelReturnFreight`) while the
+   * stock engine reverses the stock (audit 2, 28 October 2026).
    */
-  async returnFreight(tx: Db, r: { id: string; companyId: string; number: string; storeId: string; postingDate: Date }, amount: Decimal, counterRole: string, actorId: string | null): Promise<void> {
-    if (amount.lte(0)) return;
+  async returnFreight(tx: Db, r: { id: string; companyId: string; number: string; storeId: string; postingDate: Date }, amount: Decimal, averaging: Decimal, counterRole: string, actorId: string | null): Promise<void> {
+    if (amount.lte(0) && averaging.isZero()) return;
     await this.ledger.post(tx, {
       companyId: r.companyId,
       date: iso(r.postingDate),
-      documentType: 'goods_receipt',
+      documentType: RETURN_FREIGHT,
       documentId: r.id,
       documentNumber: r.number,
       storeId: r.storeId,
       actorId,
       remark: 'Freight share of the goods returned',
       lines: [
-        { role: 'freight_inward', storeId: r.storeId, debit: amount },
-        { role: counterRole, storeId: r.storeId, credit: amount },
+        ...(amount.gt(0) ? [{ role: 'freight_inward', storeId: r.storeId, debit: amount }] : []),
+        // Audit 3: the goods left at the average cost, not the receipt's; the difference is the cost of what was sold earlier.
+        ...(averaging.isZero() ? [] : [{ role: 'cost_of_goods_sold', storeId: r.storeId, debit: averaging, remark: 'Average cost against the receipt cost' }]),
+        { role: counterRole, storeId: r.storeId, credit: amount.add(averaging) },
       ],
     });
+  }
+
+  /** Cancelling a return: its freight share goes back to goods received not billed. */
+  async cancelReturnFreight(tx: Db, returnId: string, actorId: string | null): Promise<void> {
+    await this.ledger.reverseDocument(tx, RETURN_FREIGHT, returnId, actorId);
   }
 
   /**

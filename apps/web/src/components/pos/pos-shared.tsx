@@ -238,6 +238,7 @@ export const FLAG_LABELS: Record<string, string> = {
   gst_changed: "GST rate changed while the till was offline",
   price_missing: "Item had no price on the server; the till's price was kept",
   stock_negative: "Stock went below zero",
+  after_books_locked: "Sold on a day the books were locked since; its accounts entry is on the next open day",
   gst_provisional: "GST provisional (an older bill, saved before GST rates applied as soon as saved)",
   credit_note_late: "Credit note after the GST time limit (30 November): tax not reduced in the return",
   buyer_details_missing: "Buyer details a GST invoice needs were missing (made offline)",

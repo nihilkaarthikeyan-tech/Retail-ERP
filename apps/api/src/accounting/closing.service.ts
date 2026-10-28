@@ -22,6 +22,15 @@ export class ClosingService {
 
   async setLockDate(lockDate: string | null, reason: string, actor: Actor) {
     const company = await this.common.ready();
+    // Audit 2 (28 October 2026): a till shift still open from on or before the date would post its bills
+    // after the lock, on the next open day, so the period's sales and GST would differ from its bills.
+    if (lockDate) {
+      const open = await this.prisma.shift.findMany({ where: { status: 'open', businessDate: { lte: fromIso(lockDate) } }, select: { businessDate: true, till: { select: { code: true } } } });
+      if (open.length) {
+        const list = open.map((s) => `${s.till.code} (${iso(s.businessDate)})`).join(', ');
+        throw new BadRequestException(`Close these till shifts first, so their bills are in the accounts before the lock: ${list}`);
+      }
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.company.update({ where: { id: company.id }, data: { lockDate: lockDate ? fromIso(lockDate) : null } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'company', entityId: company.id, changes: { booksLockedTo: { old: iso(company.lockDate), new: lockDate } }, reason });

@@ -79,6 +79,11 @@ export class InventoryController {
   @Get('transfers/in-transit') @RequireModule('transfers') @RequirePermission('stock.view') inTransit(@ReqUser() user: AuthUser) {
     return this.documents.inTransit(user);
   }
+  /** Audit 3 #16 (owner, 28 October 2026): write off what never arrived, so the transfer can be finished. */
+  @Post('transfers/:id/close-short') @HttpCode(200) @RequireModule('transfers') @RequirePermission('stock.adjust_finalise') closeShort(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(cancelStockDocumentSchema)) input: CancelStockDocumentInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.documents.closeShort(id, input.reason, actor, user);
+  }
+
   @Post('transfers/:id/receive') @RequireModule('transfers') @RequirePermission('stock.move') receive(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(receiveTransferSchema)) input: ReceiveTransferInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.documents.receive(id, input, actor, user);
   }

@@ -47,6 +47,9 @@ export class CatchUpService implements OnApplicationBootstrap {
       const ids = unposted.filter((e) => e.documentId === id).map((e) => e.id);
       await this.prisma.$transaction(
         async (tx) => {
+          // Audit 2 (28 October 2026): two copies of the API starting at once post it only once.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`catch-up:${id}`}))`;
+          if (await tx.ledgerEntry.count({ where: { documentType: 'goods_receipt', documentId: id } })) return;
           if (r.status === 'cancelled') await this.ledger.markPosted(tx, ids);
           else {
             const own = (await tx.stockLedgerEntry.findMany({ where: { id: { in: ids }, isCancellation: false }, select: { id: true } })).map((e) => e.id);
@@ -74,6 +77,8 @@ export class CatchUpService implements OnApplicationBootstrap {
     for (const s of shifts) {
       const posted = await this.prisma.$transaction(
         async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`catch-up:${s.id}`}))`;
+          if ((await tx.shift.findUniqueOrThrow({ where: { id: s.id }, select: { ledgerEntryId: true } })).ledgerEntryId) return false;
           const entryId = await this.pos.postShift(tx, s.id, businessDate(s.closedAt ?? new Date()), null);
           await tx.shift.update({ where: { id: s.id }, data: { ledgerEntryId: entryId } });
           return entryId !== null;
@@ -91,7 +96,14 @@ export class CatchUpService implements OnApplicationBootstrap {
       .filter((e) => e.documentType !== 'goods_receipt' || !receiptIds.includes(e.documentId));
     if (rest.length) {
       const ids = rest.map((e) => e.id);
-      await this.prisma.$transaction((tx) => this.ledger.syncStock(tx, ids, { actorId: null, newIds: new Set(ids) }), { timeout: 120_000 });
+      await this.prisma.$transaction(
+        async (tx) => {
+          // syncStock posts only what is still unposted, read again after the lock.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('catch-up:stock'))`;
+          await this.ledger.syncStock(tx, ids, { actorId: null, newIds: new Set(ids) });
+        },
+        { timeout: 120_000 },
+      );
       count += new Set(rest.map((e) => e.documentId)).size;
     }
 

@@ -29,6 +29,7 @@ import { CompanyService } from '../company/company.service.js';
 import type { Item, Prisma } from '../generated/prisma/client.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { assertModuleOn } from '../modules/module-map.js';
+import { imageTypeOf } from '../common/image-type.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SeasonsService } from './seasons.service.js';
 
@@ -579,6 +580,7 @@ export class ItemsService {
     const bytes = Buffer.from(dataBase64, 'base64');
     if (bytes.length === 0) throw new BadRequestException('Picture is empty');
     if (bytes.length > MAX_IMAGE_BYTES) throw new BadRequestException('Picture must be 500 KB or smaller');
+    if (imageTypeOf(bytes) !== mimeType) throw new BadRequestException('This file is not a JPEG, PNG or WebP picture');
     await this.prisma.$transaction(async (tx) => {
       await tx.item.update({ where: { id }, data: { image: bytes, imageMimeType: mimeType, updatedById: actor.userId } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'item', entityId: id, changes: { image: { old: null, new: `${mimeType}, ${bytes.length} bytes` } } });

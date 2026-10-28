@@ -433,9 +433,16 @@ export class StockEngine {
       const src = await tx.stockLedgerEntry.findUniqueOrThrow({ where: { id: e.costSourceId } });
       return D(src.unitCost);
     };
+    const sourceValue = async (): Promise<Decimal | null> => {
+      if (e.costSourceId === null) return null;
+      const local = recomputed.get(e.costSourceId);
+      const src = local ?? (await tx.stockLedgerEntry.findUniqueOrThrow({ where: { id: e.costSourceId } }));
+      // The whole of the other movement: its exact value (audit 3); a part keeps quantity × cost.
+      return D(src.quantityChange).abs().eq(D(e.intentQuantity).abs()) ? D(src.valueChange).abs() : null;
+    };
     switch (e.kind) {
       case 'in':
-        return { kind: 'in', quantity: e.intentQuantity.toString(), incomingCost: ((await sourceCost()) ?? D(e.incomingCost ?? '0')).toString() };
+        return { kind: 'in', quantity: e.intentQuantity.toString(), incomingCost: ((await sourceCost()) ?? D(e.incomingCost ?? '0')).toString(), incomingValue: (await sourceValue())?.toString() ?? null };
       case 'out':
         return { kind: 'out', quantity: e.intentQuantity.toString(), fixedCost: (await sourceCost())?.toString() ?? null };
       case 'set':

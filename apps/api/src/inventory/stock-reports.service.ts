@@ -280,6 +280,29 @@ export class StockReportsService {
       const lq = new Decimal((b.lq ?? 0).toString());
       if (!lq.eq(b.q.toString())) problems.push(`batch ${b.batchId}@${b.locationId}: ${b.q.toString()} vs ledger ${lq.toString()}`);
     }
+    // Audit 3 (28 October 2026): more that must always hold.
+    // Movements with no position row at all.
+    const orphans = await this.prisma.$queryRaw<{ itemId: string; locationId: string }[]>`
+      SELECT DISTINCT e."itemId", e."locationId" FROM "StockLedgerEntry" e
+      LEFT JOIN "StockPosition" p ON p."itemId" = e."itemId" AND p."locationId" = e."locationId" WHERE p."itemId" IS NULL`;
+    for (const o of orphans) problems.push(`${o.itemId}@${o.locationId}: movements but no position`);
+    // Goods on the shelf never have a value below zero, an empty shelf never has a value, and the unit cost is value ÷ quantity.
+    const positions = await this.prisma.stockPosition.findMany({ select: { itemId: true, locationId: true, quantity: true, value: true, unitCost: true } });
+    for (const p of positions) {
+      const q = new Decimal(p.quantity.toString());
+      const v = new Decimal(p.value.toString());
+      if (q.gt(0) && v.lt(0)) problems.push(`${p.itemId}@${p.locationId}: ${q.toString()} on the shelf with a value of ${v.toFixed(2)}`);
+      if (q.isZero() && !v.isZero()) problems.push(`${p.itemId}@${p.locationId}: empty with a value of ${v.toFixed(2)}`);
+      if (q.gt(0) && !v.div(q).toDecimalPlaces(4).sub(p.unitCost.toString()).abs().lte('0.0001')) problems.push(`${p.itemId}@${p.locationId}: unit cost ${p.unitCost.toString()} is not value ÷ quantity`);
+    }
+    // Each movement's "after" figures follow from the one before it.
+    const breaks = await this.prisma.$queryRaw<{ id: bigint }[]>`
+      SELECT id FROM (
+        SELECT e.id, e."quantityAfter", e."quantityChange",
+               lag(e."quantityAfter") OVER (PARTITION BY e."itemId", e."locationId" ORDER BY e."postingAt", e.id) AS prev
+        FROM "StockLedgerEntry" e) t
+      WHERE t."quantityAfter" <> coalesce(t.prev, 0) + t."quantityChange" LIMIT 20`;
+    for (const b of breaks) problems.push(`movement ${b.id.toString()}: its quantity after does not follow from the one before`);
     return problems;
   }
 }

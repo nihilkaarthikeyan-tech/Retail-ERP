@@ -475,7 +475,7 @@ function TrialBalance({ f }: { f: Filters }) {
     <Loaded state={tb}>
       {(d) => (
         <>
-          <p>{d.balanced ? <Badge kind="ok">Debits equal credits</Badge> : <Badge kind="off">Debits and credits differ: tell the Accountant</Badge>}</p>
+          <p>{d.balanced ? <Badge kind="ok">Debits equal credits</Badge> : <Badge kind="off">Debits and credits differ</Badge>}{d.balanced ? null : " For one store, entries shared with other stores (transfers between GST numbers, goods on the way) make it differ; with all stores chosen it must agree, or tell the Accountant."}</p>
           <ReportTable
             name="trial-balance"
             columns={columns}
@@ -528,7 +528,13 @@ function ProfitAndLoss({ f }: { f: Filters }) {
           ...(monthly ? d.periods.map((p) => ({ key: p, header: monthName(p), align: "right" as const, value: (r: PnlRow) => r.amounts[p] ?? "", render: (r: PnlRow) => <span className={neg(r.amounts[p])}>{r.amounts[p] ? rupees(r.amounts[p]) : ""}</span> })) : []),
           { key: "total", header: monthly ? "Total" : "Amount", align: "right", value: (r) => r.total, render: (r) => <span className={neg(r.total)}>{r.total ? rupees(r.total) : ""}</span> },
         ];
-        return <ReportTable name="profit-and-loss" columns={columns} rows={rows} rowKey={(r) => r.key} empty="No income or expenses." />;
+        return (
+          <>
+            {/* Audit 2 (28 October 2026): why today's sales here can differ from the sales reports. */}
+            <p className="muted">Till sales reach the accounts when each till shift is closed, so a shift still open is not here yet; the sales reports show bills at once.</p>
+            <ReportTable name="profit-and-loss" columns={columns} rows={rows} rowKey={(r) => r.key} empty="No income or expenses." />
+          </>
+        );
       }}
     </Loaded>
   );
@@ -562,7 +568,7 @@ function BalanceSheet({ f }: { f: Filters }) {
         const temporary = [d.assets, d.liabilities, d.equity].some((s) => s.rows.some((r) => r.kind === "temporary_opening"));
         return (
           <>
-            <p>{d.balanced ? <Badge kind="ok">Assets equal liabilities and capital</Badge> : <Badge kind="off">Does not balance: tell the Accountant</Badge>}</p>
+            <p>{d.balanced ? <Badge kind="ok">Assets equal liabilities and capital</Badge> : <Badge kind="off">Does not balance</Badge>}{d.balanced ? null : " For one store, entries shared with other stores make it differ; with all stores chosen it must agree, or tell the Accountant."}</p>
             {temporary ? (
               <Alert kind="info">
                 &ldquo;Temporary opening&rdquo; holds the other side of the balances brought in from before you started (opening stock, money owed). It is expected and goes to zero once all opening balances are entered under{" "}
@@ -699,7 +705,7 @@ function StockVsAccounts() {
     <Loaded state={sv}>
       {(d) => (
         <>
-          <p>{d.ok ? <Badge kind="ok">Stock and accounts agree</Badge> : <Badge kind="off">There is a difference: tell the Accountant</Badge>} The value of stock on the shelves should equal the stock accounts for every store.</p>
+          <p>{d.ok ? <Badge kind="ok">Stock and accounts agree</Badge> : <Badge kind="off">There is a difference</Badge>}{d.ok ? null : " Bills of till shifts still open reach the accounts when the shift closes; close them and check again. If it still differs, tell the Accountant."} The value of stock on the shelves should equal the stock accounts for every store.</p>
           <ReportTable name="stock-vs-accounts" columns={columns} rows={d.rows} rowKey={(r) => r.key} empty="No stock yet." />
         </>
       )}

@@ -80,7 +80,8 @@ export class PosCommon {
       where: { id: tillId },
       include: { store: { select: { id: true, code: true, name: true, stateCode: true, companyId: true } }, paymentMethods: { include: { paymentMethod: true } } },
     });
-    if (!till) throw new NotFoundException('Till not found');
+    // Audit 1 (28 October 2026): a computer set up as a till of another shop lands here (that till is not visible).
+    if (!till) throw new NotFoundException('This till is not part of the shop you are logged in to. If this computer was set up as a till for another shop, register it again for this shop under Billing counter → Tills.');
     return till;
   }
 
@@ -122,7 +123,11 @@ export class PosCommon {
     if (a.usedAt || pending?.some((p) => p.id === a.id)) throw new ForbiddenException('The manager approval was already used');
     if (a.expiresAt < new Date()) throw new ForbiddenException('The manager approval has expired; ask again');
     if (pending) pending.push({ id: a.id, usedFor });
-    else await db.posApproval.update({ where: { id: a.id }, data: { usedAt: new Date(), usedFor } });
+    else {
+      // Audit 2 (28 October 2026): marked used in one step, so two requests at once cannot both use it.
+      const r = await db.posApproval.updateMany({ where: { id: a.id, usedAt: null }, data: { usedAt: new Date(), usedFor } });
+      if (r.count !== 1) throw new ForbiddenException('The manager approval was already used');
+    }
     return a.managerId;
   }
 

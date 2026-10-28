@@ -121,7 +121,11 @@ export class ReorderService {
   private async onHand(tx: Db, itemId: string, storeId: string): Promise<Decimal> {
     const shelves = await tx.stockLocation.findMany({ where: { storeId, kind: 'shelf' }, select: { id: true } });
     const sum = await tx.stockPosition.aggregate({ where: { itemId, locationId: { in: shelves.map((l) => l.id) } }, _sum: { quantity: true } });
-    return D(sum._sum.quantity ?? '0');
+    // Audit 3 (28 October 2026): goods already on their way to this store from another count too,
+    // so a transfer in transit is not bought again.
+    const coming = await tx.stockDocumentLine.findMany({ where: { itemId, document: { kind: 'transfer_send', status: 'finalised', toStoreId: storeId } }, select: { basicQuantity: true, receivedQuantity: true } });
+    const onTheWay = coming.reduce((s, l) => s.add(Decimal.max(0, D(l.basicQuantity).sub(D(l.receivedQuantity)))), new Decimal(0));
+    return D(sum._sum.quantity ?? '0').add(onTheWay);
   }
 
   /** The supplier of the latest goods received for the item (not a return, not a draft or cancelled one). */

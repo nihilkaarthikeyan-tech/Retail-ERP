@@ -3450,6 +3450,9 @@ model GiftCardEntry {
   storeId      String?  @db.Uuid
   entryDate    DateTime @db.Date
   remark       String?
+  /// Audit 2 (28 October 2026): how a load at the till was paid, and at which till, for the till payments report.
+  paymentMethodId String? @db.Uuid
+  tillId          String? @db.Uuid
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid

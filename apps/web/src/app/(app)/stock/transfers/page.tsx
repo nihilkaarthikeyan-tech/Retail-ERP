@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Decimal, hasPermission } from "shared";
+import { OrdersReasonDialog } from "@/components/purchasing/orders-shared";
 import { ReceiveDialog } from "@/components/stock/receive-dialog";
 import { useCompanyStores, useStockLocations } from "@/components/stock/use-stock-refs";
 import { Alert, Button, DataTable, type Column } from "@/components/ui";
@@ -32,6 +33,10 @@ export default function InTransitPage() {
   const stores = useCompanyStores(locations.data);
   const [receiving, setReceiving] = useState<StockDocumentDto | null>(null);
   const [done, setDone] = useState<StockDocumentDto | null>(null);
+  // Audit 3 #16 (owner, 28 October 2026): write off what never arrived, with a reason.
+  const canClose = hasPermission(user, "stock.adjust_finalise");
+  const [closing, setClosing] = useState<StockDocumentDto | null>(null);
+  const [closed, setClosed] = useState<string | null>(null);
 
   const mine = (storeId: string | null) => !!storeId && (user?.allStores || (user?.stores ?? []).some((s) => s.id === storeId));
   const storeName = (id: string | null) => {
@@ -57,22 +62,30 @@ export default function InTransitPage() {
     { key: "lines", header: "Items", align: "right", render: (d) => d.lines.length },
     { key: "received", header: "Received", align: "right", render: (d) => progress(d) },
   ];
+  const closeButton = (d: StockDocumentDto) =>
+    canClose && mine(d.storeId) ? (
+      <Button size="small" onClick={() => setClosing(d)}>
+        Close short
+      </Button>
+    ) : null;
   const incomingColumns: Column<StockDocumentDto>[] = [
     ...base,
-    ...(canReceive
-      ? [
-          {
-            key: "act",
-            header: "",
-            render: (d: StockDocumentDto) => (
-              <Button size="small" variant="primary" onClick={() => setReceiving(d)}>
-                Receive
-              </Button>
-            ),
-          } satisfies Column<StockDocumentDto>,
-        ]
-      : []),
+    {
+      key: "act",
+      header: "",
+      render: (d: StockDocumentDto) => (
+        <span className="row-actions">
+          {canReceive ? (
+            <Button size="small" variant="primary" onClick={() => setReceiving(d)}>
+              Receive
+            </Button>
+          ) : null}
+          {closeButton(d)}
+        </span>
+      ),
+    },
   ];
+  const outgoingColumns: Column<StockDocumentDto>[] = [...base, { key: "act", header: "", render: (d: StockDocumentDto) => closeButton(d) }];
 
   return (
     <>
@@ -95,9 +108,24 @@ export default function InTransitPage() {
       {user?.allStores ? null : (
         <>
           <h2>Sent to stores you do not look after</h2>
-          <DataTable columns={base} rows={sends.data ? outgoing : null} rowKey={(d) => d.id} loading={sends.loading} empty="Nothing you sent to other stores is still on its way." />
+          <DataTable columns={outgoingColumns} rows={sends.data ? outgoing : null} rowKey={(d) => d.id} loading={sends.loading} empty="Nothing you sent to other stores is still on its way." />
         </>
       )}
+      {closed ? <Alert kind="success">{closed}</Alert> : null}
+      <OrdersReasonDialog
+        open={closing !== null}
+        title="Close this transfer short?"
+        explain="What has not arrived yet is written off from transit at its cost (Write-off, in the sending store), and nothing more can be received on this transfer."
+        confirmLabel="Close short"
+        danger
+        onClose={() => setClosing(null)}
+        onConfirm={async (reason) => {
+          const d = closing!;
+          await api.post<StockDocumentDto>(`/stock/transfers/${d.id}/close-short`, { reason });
+          setClosed(`Transfer ${d.number} is closed; what did not arrive was written off.`);
+          await sends.reload();
+        }}
+      />
       {receiving && locations.data ? (
         <ReceiveDialog
           send={receiving}

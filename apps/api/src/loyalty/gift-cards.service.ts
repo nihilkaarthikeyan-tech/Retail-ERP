@@ -198,6 +198,8 @@ export class GiftCardsService {
       debit: Pick<LedgerLineInput, 'accountId' | 'role'>;
       receiptNumber: string;
       methodName: string;
+      paymentMethodId?: string | null;
+      tillId?: string | null;
     },
   ): Promise<{ card: GiftCard; entry: GiftCardEntry; isNew: boolean }> {
     let card: GiftCard;
@@ -240,7 +242,7 @@ export class GiftCardsService {
       card = made;
     }
     const entry = await tx.giftCardEntry.create({
-      data: { cardId: card.id, kind: 'load', amount: s.amount.toFixed(2), balanceAfter: D(card.balance).toFixed(2), storeId: s.storeId, entryDate: fromIso(s.date), remark: `Receipt ${s.receiptNumber} (${s.methodName})`, createdById: s.actorId },
+      data: { cardId: card.id, kind: 'load', amount: s.amount.toFixed(2), balanceAfter: D(card.balance).toFixed(2), storeId: s.storeId, entryDate: fromIso(s.date), remark: `Receipt ${s.receiptNumber} (${s.methodName})`, paymentMethodId: s.paymentMethodId ?? null, tillId: s.tillId ?? null, createdById: s.actorId },
     });
     await this.ledger.post(tx, {
       companyId: s.companyId,

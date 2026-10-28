@@ -53,6 +53,12 @@ export class AttentionService {
     const today = businessDate();
     const items: AttentionItem[] = [];
 
+    // Audit 2 #18 (owner, 28 October 2026): until the go-live date is recorded, "Clear trial data" can
+    // still empty the books; remind the Owner from three days before the trial ends.
+    if (user.isOwnerAdmin && !company.goLiveDate && company.trialEndsAt && company.trialEndsAt.getTime() - Date.now() < 3 * 86_400_000) {
+      items.push({ key: 'go-live', label: 'Record your go-live date', detail: 'Until it is recorded, the trial data (and the books) can still be cleared', href: '/go-live', tone: 'warn', action: 'Go live' });
+    }
+
     if (hasPermission(user, 'stock.view')) {
       const low = await this.dashboards.belowReorder(company.id, scope.ids);
       if (low.length) items.push({ key: 'reorder', label: `${low.length} item${low.length === 1 ? '' : 's'} at or below reorder level`, href: '/purchases/reorder', tone: 'warn', action: 'Reorder' });

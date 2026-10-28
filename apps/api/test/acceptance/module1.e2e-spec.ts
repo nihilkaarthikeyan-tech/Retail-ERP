@@ -187,8 +187,10 @@ describe('1.3 Wrong password lockout', () => {
 
   // Code audit, 27 October 2026: guesses sent all at once each read "no failures yet".
   it('still locks when ten wrong passwords arrive at the same moment', async () => {
-    await Promise.all(Array.from({ length: 10 }, () => request(app.getHttpServer()).post('/auth/login').send({ email: 'priya@rademics.test', password: 'wrong' })));
-    const locked = await request(app.getHttpServer()).post('/auth/login').send({ email: 'priya@rademics.test', password: 'Temp-pass-1234' }).expect(401);
+    // Someone who never logged in from this connection (audit 1: a person's own usual connection is let through).
+    await createUser(owner, { firstName: 'Ravi', email: 'ravi@rademics.test', password: 'Temp-pass-1234', roles: [SYSTEM_ROLES.CASHIER], stores: ['MAIN'] });
+    await Promise.all(Array.from({ length: 10 }, () => request(app.getHttpServer()).post('/auth/login').send({ email: 'ravi@rademics.test', password: 'wrong' })));
+    const locked = await request(app.getHttpServer()).post('/auth/login').send({ email: 'ravi@rademics.test', password: 'Temp-pass-1234' }).expect(401);
     expect(locked.body.message).toMatch(/locked/i);
   });
 });

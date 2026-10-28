@@ -34,6 +34,7 @@ import { StockEngine } from '../inventory/stock-engine.service.js';
 import { NumberingService } from '../numbering/numbering.service.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { forEachShop } from '../prisma/each-shop.js';
+import { lockedStatus, lockRows, lockStillAt } from '../common/row-lock.js';
 import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { GoodsReceiptsService, type ReceiptHeader, type ResolvedReceiptLine } from './goods-receipts.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
@@ -197,6 +198,7 @@ export class SupplierBillsService {
     };
     const prepared = await this.prepare(this.prisma, before.companyId, before.kind as CreateSupplierBillInput['kind'], merged, user, id);
     const after = await this.prisma.$transaction(async (tx) => {
+      await lockStillAt(tx, 'SupplierBill', id, 'draft', 'Only draft bills can be changed; it was just finalised or cancelled');
       await tx.supplierBill.update({
         where: { id },
         data: {
@@ -669,6 +671,7 @@ export class SupplierBillsService {
         // Rule 7 for bill numbers: one finalisation per supplier + number at a time.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${b.supplierId}|${b.supplierBillNo.trim().toLowerCase()}`}))`;
         await this.assertBillNoFree(tx, b.companyId, b.supplierId, b.supplierBillNo, prepared.financialYearId, id);
+        await lockedStatus(tx, 'SupplierBill', id);
         const fresh = await tx.supplierBill.findUniqueOrThrow({ where: { id } });
         if (fresh.status !== 'draft') throw new BadRequestException(`The bill is already ${fresh.status}`);
         let warnings: string[] = [];
@@ -766,6 +769,7 @@ export class SupplierBillsService {
     if (b.status === 'cancelled') throw new BadRequestException('Already cancelled');
     const after = await this.prisma.$transaction(
       async (tx) => {
+        await lockStillAt(tx, 'SupplierBill', id, b.status, 'This bill was just changed; open it again');
         if (b.status === 'draft') {
           if (b.receiptId) await tx.goodsReceipt.update({ where: { id: b.receiptId }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
           await tx.supplierBill.update({ where: { id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelledById: actor.userId, cancelReason: reason } });
@@ -982,6 +986,8 @@ export class SupplierBillsService {
 
   private async undoDebitNote(tx: Db, note: BillRow, reason: string, actor: Actor, user: CurrentUser) {
     const original = note.returnOfId ? await this.getRow(tx, note.returnOfId) : null;
+    await lockRows(tx, 'SupplierBillLine', note.lines.map((l) => l.returnOfLineId));
+    await lockRows(tx, 'GoodsReceiptLine', note.lines.map((l) => l.receiptLineId));
     for (const l of note.lines) {
       if (!l.returnOfLineId) continue;
       const orig = await tx.supplierBillLine.findUniqueOrThrow({ where: { id: l.returnOfLineId } });
