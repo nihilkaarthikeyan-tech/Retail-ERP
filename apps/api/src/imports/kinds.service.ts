@@ -24,6 +24,7 @@ import {
   updatePriceSchema,
   updateSupplierSchema,
   variantValuesKey,
+  hasPermission,
 } from 'shared';
 import { ClosingService } from '../accounting/closing.service.js';
 import { MastersService } from '../catalogue/masters.service.js';
@@ -522,9 +523,10 @@ export class ImportKindsService {
         const created = (await this.pricing.createPrice(checked(createPriceSchema, { priceListId, itemId, unitId, price: str(v.price)!, startDate, endDate: str(v.end) ?? null, customerId }), ctx.actor, ctx.user)) as { id: string };
         return { outcome: 'added', recordId: created.id };
       },
-      exportRows: async ({ companyId }) => {
+      exportRows: async ({ companyId, user }) => {
         const rows = await this.prisma.price.findMany({
-          where: { priceList: { companyId }, supplierId: null, batchId: null },
+          // Audit 1 (28 October 2026): buying lists only for people who may see buying prices (as on the Prices screen).
+          where: { priceList: { companyId, ...(hasPermission(user, 'buying_prices.view') ? {} : { forBuying: false }) }, supplierId: null, batchId: null },
           include: { priceList: true, item: true, unit: true },
           orderBy: [{ priceList: { code: 'asc' } }, { item: { code: 'asc' } }, { startDate: 'asc' }],
         });

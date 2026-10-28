@@ -57,6 +57,7 @@ import {
   taxSituationOf,
   tillNumberSeries,
 } from 'shared';
+import { assertStoreAccess } from '../auth/store-access.js';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
@@ -1710,6 +1711,8 @@ export class PosBillsService {
     await this.common.usableTill(this.prisma, b.tillId, user).catch(() => {
       if (!hasPermission(user, 'pos.reports')) throw new ForbiddenException('You are not allowed to work in this store');
     });
+    // Audit 1 (28 October 2026): the reports right reads bills of a switched-off till, but only in the person's own stores.
+    assertStoreAccess(user, b.till.storeId);
     return this.billDto(b, user, await this.extras([b]));
   }
 

@@ -139,7 +139,7 @@ export class LandedChargesService {
   async finalise(id: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.charges');
     const c = await this.getRow(this.prisma, id);
-    if (!this.visible(c, user)) throw new ForbiddenException('You are not allowed to work in this store');
+    if (!this.visible(c, user, 'change')) throw new ForbiddenException('You are not allowed to work in this store');
     if (c.status !== 'draft') throw new BadRequestException(`The entry is already ${c.status}`);
     await this.common.checkStockDate(this.prisma, c.companyId, iso(c.postingDate)!, 'Extra charges');
     const after = await this.prisma.$transaction(
@@ -157,7 +157,7 @@ export class LandedChargesService {
   async cancel(id: string, reason: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.charges');
     const c = await this.getRow(this.prisma, id);
-    if (!this.visible(c, user)) throw new ForbiddenException('You are not allowed to work in this store');
+    if (!this.visible(c, user, 'change')) throw new ForbiddenException('You are not allowed to work in this store');
     if (c.status === 'cancelled') throw new BadRequestException('Already cancelled');
     if (c.status === 'finalised' && iso(c.postingDate)!.slice(0, 7) < businessDate().slice(0, 7) && !hasPermission(user, 'stock.backdate')) {
       throw new ForbiddenException('Only the Accountant may cancel extra charges from an earlier month');
@@ -200,9 +200,11 @@ export class LandedChargesService {
     void user;
   }
 
-  private visible(c: ChargeRow, user: CurrentUser): boolean {
+  /** Seeing a charge: any store it is shared to. Finalising or cancelling it (audit 1): every one. */
+  private visible(c: ChargeRow, user: CurrentUser, use: 'see' | 'change' = 'see'): boolean {
     if (user.allStores) return true;
-    return c.shares.some((s) => user.stores.some((u) => u.id === s.receiptLine.receipt.storeId));
+    const mine = (s: { receiptLine: { receipt: { storeId: string } } }) => user.stores.some((u) => u.id === s.receiptLine.receipt.storeId);
+    return use === 'change' ? c.shares.every(mine) : c.shares.some(mine);
   }
 
   private toDto(c: ChargeRow, user: CurrentUser) {

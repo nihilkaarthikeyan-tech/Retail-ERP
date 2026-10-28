@@ -3,7 +3,7 @@
 // a comparison and simple chart series, worked out when the page opens and
 // limited to the viewer's stores. Each figure comes from the same code as the
 // matching report, so they always agree (scenario 9.9).
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { addDays, businessDate, changePercent, type CurrentUser, Decimal, grossMarginPercent, hasPermission, previousPeriod } from 'shared';
 import type { Prisma } from '../generated/prisma/client.js';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
@@ -156,6 +156,8 @@ export class DashboardsService {
   /** Owner dashboard (all stores): month to date against the previous period of the same length. */
   async owner(user: CurrentUser) {
     this.common.require(user, 'pos.reports');
+    // Audit 1 (28 October 2026): it shows the whole company (stock value, dues), so the same rule as the menu.
+    if (!this.available(user).includes('owner')) throw new ForbiddenException('The owner dashboard covers every store; it is for people who work in all stores');
     const company = await this.common.current();
     const scope = this.common.scope(user);
     const seesCost = this.common.seesCost(user);

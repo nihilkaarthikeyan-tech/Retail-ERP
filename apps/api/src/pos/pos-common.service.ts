@@ -145,6 +145,9 @@ export class PosCommon {
     if (!token) return user.id;
     const t = await db.posCashierToken.findUnique({ where: { tokenHash: sha256(token) } });
     if (!t || t.tillId !== tillId || t.expiresAt < new Date()) throw new UnauthorizedException('The cashier switch has expired; switch again with the PIN');
+    // Audit 1 (28 October 2026): a cashier switched off since cannot keep billing on the switch.
+    const cashier = await db.user.findUnique({ where: { id: t.userId }, select: { active: true } });
+    if (!cashier?.active) throw new UnauthorizedException('That cashier is switched off; switch again with another PIN');
     return t.userId;
   }
 

@@ -120,11 +120,11 @@ export class AccountingController {
   }
 
   // ---- Journals ----
-  @Get('journals') @RequireAnyPermission('accounts.view', 'journals.post', 'cash.deposit') listJournals(@Query(zod(docListQuerySchema)) q: DocListQuery) {
-    return this.journals.list(q);
+  @Get('journals') @RequireAnyPermission('accounts.view', 'journals.post', 'cash.deposit') listJournals(@Query(zod(docListQuerySchema)) q: DocListQuery, @ReqUser() user: AuthUser) {
+    return this.journals.list(q, user);
   }
-  @Get('journals/:id') @RequireAnyPermission('accounts.view', 'journals.post', 'cash.deposit') journal(@Param('id', id()) journalId: string) {
-    return this.journals.get(journalId);
+  @Get('journals/:id') @RequireAnyPermission('accounts.view', 'journals.post', 'cash.deposit') journal(@Param('id', id()) journalId: string, @ReqUser() user: AuthUser) {
+    return this.journals.get(journalId, user);
   }
   @Post('journals') @RequireAnyPermission('journals.post', 'cash.deposit') createJournal(@Body(zod(journalSchema)) input: JournalInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.journals.create(input, actor, user);
@@ -140,11 +140,11 @@ export class AccountingController {
   }
 
   // ---- Receipts, payments, transfers ----
-  @Get('payments') @RequireAnyPermission('accounts.view', 'payments.post', 'cash.deposit') listPayments(@Query(zod(docListQuerySchema)) q: DocListQuery) {
-    return this.payments.list(q);
+  @Get('payments') @RequireAnyPermission('accounts.view', 'payments.post', 'cash.deposit') listPayments(@Query(zod(docListQuerySchema)) q: DocListQuery, @ReqUser() user: AuthUser) {
+    return this.payments.list(q, user);
   }
-  @Get('payments/:id') @RequireAnyPermission('accounts.view', 'payments.post', 'cash.deposit') payment(@Param('id', id()) paymentId: string) {
-    return this.payments.get(paymentId);
+  @Get('payments/:id') @RequireAnyPermission('accounts.view', 'payments.post', 'cash.deposit') payment(@Param('id', id()) paymentId: string, @ReqUser() user: AuthUser) {
+    return this.payments.get(paymentId, user);
   }
   @Post('payments') @RequireAnyPermission('payments.post', 'cash.deposit') createPayment(@Body(zod(paymentSchema)) input: PaymentInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.payments.create(input, actor, user);

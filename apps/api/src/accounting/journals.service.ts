@@ -23,11 +23,14 @@ export class JournalsService {
     private readonly ledger: LedgerService,
   ) {}
 
-  async list(q: DocListQuery) {
+  async list(q: DocListQuery, user: CurrentUser) {
     const company = await this.common.ready();
+    // Audit 1 (28 October 2026): a person working in some stores sees only journals that touch no other store.
+    const allowed = this.common.storeFilter(user);
     const rows = await this.prisma.journal.findMany({
       where: {
         companyId: company.id,
+        ...(allowed ? { lines: { none: { storeId: { notIn: allowed } } } } : {}),
         ...(q.status ? { status: q.status } : {}),
         ...(q.kind ? { kind: q.kind } : {}),
         ...(q.search ? { OR: [{ number: { contains: q.search, mode: 'insensitive' } }, { remark: { contains: q.search, mode: 'insensitive' } }, { reference: { contains: q.search, mode: 'insensitive' } }] } : {}),
@@ -40,8 +43,15 @@ export class JournalsService {
     return rows.map((j) => this.dto(j));
   }
 
-  async get(id: string) {
-    return this.dto(await this.row(this.prisma, id));
+  async get(id: string, user?: CurrentUser) {
+    const j = await this.row(this.prisma, id);
+    if (user) this.assertStores(user, j);
+    return this.dto(j);
+  }
+
+  /** Audit 1: every store a journal touches must be one the person works in. */
+  private assertStores(user: CurrentUser, j: { lines: { storeId: string | null }[] }) {
+    for (const l of j.lines) this.common.assertStore(user, l.storeId);
   }
 
   async create(input: JournalInput, actor: Actor, user: CurrentUser) {
@@ -74,6 +84,7 @@ export class JournalsService {
   async update(id: string, input: JournalInput, actor: Actor, user: CurrentUser) {
     const company = await this.common.ready();
     const before = await this.row(this.prisma, id);
+    this.assertStores(user, before);
     if (before.status !== 'draft') throw new BadRequestException(`A ${before.status} journal cannot be changed; cancel it and make a new one`);
     this.checkRights(input, user);
     await this.validate(this.prisma, company.id, input, user);
@@ -155,6 +166,7 @@ export class JournalsService {
     const j = await this.row(this.prisma, id);
     if (j.status === 'cancelled') throw new BadRequestException('Already cancelled');
     this.checkRights(this.inputOf(j), user);
+    this.assertStores(user, j);
     const after = await this.prisma.$transaction(async (tx) => {
       if (j.status === 'posted') {
         await this.ledger.undoLinks(tx, 'journal', id, actor.userId);

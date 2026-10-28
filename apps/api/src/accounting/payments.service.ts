@@ -25,11 +25,14 @@ export class PaymentsService {
     private readonly ledger: LedgerService,
   ) {}
 
-  async list(q: DocListQuery) {
+  async list(q: DocListQuery, user: CurrentUser) {
     const company = await this.common.ready();
+    // Audit 1 (28 October 2026): a person working in some stores sees only theirs (and the ones without a store).
+    const allowed = this.common.storeFilter(user);
     const rows = await this.prisma.payment.findMany({
       where: {
         companyId: company.id,
+        ...(allowed ? { OR: [{ storeId: null }, { storeId: { in: allowed } }] } : {}),
         ...(q.status ? { status: q.status } : {}),
         ...(q.kind ? { kind: q.kind } : {}),
         ...(q.partyId ? { partyId: q.partyId } : {}),
@@ -43,8 +46,10 @@ export class PaymentsService {
     return Promise.all(rows.map((p) => this.dto(this.prisma, p)));
   }
 
-  async get(id: string) {
-    return this.dto(this.prisma, await this.row(this.prisma, id));
+  async get(id: string, user?: CurrentUser) {
+    const p = await this.row(this.prisma, id);
+    if (user) this.common.assertStore(user, p.storeId);
+    return this.dto(this.prisma, p);
   }
 
   /** A customer's or supplier's open bills and unused payments, oldest first. */
@@ -95,6 +100,7 @@ export class PaymentsService {
   async update(id: string, input: PaymentInput, actor: Actor, user: CurrentUser) {
     const company = await this.common.ready();
     const before = await this.row(this.prisma, id);
+    this.common.assertStore(user, before.storeId);
     if (before.status !== 'draft') throw new BadRequestException(`A ${before.status} payment cannot be changed; cancel it and make a new one`);
     await this.validate(this.prisma, company.id, input, user);
     const fy = await this.common.yearFor(this.prisma, company.id, input.paymentDate);
@@ -184,6 +190,7 @@ export class PaymentsService {
     const p = await this.row(this.prisma, id);
     if (p.status === 'cancelled') throw new BadRequestException('Already cancelled');
     this.checkRights(p.kind as PaymentInput['kind'], user);
+    this.common.assertStore(user, p.storeId);
     const after = await this.prisma.$transaction(async (tx) => {
       if (p.status === 'posted') {
         await this.ledger.undoLinks(tx, 'payment', id, actor.userId);

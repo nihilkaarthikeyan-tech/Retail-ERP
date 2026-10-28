@@ -53,6 +53,7 @@ import {
   updateTillSchema,
 } from 'shared';
 import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
+import { RateLimit } from '../auth/rate-limit.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { DeliveriesService } from './deliveries.service.js';
@@ -144,10 +145,10 @@ export class PosController {
   @Get('tills/:id/people') @RequirePermission('pos.sell') people(@Param('id', id()) tillId: string, @ReqUser() user: AuthUser) {
     return this.pins.approvers(tillId, user);
   }
-  @Post('approvals') @HttpCode(200) @RequirePermission('pos.sell') approve(@Body(zod(approvalSchema)) input: ApprovalInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('approvals') @HttpCode(200) @RateLimit('pin') @RequirePermission('pos.sell') approve(@Body(zod(approvalSchema)) input: ApprovalInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.pins.approve(input, actor, user);
   }
-  @Post('switch-cashier') @HttpCode(200) @RequirePermission('pos.sell') switchCashier(@Body(zod(switchCashierSchema)) input: SwitchCashierInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('switch-cashier') @HttpCode(200) @RateLimit('pin') @RequirePermission('pos.sell') switchCashier(@Body(zod(switchCashierSchema)) input: SwitchCashierInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.pins.switchCashier(input, actor, user);
   }
 

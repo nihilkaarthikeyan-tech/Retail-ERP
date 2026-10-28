@@ -165,7 +165,7 @@ export class StockDocumentsService {
 
   async update(id: string, input: UpdateStockDocumentInput, actor: Actor, user: CurrentUser) {
     const before = await this.getRow(this.prisma, id);
-    this.assertDocAccess(before, user);
+    this.assertDocAccess(before, user, 'change');
     if (before.status !== 'draft') throw new BadRequestException('Only drafts can be changed; cancel and create a new document instead');
     if (before.kind === 'count' || before.kind === 'transfer_receive') throw new BadRequestException('Use the count or receive screen');
     this.requireDraftRight(before.kind, user);
@@ -268,7 +268,7 @@ export class StockDocumentsService {
 
   async updateCount(id: string, input: UpdateCountInput, actor: Actor, user: CurrentUser) {
     const before = await this.getRow(this.prisma, id);
-    this.assertDocAccess(before, user);
+    this.assertDocAccess(before, user, 'change');
     if (before.kind !== 'count') throw new BadRequestException('Not a stock count');
     if (before.status !== 'draft') throw new BadRequestException('Only drafts can be changed');
     this.requireRight(user, 'stock.count');
@@ -299,7 +299,7 @@ export class StockDocumentsService {
 
   async finalise(id: string, actor: Actor, user: CurrentUser) {
     const doc = await this.getRow(this.prisma, id);
-    this.assertDocAccess(doc, user);
+    this.assertDocAccess(doc, user, 'change');
     if (doc.status !== 'draft') throw new BadRequestException(`Document is already ${doc.status}`);
     this.requireFinaliseRight(doc.kind, user);
     if (doc.kind === 'transfer_send') await assertModuleOn(this.prisma, 'transfers');
@@ -457,7 +457,7 @@ export class StockDocumentsService {
 
   async cancel(id: string, reason: string, actor: Actor, user: CurrentUser) {
     const doc = await this.getRow(this.prisma, id);
-    this.assertDocAccess(doc, user);
+    this.assertDocAccess(doc, user, 'change');
     if (doc.status === 'cancelled') throw new BadRequestException('Already cancelled');
     if (doc.status === 'draft') {
       this.requireDraftRight(doc.kind, user);
@@ -629,9 +629,13 @@ export class StockDocumentsService {
     this.requireRight(user, kind === 'move' || kind === 'transfer_send' || kind === 'transfer_receive' ? 'stock.move' : 'stock.adjust_finalise');
   }
 
-  private assertDocAccess(doc: StockDocument, user: CurrentUser) {
+  /**
+   * Seeing a transfer: either store. Changing, finalising or cancelling it (audit 1, 28 October
+   * 2026): only its own store, so the receiving store cannot send or undo the sender's stock.
+   */
+  private assertDocAccess(doc: StockDocument, user: CurrentUser, use: 'see' | 'change' = 'see') {
     if (user.allStores) return;
-    const ok = user.stores.some((s) => s.id === doc.storeId || s.id === doc.toStoreId);
+    const ok = user.stores.some((s) => s.id === doc.storeId || (use === 'see' && s.id === doc.toStoreId));
     if (!ok) throw new ForbiddenException('You are not allowed to work in this store');
   }
 

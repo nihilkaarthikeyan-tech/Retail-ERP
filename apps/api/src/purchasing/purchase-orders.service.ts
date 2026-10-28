@@ -141,7 +141,7 @@ export class PurchaseOrdersService {
   async update(id: string, input: UpdatePurchaseOrderInput, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.order');
     const before = await this.getRow(this.prisma, id);
-    this.assertAccess(before, user);
+    this.assertAccess(before, user, 'change');
     if (['cancelled', 'closed', 'completed'].includes(before.status)) throw new BadRequestException(`A ${before.status} order cannot be changed`);
     const finalised = before.status !== 'draft';
     if (finalised && !input.changeReason) throw new BadRequestException('Give a reason for changing a finalised order');
@@ -290,7 +290,7 @@ export class PurchaseOrdersService {
   async finalise(id: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.order');
     const order = await this.getRow(this.prisma, id);
-    this.assertAccess(order, user);
+    this.assertAccess(order, user, 'change');
     if (order.status !== 'draft') throw new BadRequestException(`The order is already ${order.status}`);
     // Re-run the checks: the supplier may have been held, prices or items switched off since the draft.
     await this.prepare(this.prisma, order.companyId, { ...draftInput(order), orderDate: iso(order.orderDate)! }, user);
@@ -351,7 +351,7 @@ export class PurchaseOrdersService {
   async cancel(id: string, reason: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.order');
     const order = await this.getRow(this.prisma, id);
-    this.assertAccess(order, user);
+    this.assertAccess(order, user, 'change');
     if (order.status === 'cancelled') throw new BadRequestException('Already cancelled');
     const after = await this.prisma.$transaction(async (tx) => {
       const lineIds = order.lines.map((l) => l.id);
@@ -368,7 +368,7 @@ export class PurchaseOrdersService {
 
   private async changeStatus(id: string, user: CurrentUser, actor: Actor, reason: string | null, next: (o: PurchaseOrder) => Prisma.PurchaseOrderUpdateInput, refresh = false) {
     const order = await this.getRow(this.prisma, id);
-    this.assertAccess(order, user);
+    this.assertAccess(order, user, 'change');
     const after = await this.prisma.$transaction(async (tx) => {
       const fresh = await tx.purchaseOrder.findUniqueOrThrow({ where: { id } });
       const data = next(fresh);
@@ -403,9 +403,12 @@ export class PurchaseOrdersService {
     if (order.status === 'cancelled') throw new BadRequestException(`Order ${order.number} is cancelled`);
   }
 
-  assertAccess(order: { storeId: string; lines: { storeId: string }[] }, user: CurrentUser): void {
+  /** Seeing an order: any of its stores. Changing it (audit 1, 28 October 2026): every one of its stores. */
+  assertAccess(order: { storeId: string; lines: { storeId: string }[] }, user: CurrentUser, use: 'see' | 'change' = 'see'): void {
     if (user.allStores) return;
-    const ok = [order.storeId, ...order.lines.map((l) => l.storeId)].some((s) => user.stores.some((u) => u.id === s));
+    const stores = [order.storeId, ...order.lines.map((l) => l.storeId)];
+    const mine = (s: string) => user.stores.some((u) => u.id === s);
+    const ok = use === 'change' ? stores.every(mine) : stores.some(mine);
     if (!ok) throw new ForbiddenException('You are not allowed to work in this store');
   }
 

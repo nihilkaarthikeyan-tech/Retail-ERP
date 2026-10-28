@@ -1,12 +1,31 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { type CreateUserInput, type ResetPasswordInput, SYSTEM_ROLES, type UpdateUserInput } from 'shared';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  type CreateUserInput,
+  type ResetPasswordInput,
+  SYSTEM_ROLES,
+  type UpdateUserInput,
+} from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
-import { AuthService, userAccessInclude, type UserWithAccess } from '../auth/auth.service.js';
+import {
+  AuthService,
+  userAccessInclude,
+  type UserWithAccess,
+} from '../auth/auth.service.js';
 import { hashPassword } from '../auth/password.js';
 import type { Actor } from '../common/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { assertCanGiveRoles, assertCanTouchUser, callerRights } from './delegation.js';
+import {
+  assertCanGiveRoles,
+  assertCanGiveStores,
+  assertCanTouchUser,
+  callerRights,
+} from './delegation.js';
 
 @Injectable()
 export class UsersService {
@@ -17,125 +36,198 @@ export class UsersService {
   ) {}
 
   async list() {
-    const users = await this.prisma.user.findMany({ include: userAccessInclude, orderBy: [{ active: 'desc' }, { firstName: 'asc' }] });
+    const users = await this.prisma.user.findMany({
+      include: userAccessInclude,
+      orderBy: [{ active: 'desc' }, { firstName: 'asc' }],
+    });
     return users.map(toDto);
   }
 
   async get(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id }, include: userAccessInclude });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: userAccessInclude,
+    });
     if (!user) throw new NotFoundException('User not found');
     return toDto(user);
   }
 
   async create(input: CreateUserInput, actor: Actor) {
-    await assertCanGiveRoles(this.prisma, await callerRights(this.prisma, actor.userId), input.roleIds);
+    const caller = await callerRights(this.prisma, actor.userId);
+    await assertCanGiveRoles(this.prisma, caller, input.roleIds);
+    assertCanGiveStores(caller, input.allStores ?? false, input.storeIds ?? []);
     if (await this.prisma.user.findUnique({ where: { email: input.email } })) {
-      throw new ConflictException(`A user with email ${input.email} already exists`);
+      throw new ConflictException(
+        `A user with email ${input.email} already exists`,
+      );
     }
     await this.auth.assertPasswordAllowed(input.temporaryPassword);
     const passwordHash = await hashPassword(input.temporaryPassword);
-    const access = await this.checkAccess(this.prisma, input.roleIds, input.allStores ?? false, input.storeIds ?? [], input.defaultStoreId ?? null);
+    const access = await this.checkAccess(
+      this.prisma,
+      input.roleIds,
+      input.allStores ?? false,
+      input.storeIds ?? [],
+      input.defaultStoreId ?? null,
+    );
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: {
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName ?? null,
-          mobile: input.mobile ?? null,
-          passwordHash,
-          mustChangePassword: true,
-          allStores: access.allStores,
-          roles: { create: access.roleIds.map((roleId) => ({ roleId })) },
-          stores: { create: access.stores },
-          createdById: actor.userId,
-          updatedById: actor.userId,
-        },
-        include: userAccessInclude,
-      });
-      await this.audit.record(tx, actor, {
-        action: 'create',
-        entityType: 'user',
-        entityId: created.id,
-        changes: {
-          email: created.email,
-          firstName: created.firstName,
-          roles: created.roles.map((r) => r.role.code),
-          allStores: created.allStores,
-          stores: created.stores.map((s) => s.store.code),
-        },
-      });
-      return created;
-    });
+    const user = await this.prisma
+      .$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email: input.email,
+            firstName: input.firstName,
+            lastName: input.lastName ?? null,
+            mobile: input.mobile ?? null,
+            passwordHash,
+            mustChangePassword: true,
+            allStores: access.allStores,
+            roles: { create: access.roleIds.map((roleId) => ({ roleId })) },
+            stores: { create: access.stores },
+            createdById: actor.userId,
+            updatedById: actor.userId,
+          },
+          include: userAccessInclude,
+        });
+        await this.audit.record(tx, actor, {
+          action: 'create',
+          entityType: 'user',
+          entityId: created.id,
+          changes: {
+            email: created.email,
+            firstName: created.firstName,
+            roles: created.roles.map((r) => r.role.code),
+            allStores: created.allStores,
+            stores: created.stores.map((s) => s.store.code),
+          },
+        });
+        return created;
+      })
+      .catch(emailTaken(input.email));
     return toDto(user);
   }
 
   async update(id: string, input: UpdateUserInput, actor: Actor) {
-    const before = await this.prisma.user.findUnique({ where: { id }, include: userAccessInclude });
+    const before = await this.prisma.user.findUnique({
+      where: { id },
+      include: userAccessInclude,
+    });
     if (!before) throw new NotFoundException('User not found');
     const caller = await callerRights(this.prisma, actor.userId);
     await assertCanTouchUser(this.prisma, caller, id);
-    if (input.roleIds) await assertCanGiveRoles(this.prisma, caller, input.roleIds.filter((r) => !before.roles.some((b) => b.roleId === r)));
+    if (input.roleIds)
+      await assertCanGiveRoles(
+        this.prisma,
+        caller,
+        input.roleIds.filter((r) => !before.roles.some((b) => b.roleId === r)),
+      );
+    // Only stores (or "all stores") newly given are checked; what the person already had may stay.
+    assertCanGiveStores(
+      caller,
+      input.allStores === true && !before.allStores,
+      (input.storeIds ?? []).filter(
+        (s) => !before.stores.some((b) => b.storeId === s),
+      ),
+    );
     if (input.active === false && id === actor.userId) {
       throw new BadRequestException('You cannot switch off your own account');
     }
     if (input.email && input.email !== before.email) {
-      if (await this.prisma.user.findUnique({ where: { email: input.email } })) {
-        throw new ConflictException(`A user with email ${input.email} already exists`);
+      if (
+        await this.prisma.user.findUnique({ where: { email: input.email } })
+      ) {
+        throw new ConflictException(
+          `A user with email ${input.email} already exists`,
+        );
       }
     }
-    const accessChanged = input.roleIds !== undefined || input.allStores !== undefined || input.storeIds !== undefined || input.defaultStoreId !== undefined;
+    const accessChanged =
+      input.roleIds !== undefined ||
+      input.allStores !== undefined ||
+      input.storeIds !== undefined ||
+      input.defaultStoreId !== undefined;
     const access = accessChanged
       ? await this.checkAccess(
           this.prisma,
           input.roleIds ?? before.roles.map((r) => r.roleId),
           input.allStores ?? before.allStores,
           input.storeIds ?? before.stores.map((s) => s.storeId),
-          input.defaultStoreId !== undefined ? input.defaultStoreId : (before.stores.find((s) => s.isDefault)?.storeId ?? null),
+          input.defaultStoreId !== undefined
+            ? input.defaultStoreId
+            : (before.stores.find((s) => s.isDefault)?.storeId ?? null),
         )
       : null;
 
     // The business must always keep at least one active Owner/Admin.
-    const wasOwner = before.active && before.roles.some((r) => r.role.code === SYSTEM_ROLES.OWNER_ADMIN && r.role.active);
+    const wasOwner =
+      before.active &&
+      before.roles.some(
+        (r) => r.role.code === SYSTEM_ROLES.OWNER_ADMIN && r.role.active,
+      );
     if (wasOwner) {
-      const ownerRole = await this.prisma.role.findFirstOrThrow({ where: { code: SYSTEM_ROLES.OWNER_ADMIN } });
-      const staysOwner = input.active !== false && (!access || access.roleIds.includes(ownerRole.id));
+      const ownerRole = await this.prisma.role.findFirstOrThrow({
+        where: { code: SYSTEM_ROLES.OWNER_ADMIN },
+      });
+      const staysOwner =
+        input.active !== false &&
+        (!access || access.roleIds.includes(ownerRole.id));
       if (!staysOwner) {
         const otherOwners = await this.prisma.user.count({
-          where: { id: { not: id }, active: true, roles: { some: { roleId: ownerRole.id } } },
+          where: {
+            id: { not: id },
+            active: true,
+            roles: { some: { roleId: ownerRole.id } },
+          },
         });
-        if (otherOwners === 0) throw new BadRequestException('This is the only active Owner/Admin; give the role to someone else first');
+        if (otherOwners === 0)
+          throw new BadRequestException(
+            'This is the only active Owner/Admin; give the role to someone else first',
+          );
       }
     }
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const after = await tx.user.update({
-        where: { id },
-        data: {
-          email: input.email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          mobile: input.mobile,
-          active: input.active,
-          // A new email is not confirmed yet (code audit: the old confirmation carried over).
-          ...(input.email && input.email !== before.email ? { emailVerifiedAt: null } : {}),
-          updatedById: actor.userId,
-          ...(access
-            ? {
-                allStores: access.allStores,
-                roles: { deleteMany: {}, create: access.roleIds.map((roleId) => ({ roleId })) },
-                stores: { deleteMany: {}, create: access.stores },
-              }
-            : {}),
-        },
-        include: userAccessInclude,
-      });
-      await this.audit.recordUpdate(tx, actor, 'user', id, summarise(before), summarise(after));
-      if (input.active === false && before.active) {
-        await this.auth.endAllSessions(tx, id, actor);
-      }
-      return after;
-    });
+    const user = await this.prisma
+      .$transaction(async (tx) => {
+        const after = await tx.user.update({
+          where: { id },
+          data: {
+            email: input.email,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            mobile: input.mobile,
+            active: input.active,
+            // A new email is not confirmed yet (code audit: the old confirmation carried over).
+            ...(input.email && input.email !== before.email
+              ? { emailVerifiedAt: null }
+              : {}),
+            updatedById: actor.userId,
+            ...(access
+              ? {
+                  allStores: access.allStores,
+                  roles: {
+                    deleteMany: {},
+                    create: access.roleIds.map((roleId) => ({ roleId })),
+                  },
+                  stores: { deleteMany: {}, create: access.stores },
+                }
+              : {}),
+          },
+          include: userAccessInclude,
+        });
+        await this.audit.recordUpdate(
+          tx,
+          actor,
+          'user',
+          id,
+          summarise(before),
+          summarise(after),
+        );
+        if (input.active === false && before.active) {
+          await this.auth.endAllSessions(tx, id, actor);
+        }
+        return after;
+      })
+      .catch(emailTaken(input.email ?? before.email));
     return toDto(user);
   }
 
@@ -143,39 +235,84 @@ export class UsersService {
   async resetPassword(id: string, input: ResetPasswordInput, actor: Actor) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');
-    await assertCanTouchUser(this.prisma, await callerRights(this.prisma, actor.userId), id);
+    await assertCanTouchUser(
+      this.prisma,
+      await callerRights(this.prisma, actor.userId),
+      id,
+    );
     await this.auth.assertPasswordAllowed(input.temporaryPassword);
     const passwordHash = await hashPassword(input.temporaryPassword);
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id },
-        data: { passwordHash, mustChangePassword: true, passwordChangedAt: new Date(), failedLoginCount: 0, lockedUntil: null, updatedById: actor.userId },
+        data: {
+          passwordHash,
+          mustChangePassword: true,
+          passwordChangedAt: new Date(),
+          failedLoginCount: 0,
+          lockedUntil: null,
+          updatedById: actor.userId,
+        },
       });
-      await this.audit.record(tx, actor, { action: 'password_reset', entityType: 'user', entityId: id });
+      await this.audit.record(tx, actor, {
+        action: 'password_reset',
+        entityType: 'user',
+        entityId: id,
+      });
       await this.auth.endAllSessions(tx, id, actor);
     });
   }
 
   async endSessions(id: string, actor: Actor) {
-    if (!(await this.prisma.user.findUnique({ where: { id } }))) throw new NotFoundException('User not found');
-    await assertCanTouchUser(this.prisma, await callerRights(this.prisma, actor.userId), id);
-    return this.prisma.$transaction((tx) => this.auth.endAllSessions(tx, id, actor));
+    if (!(await this.prisma.user.findUnique({ where: { id } })))
+      throw new NotFoundException('User not found');
+    await assertCanTouchUser(
+      this.prisma,
+      await callerRights(this.prisma, actor.userId),
+      id,
+    );
+    return this.prisma.$transaction((tx) =>
+      this.auth.endAllSessions(tx, id, actor),
+    );
   }
 
-  private async checkAccess(db: Db, roleIds: string[], allStores: boolean, storeIds: string[], defaultStoreId: string | null) {
+  private async checkAccess(
+    db: Db,
+    roleIds: string[],
+    allStores: boolean,
+    storeIds: string[],
+    defaultStoreId: string | null,
+  ) {
     const uniqueRoles = [...new Set(roleIds)];
-    const roles = await db.role.findMany({ where: { id: { in: uniqueRoles } } });
-    if (roles.length !== uniqueRoles.length) throw new BadRequestException('One or more roles do not exist');
+    const roles = await db.role.findMany({
+      where: { id: { in: uniqueRoles } },
+    });
+    if (roles.length !== uniqueRoles.length)
+      throw new BadRequestException('One or more roles do not exist');
     const uniqueStores = allStores ? [] : [...new Set(storeIds)];
-    const stores = await db.store.findMany({ where: { id: { in: uniqueStores }, active: true } });
-    if (stores.length !== uniqueStores.length) throw new BadRequestException('One or more stores do not exist or are switched off');
-    if (defaultStoreId && !allStores && !uniqueStores.includes(defaultStoreId)) {
-      throw new BadRequestException('The default store must be one of the user’s stores');
+    const stores = await db.store.findMany({
+      where: { id: { in: uniqueStores }, active: true },
+    });
+    if (stores.length !== uniqueStores.length)
+      throw new BadRequestException(
+        'One or more stores do not exist or are switched off',
+      );
+    if (
+      defaultStoreId &&
+      !allStores &&
+      !uniqueStores.includes(defaultStoreId)
+    ) {
+      throw new BadRequestException(
+        'The default store must be one of the user’s stores',
+      );
     }
     return {
       roleIds: uniqueRoles,
       allStores,
-      stores: uniqueStores.map((storeId) => ({ storeId, isDefault: storeId === defaultStoreId })),
+      stores: uniqueStores.map((storeId) => ({
+        storeId,
+        isDefault: storeId === defaultStoreId,
+      })),
     };
   }
 }
@@ -190,7 +327,9 @@ function summarise(user: UserWithAccess): Record<string, unknown> {
     active: user.active,
     allStores: user.allStores,
     roles: user.roles.map((r) => r.role.code).sort(),
-    stores: user.stores.map((s) => `${s.store.code}${s.isDefault ? '*' : ''}`).sort(),
+    stores: user.stores
+      .map((s) => `${s.store.code}${s.isDefault ? '*' : ''}`)
+      .sort(),
   };
 }
 
@@ -206,8 +345,35 @@ export function toDto(user: UserWithAccess) {
     mustChangePassword: user.mustChangePassword,
     lockedUntil: user.lockedUntil,
     lastLoginAt: user.lastLoginAt,
-    roles: user.roles.map((r) => ({ id: r.role.id, code: r.role.code, name: r.role.name, active: r.role.active })),
-    stores: user.stores.map((s) => ({ id: s.store.id, code: s.store.code, name: s.store.name, isDefault: s.isDefault })),
+    roles: user.roles.map((r) => ({
+      id: r.role.id,
+      code: r.role.code,
+      name: r.role.name,
+      active: r.role.active,
+    })),
+    stores: user.stores.map((s) => ({
+      id: s.store.id,
+      code: s.store.code,
+      name: s.store.name,
+      isDefault: s.isDefault,
+    })),
     createdAt: user.createdAt,
+  };
+}
+
+/**
+ * Audit 1 (28 October 2026): an email is unique across every shop, but a shop sees only its own
+ * users, so an email used in another shop got past the check above and failed with a server error.
+ * It now gets the same plain message.
+ */
+function emailTaken(email: string) {
+  return (err: unknown): never => {
+    if (
+      (err as { code?: string }).code === 'P2002' &&
+      JSON.stringify((err as { meta?: unknown }).meta ?? '').includes('email')
+    ) {
+      throw new ConflictException(`A user with email ${email} already exists`);
+    }
+    throw err;
   };
 }

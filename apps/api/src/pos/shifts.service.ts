@@ -14,6 +14,7 @@ import {
   hasPermission,
   type OpenShiftInput,
 } from 'shared';
+import { assertStoreAccess } from '../auth/store-access.js';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
@@ -88,6 +89,8 @@ export class ShiftsService {
     await this.common.usableTill(this.prisma, shift.tillId, user).catch(async (e) => {
       if (!hasPermission(user, 'pos.reports')) throw e;
     });
+    // Audit 1 (28 October 2026): the reports right reads shifts of a switched-off till, but only in the person's own stores.
+    assertStoreAccess(user, shift.till.storeId);
     return { ...this.toDto(shift), expected: await this.expected(this.prisma, shift) };
   }
 

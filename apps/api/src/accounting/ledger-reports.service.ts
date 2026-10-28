@@ -135,6 +135,8 @@ export class LedgerReportsService {
 
   /** Every entry in a period with its lines (the day book). */
   async dayBook(q: PeriodQuery, user: CurrentUser) {
+    // Audit 1 (28 October 2026): a chosen store must be one the person works in.
+    if (q.storeId) this.common.assertStore(user, q.storeId);
     const company = await this.common.ready();
     const { byId } = await this.accounts(company.id);
     const allowed = this.common.storeFilter(user);
@@ -301,6 +303,7 @@ export class LedgerReportsService {
     const settings = await this.prisma.accountingSettings.findUnique({ where: { companyId: company.id } });
     const bands = settings?.ageingBands?.length ? settings.ageingBands : [30, 60, 90, 120];
     const labels = ageBandLabels(bands);
+    if (q.storeId) this.common.assertStore(user, q.storeId);
     const allowed = this.common.storeFilter(user);
     const parties = await this.prisma.ledgerLine.groupBy({
       by: ['partyId'],

@@ -14,8 +14,17 @@ export const JSON_BODY_LIMIT = '1mb';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+  // JSON only (audit 1, 28 October 2026): no form-style bodies, which the app never sends.
   app.useBodyParser('json', { limit: JSON_BODY_LIMIT });
-  app.useBodyParser('urlencoded', { limit: JSON_BODY_LIMIT, extended: true });
+  // Audit 1: the API's own answers carry the basic security headers (the web pages get theirs from next.config.ts).
+  app.disable('x-powered-by');
+  app.use((_req: unknown, res: { setHeader(name: string, value: string): void }, next: () => void) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-site');
+    next();
+  });
   // On the server the API sits behind Nginx: trust it for the visitor's address
   // (login history, audit log). Unset in development.
   if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);

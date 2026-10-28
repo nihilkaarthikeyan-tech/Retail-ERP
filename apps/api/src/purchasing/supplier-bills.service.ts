@@ -181,6 +181,8 @@ export class SupplierBillsService {
   async update(id: string, input: UpdateSupplierBillInput, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.bill');
     const before = await this.getRow(this.prisma, id);
+    // Audit 1 (28 October 2026): the stored bill's own store, not only the new input's.
+    if (before.storeId) assertStoreAccess(user, before.storeId);
     if (before.status !== 'draft' || before.kind === 'debit_note') throw new BadRequestException('Only draft bills can be changed');
     const merged = {
       supplierId: input.supplierId ?? before.supplierId,
@@ -805,6 +807,7 @@ export class SupplierBillsService {
   async hold(id: string, input: HoldBillInput, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.bill');
     const b = await this.getRow(this.prisma, id);
+    if (b.storeId) assertStoreAccess(user, b.storeId);
     if (b.kind === 'debit_note') throw new BadRequestException('A debit note cannot be held');
     if (b.status !== 'unpaid') throw new BadRequestException('Only a finalised bill that is still owed can be held');
     if ((await this.ledger.openAmount(this.prisma, 'supplier_bill', b.id)).lte(0)) throw new BadRequestException('This bill is already paid, so it cannot be held');
@@ -820,6 +823,7 @@ export class SupplierBillsService {
   async release(id: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'purchase.bill');
     const b = await this.getRow(this.prisma, id);
+    if (b.storeId) assertStoreAccess(user, b.storeId);
     if (!b.holdUntil) throw new BadRequestException('The bill is not held');
     const after = await this.prisma.$transaction(async (tx) => {
       await tx.supplierBill.update({ where: { id }, data: { holdReason: null, holdUntil: null, updatedById: actor.userId } });

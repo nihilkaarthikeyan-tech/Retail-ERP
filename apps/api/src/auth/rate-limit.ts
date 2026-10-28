@@ -21,6 +21,8 @@ export const RATE_LIMITS = {
   emailLink: { ttl: 15 * MINUTE, limit: 20 },
   contactForm: { ttl: 60 * MINUTE, limit: 5 },
   clientError: { ttl: MINUTE, limit: 20 },
+  /** Manager PINs and cashier switching at the till (audit 1, 28 October 2026). */
+  pin: { ttl: 10 * MINUTE, limit: 60 },
 } as const;
 
 export const TOO_MANY = 'Too many tries from this connection. Please wait a few minutes and try again.';

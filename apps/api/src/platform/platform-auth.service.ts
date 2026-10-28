@@ -40,9 +40,10 @@ export class PlatformAuthService {
       throw new UnauthorizedException('Too many wrong passwords. Try again in 15 minutes.');
     }
     if (!(await verifyPassword(password, admin.passwordHash))) {
-      const failed = admin.failedLoginCount + 1;
-      const lockedUntil = lockoutUntil(failed, LOCKOUT.attempts, LOCKOUT.seconds, now);
-      await this.system.platformAdmin.update({ where: { id: admin.id }, data: { failedLoginCount: lockedUntil ? 0 : failed, lockedUntil } });
+      // Counted in the database itself (audit 1, 28 October 2026), so guesses sent all at once still lock.
+      const { failedLoginCount } = await this.system.platformAdmin.update({ where: { id: admin.id }, data: { failedLoginCount: { increment: 1 } }, select: { failedLoginCount: true } });
+      const lockedUntil = lockoutUntil(failedLoginCount, LOCKOUT.attempts, LOCKOUT.seconds, now);
+      if (lockedUntil) await this.system.platformAdmin.update({ where: { id: admin.id }, data: { failedLoginCount: 0, lockedUntil } });
       this.log.warn(`Wrong Retail ERP admin password for ${admin.email} from ${ipAddress ?? 'unknown address'}`);
       throw new UnauthorizedException(WRONG_LOGIN);
     }

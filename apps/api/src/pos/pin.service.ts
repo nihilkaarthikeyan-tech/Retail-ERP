@@ -8,6 +8,7 @@ import { AuditService } from '../audit/audit.service.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import type { Actor } from '../common/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { assertCanTouchUser, callerRights } from '../users/delegation.js';
 import { PosCommon } from './pos-common.service.js';
 
 const MAX_FAILS = 5;
@@ -35,6 +36,8 @@ export class PinService {
 
   /** A manager removes someone's PIN (forgotten PIN); they set a new one themselves. */
   async clearPin(userId: string, actor: Actor) {
+    // Audit 1 (28 October 2026): not the PIN of an Owner, or of someone with more rights or stores.
+    await assertCanTouchUser(this.prisma, await callerRights(this.prisma, actor.userId), userId);
     await this.prisma.$transaction(async (tx) => {
       await tx.userPin.deleteMany({ where: { userId } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'user_pin', entityId: userId, changes: { pin: 'cleared' } });
@@ -46,18 +49,27 @@ export class PinService {
     return { hasPin: !!(await this.prisma.userPin.findUnique({ where: { userId } })) };
   }
 
-  /** Checks a user's PIN; counts failures and locks after five. */
+  /**
+   * Checks a user's PIN; locks after five wrong ones. Audit 1 (28 October 2026): each try first
+   * takes one of the five in a single database step, before the (slow) PIN check, so PINs sent all
+   * at once cannot get more than five tries between them. A right PIN gives the tries back.
+   */
   private async checkPin(userId: string, pin: string): Promise<void> {
-    const row = await this.prisma.userPin.findUnique({ where: { userId } });
-    if (!row) throw new BadRequestException('That person has not set a PIN yet');
-    if (row.lockedUntil && row.lockedUntil > new Date()) throw new ForbiddenException('Too many wrong PINs; try again later');
-    if (!(await verifyPassword(pin, row.pinHash))) {
-      // Counted in the database itself (code audit, 27 October 2026), so PINs tried all at once still lock.
-      const { failedCount } = await this.prisma.userPin.update({ where: { userId }, data: { failedCount: { increment: 1 } }, select: { failedCount: true } });
-      if (failedCount >= MAX_FAILS) await this.prisma.userPin.update({ where: { userId }, data: { lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) } });
-      throw new UnauthorizedException('Wrong PIN');
+    const claimed = await this.prisma.$queryRaw<{ pinHash: string; failedCount: number }[]>`
+      UPDATE "UserPin"
+         SET "failedCount" = CASE WHEN "lockedUntil" IS NOT NULL THEN 1 ELSE "failedCount" + 1 END,
+             -- The fifth try locks at once; a right PIN on it unlocks again.
+             "lockedUntil" = CASE WHEN (CASE WHEN "lockedUntil" IS NOT NULL THEN 1 ELSE "failedCount" + 1 END) >= ${MAX_FAILS}
+                                  THEN (now() AT TIME ZONE 'UTC') + make_interval(mins => ${LOCK_MINUTES}) ELSE NULL END
+       WHERE "userId" = ${userId}::uuid
+         AND ("lockedUntil" IS NULL OR "lockedUntil" <= (now() AT TIME ZONE 'UTC'))
+   RETURNING "pinHash", "failedCount"`;
+    if (!claimed.length) {
+      if (!(await this.prisma.userPin.findUnique({ where: { userId } }))) throw new BadRequestException('That person has not set a PIN yet');
+      throw new ForbiddenException('Too many wrong PINs; try again later');
     }
-    if (row.failedCount) await this.prisma.userPin.update({ where: { userId }, data: { failedCount: 0, lockedUntil: null } });
+    if (!(await verifyPassword(pin, claimed[0].pinHash))) throw new UnauthorizedException('Wrong PIN');
+    await this.prisma.userPin.update({ where: { userId }, data: { failedCount: 0, lockedUntil: null } });
   }
 
   private async userWithRight(userId: string, key: PermissionKey, storeId: string) {

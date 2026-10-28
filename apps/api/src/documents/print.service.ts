@@ -404,6 +404,8 @@ export class PrintService {
     const units = await this.unitCodes(o.lines.map((l) => l.unitId));
     const paymentTerms = o.paymentTermsId ? await this.prisma.paymentTerms.findUnique({ where: { id: o.paymentTermsId } }) : null;
     const lh = await this.letterhead(o.storeId);
+    // Audit 1 (28 October 2026): rates and amounts only for people who may see buying prices, as on the screen.
+    const prices = hasPermission(user, 'buying_prices.view');
     return {
       ...this.base('purchase_order', 'Purchase order', lh),
       number: o.number,
@@ -415,24 +417,32 @@ export class PrintService {
         { key: 'no', label: '#' },
         { key: 'item', label: 'Item' },
         { key: 'quantity', label: 'Quantity', align: 'right' },
-        { key: 'rate', label: 'Rate', align: 'right' },
-        { key: 'discount', label: 'Discount', align: 'right' },
-        { key: 'taxable', label: 'Taxable value', align: 'right' },
-        { key: 'gst', label: 'GST', align: 'right' },
-        { key: 'total', label: 'Amount', align: 'right' },
+        ...(prices
+          ? ([
+              { key: 'rate', label: 'Rate', align: 'right' },
+              { key: 'discount', label: 'Discount', align: 'right' },
+              { key: 'taxable', label: 'Taxable value', align: 'right' },
+              { key: 'gst', label: 'GST', align: 'right' },
+              { key: 'total', label: 'Amount', align: 'right' },
+            ] as const)
+          : []),
       ],
       lines: o.lines.map((l) => ({
         no: String(l.lineNo),
         item: `${l.item.name} (${l.item.code})`,
         quantity: `${qty(l.quantity)} ${units.get(l.unitId) ?? ''}${D(l.freeQuantity).gt(0) ? ` + ${qty(l.freeQuantity)} free` : ''}`.trim(),
-        rate: money(l.rate),
-        discount: D(l.discountPercent).gt(0) ? `${D(l.discountPercent).toFixed(2)}%` : D(l.discountAmount).gt(0) ? money(l.discountAmount) : '',
-        taxable: money(l.taxableAmount),
-        gst: `${D(l.gstRate).toString()}% · ${money(D(l.cgst).add(D(l.sgst)).add(D(l.igst)))}`,
-        total: money(l.lineTotal),
+        ...(prices
+          ? {
+              rate: money(l.rate),
+              discount: D(l.discountPercent).gt(0) ? `${D(l.discountPercent).toFixed(2)}%` : D(l.discountAmount).gt(0) ? money(l.discountAmount) : '',
+              taxable: money(l.taxableAmount),
+              gst: `${D(l.gstRate).toString()}% · ${money(D(l.cgst).add(D(l.sgst)).add(D(l.igst)))}`,
+              total: money(l.lineTotal),
+            }
+          : {}),
       })),
-      totals: [['Taxable value', money(o.taxableAmount)], ['GST', money(o.taxAmount)], ...(D(o.roundingAdjustment).isZero() ? [] : [['Rounding', money(o.roundingAdjustment)] as [string, string]]), ['Total', money(o.total)]],
-      amountInWords: amountInWords(o.total.toString()),
+      totals: prices ? [['Taxable value', money(o.taxableAmount)], ['GST', money(o.taxAmount)], ...(D(o.roundingAdjustment).isZero() ? [] : [['Rounding', money(o.roundingAdjustment)] as [string, string]]), ['Total', money(o.total)]] : [],
+      amountInWords: prices ? amountInWords(o.total.toString()) : '',
       terms: await this.termsFor('purchase_order'),
       signatures: ['Authorised signatory'],
     };

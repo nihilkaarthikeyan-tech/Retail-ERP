@@ -69,6 +69,7 @@ Check:
 - Login, sessions, lockout, password reset, email links, PINs, the platform admin login: brute force, replay, expiry, logging out everywhere.
 - Uploads (imports, logos): size, type, file name, zip bombs.
 - Secrets: nothing in the repository, logs or error messages; `.env` never committed.
+- Web attacks (added 28 Oct): cross-site request forgery (cookies, SameSite, CORS), cross-site scripting (shop-typed names on receipts, invoices, labels and emails), spreadsheet formula injection in exports, security headers, input checks and request size on every route, SQL built from user input, the server calling other sites (GSTIN lookup) with user input.
 
 Done when: a route table with the check for each route, two-shop and two-store tests in the acceptance suite, no Critical or High left.
 
@@ -162,6 +163,9 @@ Check:
 - Missing indexes, queries inside loops, lists without pages.
 - 20 tills billing at once on one server.
 - Memory use of the API and the web server over a day.
+- Growth beyond one server (added 28 Oct): what breaks with two API copies (nightly jobs running twice, in-memory caches and rate limits, sessions), database connection limits, how long a nightly job takes with 500 shops, the largest single shop we can carry.
+- When an outside service is slow or down (GST network lookup, email, later e-invoice and payments): the shop keeps working, the work is retried, and nobody waits more than a few seconds.
+- Running costs and limits: email per day (Hostinger: 100), GSTIN credits per shop, disk growth per shop per year, backup size.
 
 Done when: timings written down before and after; nothing above the limits.
 
@@ -211,6 +215,7 @@ Check:
 - Backups: nightly, kept off the server, and a **restore actually tested**.
 - Logs kept and readable; an alert when the API or database is down; disk space watched.
 - A written "what to do when it breaks" page and a rollback.
+- One-person team (added 28 Oct): everything needed to run and recover the system is written down (passwords in a root-only file, where backups are, how to deploy and roll back), so it does not depend on one memory.
 
 Done when: the deployment checklist in the global CLAUDE.md passes and a restore has been done.
 
@@ -218,11 +223,45 @@ Done when: the deployment checklist in the global CLAUDE.md passes and a restore
 
 Check:
 - Terms of use and a privacy policy (India's Digital Personal Data Protection Act, 2023), shown at sign-up. Needs the owner and a lawyer.
+- Personal data (added 28 Oct): what we keep about shop customers (names, mobiles, birthdays, GSTINs), who can see it, how long it is kept, how a shop exports or deletes it, and what a data breach notice would need.
 - Help: the shop guides in `docs/guides`, a support contact, how a shop reports a problem.
 - Platform admin (see section 5 below): what Rademics needs to look after many shops.
 - A pilot: one or two friendly shops for two weeks, a daily check of their books and stock, then a go / no-go meeting.
 
 Done when: the go / no-go list at the end of this file is all ticked.
+
+### Session 14: Code health for a one-person, AI-built product (added 28 October 2026)
+
+Scope: the whole repository.
+
+Check:
+- The same rule written twice (for example the till and the server both pricing a bill): one place, or a test proving they agree.
+- Tests that pass for the wrong reason: assertions that only repeat what the code does, mocks that hide the real database, tests never run in CI.
+- Code paths no test reaches in money, stock, tax and security (coverage report on those folders).
+- Dead code, unused settings, screens no menu reaches, TODOs.
+- Library calls and options that do not exist or are deprecated; type checks and lint warnings switched off.
+- The docs match the code: plans, decisions and acceptance tests describe what is built today.
+
+Done when: a coverage figure for the money, stock, tax and security folders, the duplicated rules listed with a test for each, and no warnings left in type check and lint.
+
+### What each session covers (A to Z)
+
+| Topic | Session |
+| --- | --- |
+| Access, logins, passwords, PINs, sessions, shop and store separation, web attacks, uploads, secrets | 1 |
+| Money, rounding, double entry, cancelling, loyalty and gift cards | 2 |
+| Stock, cost, batches, serials, two cashiers at once | 3 |
+| GST law, returns, e-invoice and e-way files | 4 |
+| Billing counter, offline, devices, crash recovery | 5 |
+| Indian dates, financial year, scheduled jobs, number and date formats | 6 |
+| Audit columns, history, migrations, constraints, backups restore, data export | 7 |
+| Speed, large shops, many shops, two servers, outside services down, costs and limits | 8 |
+| Ease of use, accessibility, phone layout, first-time shop | 9 |
+| Libraries, licences, image size, monthly updates | 10 |
+| Tests and acceptance scenarios | 11 |
+| Live server, HTTPS, headers, monitoring, alerts, backups, runbook, rollback | 12 |
+| Legal, privacy (DPDP Act), support, pilot shops | 13 |
+| Code health, duplicated rules, AI-built risks, docs matching code | 14 |
 
 ---
 
@@ -260,8 +299,8 @@ To add before many shops (owner to choose; each needs a short plan first):
 ## 6. Go / no-go before giving it to people
 
 - [ ] Sessions 1 to 7 done with no Critical or High open
-- [ ] The owner's decisions L1 to L10 and L12 recorded (`docs/decisions.md`; L11 is decided)
-- [ ] Security upgrades deployed; live server checks pass (Session 12)
+- [x] The owner's decisions L1 to L12 recorded (`docs/decisions.md`, 28 October 2026)
+- [ ] Security upgrades deployed (done 27 October 2026); live server checks pass (Session 12)
 - [ ] Backup restore tested
 - [ ] Terms and privacy policy published
 - [ ] Two pilot shops ran two weeks with books, stock and GST agreeing
@@ -273,7 +312,7 @@ To add before many shops (owner to choose; each needs a short plan first):
 
 | Session | Status | Date | Results |
 | --- | --- | --- | --- |
-| 1. Security and access | Not started | | |
+| 1. Security and access | **Done**: 27 findings, no Critical, all 7 High fixed with tests | 28 Oct 2026 | `docs/audit/01-security-access.md`, route table `docs/audit/01-routes.md` |
 | 2. Money and accounts | Not started | | |
 | 3. Stock | Not started | | |
 | 4. GST | Not started | | |
@@ -286,5 +325,6 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 11. Tests | Not started | | |
 | 12. Live server | Not started | | |
 | 13. Ready for people | Not started | | |
+| 14. Code health | Not started | | |
 
-**Next step:** Session 1 (security and access).
+**Next step:** Session 2 (money and accounts). Open items from Session 1 for later sessions: #18 (Session 12), #21 (Session 5), #26 (Session 2), #20 and #23 (small, any time); owner decisions #19, #22, #24.

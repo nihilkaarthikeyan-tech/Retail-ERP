@@ -99,8 +99,16 @@ export class PurchaseReportsService {
   async register(q: PurchaseReportQuery, user: CurrentUser) {
     const company = await this.common.currentCompany();
     this.common.requireRight(user, 'buying_prices.view');
+    // Audit 1 (28 October 2026): a person working in some stores sees only their stores' bills (and those without a store).
+    const stores = this.common.storeFilter(user);
     const where: Prisma.SupplierBillLineWhereInput = {
-      bill: { companyId: company.id, status: 'unpaid', ...(q.supplierId ? { supplierId: q.supplierId } : {}), ...(this.dateRange(q) ? { postingDate: this.dateRange(q) } : {}) },
+      bill: {
+        companyId: company.id,
+        status: 'unpaid',
+        ...(stores ? { OR: [{ storeId: null }, { storeId: { in: stores } }] } : {}),
+        ...(q.supplierId ? { supplierId: q.supplierId } : {}),
+        ...(this.dateRange(q) ? { postingDate: this.dateRange(q) } : {}),
+      },
       ...(q.itemId ? { itemId: q.itemId } : {}),
     };
     const lines = await this.prisma.supplierBillLine.findMany({
