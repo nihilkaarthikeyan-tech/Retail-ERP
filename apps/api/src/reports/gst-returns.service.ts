@@ -61,6 +61,7 @@ import {
 } from 'shared';
 import type { GstRegistration } from '../generated/prisma/client.js';
 import { TransferGstService } from '../inventory/transfer-gst.service.js';
+import { OfficialHsnService } from '../gst/official-hsn.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, money, qty, ReportsCommon, type StoreScope, ZERO } from './reports-common.service.js';
 
@@ -136,6 +137,7 @@ export class GstReturnsService {
     private readonly prisma: PrismaService,
     private readonly common: ReportsCommon,
     private readonly transferGst: TransferGstService,
+    private readonly officialHsn: OfficialHsnService,
   ) {}
 
   // ---- Registrations, period and settings ----
@@ -477,6 +479,8 @@ export class GstReturnsService {
 
     // Table 12: HSN summary, business (B2B and their notes) and consumer separately, at the configured digits.
     const descriptions = new Map((await this.prisma.hsnCode.findMany({ select: { code: true, description: true } })).map((h) => [h.code, h.description]));
+    // Owner, 28 October 2026: a code the shop gave no description for takes the official one.
+    const official = await this.officialHsn.descriptions([...new Set(live.flatMap((d) => d.lines.map((l) => l.hsn)))]);
     const hsnGroups = (business: boolean): Gstr1HsnRow[] => {
       const m = new Map<string, { hsn: string; uqc: string; rate: string; quantity: Decimal; f: TaxFigures }>();
       for (const d of live.filter((x) => x.section !== 'excluded' && (x.section === 'b2b' || x.section === 'cdnr') === business)) {
@@ -490,7 +494,7 @@ export class GstReturnsService {
       }
       return [...m.values()]
         .sort((a, b) => a.hsn.localeCompare(b.hsn) || D(a.rate).cmp(D(b.rate)))
-        .map((g) => ({ hsn: g.hsn, description: descriptions.get(g.hsn) ?? [...descriptions].find(([code]) => code.startsWith(g.hsn))?.[1] ?? '', uqc: g.uqc, quantity: qty(g.quantity), rate: g.rate, ...f2s(g.f) }));
+        .map((g) => ({ hsn: g.hsn, description: descriptions.get(g.hsn) ?? [...descriptions].find(([code]) => code.startsWith(g.hsn))?.[1] ?? official.get(g.hsn) ?? '', uqc: g.uqc, quantity: qty(g.quantity), rate: g.rate, ...f2s(g.f) }));
     };
     const hsnBusiness = hsnGroups(true);
     const hsnConsumer = hsnGroups(false);

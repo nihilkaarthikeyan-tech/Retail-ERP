@@ -7,6 +7,7 @@ import { ActiveBadge, Alert, Badge, Button, CheckInput, DataTable, Dialog, TextI
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import type { HsnCodeDto } from "@/lib/types";
+import { useOfficialHsn } from "@/lib/official-hsn";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 
@@ -30,10 +31,19 @@ export default function HsnCodesPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Owner, 28 October 2026: a new code takes its official description (until the person types their own).
+  const official = useOfficialHsn(editing === "new" ? form.code : "");
+  const [descriptionTyped, setDescriptionTyped] = useState(false);
+  const [serviceTicked, setServiceTicked] = useState(false);
+  const fromList = official?.official ? official : null;
+  const description = !descriptionTyped && fromList?.description ? fromList.description : form.description;
+  const isService = !serviceTicked && fromList ? !!fromList.isService : form.isService;
 
   function open(h: HsnCodeDto | "new") {
     setErrors({});
     setError(null);
+    setDescriptionTyped(false);
+    setServiceTicked(false);
     setForm(h === "new" ? emptyHsn : { code: h.code, description: h.description, isService: h.isService, active: h.active });
     setEditing(h);
   }
@@ -43,7 +53,7 @@ export default function HsnCodesPage() {
     setError(null);
     const parsed =
       editing === "new"
-        ? createHsnCodeSchema.safeParse({ code: form.code, description: form.description, isService: form.isService })
+        ? createHsnCodeSchema.safeParse({ code: form.code, description, isService })
         : updateHsnCodeSchema.safeParse({ description: form.description, active: form.active });
     const issues = issuesToFieldErrors(parsed);
     setErrors(issues);
@@ -116,11 +126,12 @@ export default function HsnCodesPage() {
           <Alert kind="error">{error}</Alert>
           {editing === "new" ? (
             <>
-              <TextInput id="hsn-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required inputMode="numeric" className="mono" hint="4, 6 or 8 digits." autoComplete="off" />
-              <CheckInput id="hsn-isService" label="Service (SAC) code" description="Off = goods (HSN)." checked={form.isService} onChange={(e) => setForm({ ...form, isService: e.target.checked })} />
+              <TextInput id="hsn-code" label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} error={errors.code} required inputMode="numeric" className="mono" hint="4, 6 or 8 digits. The official description fills in by itself." autoComplete="off" />
+              {official && !official.official ? <p className="field-warning">{form.code.trim()} is not in the official HSN / SAC list of the GST portal. Check the code.</p> : null}
+              <CheckInput id="hsn-isService" label="Service (SAC) code" description="Off = goods (HSN)." checked={isService} onChange={(e) => { setServiceTicked(true); setForm({ ...form, isService: e.target.checked }); }} />
             </>
           ) : null}
-          <TextInput id="hsn-description" label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} error={errors.description} required autoComplete="off" />
+          <TextInput id="hsn-description" label="Description" value={editing === "new" ? description : form.description} onChange={(e) => { setDescriptionTyped(true); setForm({ ...form, description: e.target.value }); }} error={errors.description} required autoComplete="off" />
           {editing !== "new" ? <CheckInput id="hsn-active" label="Active" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} /> : null}
           <div className="actions">
             <Button type="submit" variant="primary" busy={busy}>

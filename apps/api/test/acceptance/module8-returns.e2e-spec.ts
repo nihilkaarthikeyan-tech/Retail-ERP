@@ -193,7 +193,8 @@ describe('8.8 GSTR-1 and HSN summary for a month; 8.9 GSTR-3B', () => {
     expect(g.cdnur).toMatchObject([{ buyerGstin: null, placeOfSupply: '29', items: [{ rate: '18.00', taxable: '-250000.00', igst: '-45000.00' }] }]);
     expect(g.nil).toEqual([{ supplyType: 'INTRAB2C', nil: '30.00', exempt: '0.00', nonGst: '0.00' }]);
     // HSN at 4 digits, business and consumer apart, with credit notes as minus figures.
-    expect(g.hsnBusiness).toEqual([{ hsn: '6205', description: '', uqc: 'PCS', quantity: '1', rate: '5.00', taxable: '1000.00', igst: '0.00', cgst: '25.00', sgst: '25.00', cess: '0.00' }]);
+    // The shop gave 6205 no description, so the official one is used (owner, 28 October 2026).
+    expect(g.hsnBusiness).toEqual([{ hsn: '6205', description: expect.stringMatching(/SHIRTS/), uqc: 'PCS', quantity: '1', rate: '5.00', taxable: '1000.00', igst: '0.00', cgst: '25.00', sgst: '25.00', cess: '0.00' }]);
     expect(g.hsnConsumer.map((h: { hsn: string; quantity: string; taxable: string }) => [h.hsn, h.quantity, h.taxable])).toEqual([
       ['0401', '1', '30.00'],
       ['1006', '1', '100.00'],
@@ -241,7 +242,7 @@ describe('8.8 GSTR-1 and HSN summary for a month; 8.9 GSTR-3B', () => {
     expect(json.cdnr[0]).toMatchObject({ ctin: KA_GSTIN, nt: [{ ntty: 'C', val: 1050, pos: '29', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 5, txval: 1000, iamt: 50 } }] }] });
     expect(json.cdnur).toMatchObject([{ typ: 'B2CL', ntty: 'C', val: 295000, pos: '29', itms: [{ itm_det: { rt: 18, txval: 250000, iamt: 45000 } }] }]);
     expect(json.nil).toEqual({ inv: [{ sply_ty: 'INTRAB2C', nil_amt: 30, expt_amt: 0, ngsup_amt: 0 }] });
-    expect(json.hsn.hsn_b2b).toEqual([{ num: 1, hsn_sc: '6205', uqc: 'PCS', qty: 1, rt: 5, txval: 1000, iamt: 0, camt: 25, samt: 25, csamt: 0 }]);
+    expect(json.hsn.hsn_b2b).toEqual([{ num: 1, hsn_sc: '6205', desc: "MEN'S OR BOYS' SHIRTS", uqc: 'PCS', qty: 1, rt: 5, txval: 1000, iamt: 0, camt: 25, samt: 25, csamt: 0 }]);
     expect(json.hsn.hsn_b2c.map((h: { hsn_sc: string; txval: number }) => [h.hsn_sc, h.txval])).toEqual([
       ['0401', 30],
       ['1006', 100],

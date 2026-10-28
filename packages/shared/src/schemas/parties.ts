@@ -3,11 +3,11 @@
 // contacts, payment terms and party settings.
 import { z } from 'zod';
 import { businessDate } from '../business-date.js';
-import { PAN_RE } from '../company.js';
+import { PAN_RE, panFromGstin } from '../company.js';
 import { dayMonthYearProblem, EARLIEST_CUSTOMER_YEAR, isDayMonth } from '../customer-dates.js';
 import { isIsoDate } from '../financial-year.js';
 import { gstinProblem, TAX_SITUATIONS } from '../gst-core.js';
-import { isStateCode } from '../india.js';
+import { INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE, isStateCode, pinCodeStateProblem } from '../india.js';
 import { DUE_BASES } from '../payment-terms.js';
 import { itemCode, nonNegativeDecimalString } from './catalogue.js';
 
@@ -15,7 +15,7 @@ const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
 const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
 const email = z.string().trim().toLowerCase().email().max(254);
-const mobile = z.string().trim().regex(/^[0-9]{10}$/, 'Mobile number must be 10 digits');
+const mobile = z.string().trim().regex(INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE);
 // Customers' and suppliers' GSTINs get the full check, check character included (see schemas/index.ts).
 const gstin = z
   .string()
@@ -37,7 +37,7 @@ export type HoldType = (typeof HOLD_TYPES)[number];
 
 // ---- Addresses and contacts (shared by customers and suppliers) ----
 
-export const addressSchema = z.object({
+const addressFields = z.object({
   label: optionalText(40),
   addressLine1: trimmed(120),
   addressLine2: optionalText(120),
@@ -52,8 +52,15 @@ export const addressSchema = z.object({
   isDelivery: z.boolean().optional(),
   isMain: z.boolean().optional(),
 });
+/** Owner, 28 October 2026: the PIN code must be in the address's state (the state decides CGST + SGST or IGST). */
+function checkPinCode(v: { pincode?: string | null; stateCode?: string | null }, ctx: z.RefinementCtx) {
+  const problem = pinCodeStateProblem(v.pincode, v.stateCode);
+  if (problem) ctx.addIssue({ code: 'custom', path: ['pincode'], message: problem });
+}
+
+export const addressSchema = addressFields.superRefine(checkPinCode);
 export type AddressInput = z.infer<typeof addressSchema>;
-export const updateAddressSchema = addressSchema.extend({ active: z.boolean() }).partial();
+export const updateAddressSchema = addressFields.extend({ active: z.boolean() }).partial().superRefine(checkPinCode);
 export type UpdateAddressInput = z.infer<typeof updateAddressSchema>;
 
 export const contactSchema = z.object({
@@ -228,9 +235,25 @@ const supplierBody = z.object({
   linkedCustomerId: z.string().uuid().optional().nullable(),
 });
 
-export const createSupplierSchema = supplierBody.extend({ address: addressSchema.optional().nullable() });
+/**
+ * Owner, 28 October 2026: characters 3 to 12 of a GSTIN are the business's PAN, so a PAN and a
+ * GSTIN given together must agree. When a change sends only one, the API checks it against the other.
+ */
+export function supplierPanProblem(pan: string | null | undefined, gstin: string | null | undefined): string | null {
+  const p = pan?.trim().toUpperCase();
+  const g = gstin?.trim().toUpperCase();
+  if (!p || !g || g.length !== 15 || panFromGstin(g) === p) return null;
+  return `This GSTIN belongs to PAN ${panFromGstin(g)}, not ${p}. Check the PAN or the GSTIN.`;
+}
+
+function checkSupplierPan(v: { pan?: string | null; gstin?: string | null }, ctx: z.RefinementCtx) {
+  const problem = supplierPanProblem(v.pan, v.gstin);
+  if (problem) ctx.addIssue({ code: 'custom', path: ['pan'], message: problem });
+}
+
+export const createSupplierSchema = supplierBody.extend({ address: addressSchema.optional().nullable() }).superRefine(checkSupplierPan);
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
-export const updateSupplierSchema = supplierBody.omit({ code: true }).partial();
+export const updateSupplierSchema = supplierBody.omit({ code: true }).partial().superRefine(checkSupplierPan);
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>;
 
 /** suppliers.hold only. */

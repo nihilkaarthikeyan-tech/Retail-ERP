@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { Field } from "@/components/ui";
 import { api, query } from "@/lib/api";
+import { searchOfficialHsn, useOfficialHsn } from "@/lib/official-hsn";
 import type { HsnCodeDto } from "@/lib/types";
 
 interface HsnInputProps {
@@ -15,24 +16,43 @@ interface HsnInputProps {
   hint?: string;
 }
 
-/** HSN/SAC code with search-as-you-type over the company's HSN list. */
+interface Match {
+  key: string;
+  code: string;
+  description: string;
+  isService: boolean;
+  official: boolean;
+  heading?: string | null;
+}
+
+/**
+ * HSN/SAC code with search-as-you-type over the shop's own HSN list and, after it, the official
+ * list of the GST portal (owner, 28 October 2026). A complete code shows its official description,
+ * or a warning when the official list does not have it.
+ */
 export function HsnInput({ id, value, onChange, error, disabled, hint }: HsnInputProps) {
-  const [matches, setMatches] = useState<HsnCodeDto[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
   const [open, setOpen] = useState(false);
+  const official = useOfficialHsn(value);
 
   useEffect(() => {
     const text = value.trim();
     if (!open || text.length < 2) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      api
+      const own = api
         .get<HsnCodeDto[]>(`/catalogue/hsn-codes${query({ search: text })}`)
-        .then((rows) => {
-          if (!cancelled) setMatches(rows.filter((r) => r.active).slice(0, 8));
-        })
-        .catch(() => {
-          if (!cancelled) setMatches([]);
-        });
+        .then((rows) => rows.filter((r) => r.active).slice(0, 6))
+        .catch(() => [] as HsnCodeDto[]);
+      const listed = searchOfficialHsn(text).catch(() => []);
+      void Promise.all([own, listed]).then(([mine, theirs]) => {
+        if (cancelled) return;
+        const ownCodes = new Set(mine.map((m) => m.code));
+        setMatches([
+          ...mine.map((m) => ({ key: `own-${m.id}`, code: m.code, description: m.description, isService: m.isService, official: false })),
+          ...theirs.filter((o) => !ownCodes.has(o.code)).slice(0, 8).map((o) => ({ key: `gov-${o.code}`, code: o.code, description: o.description, isService: o.isService, official: true, heading: o.heading })),
+        ]);
+      });
     }, 250);
     return () => {
       cancelled = true;
@@ -41,6 +61,7 @@ export function HsnInput({ id, value, onChange, error, disabled, hint }: HsnInpu
   }, [value, open]);
 
   const showList = open && value.trim().length >= 2 && matches.length > 0;
+  const firstOfficial = matches.findIndex((m) => m.official);
 
   return (
     <Field id={id} label="HSN / SAC code" error={error} hint={hint}>
@@ -66,8 +87,9 @@ export function HsnInput({ id, value, onChange, error, disabled, hint }: HsnInpu
         />
         {showList ? (
           <ul className="picker-results" id={`${id}-list`}>
-            {matches.map((m) => (
-              <li key={m.id}>
+            {matches.map((m, i) => (
+              <li key={m.key}>
+                {i === firstOfficial ? <div className="picker-group">Official list (GST portal)</div> : null}
                 <button
                   type="button"
                   className="picker-result"
@@ -79,12 +101,15 @@ export function HsnInput({ id, value, onChange, error, disabled, hint }: HsnInpu
                 >
                   <span className="mono">{m.code}</span> {m.description}
                   {m.isService ? <span className="muted"> (service)</span> : null}
+                  {m.heading ? <span className="picker-result-note">{m.heading}</span> : null}
                 </button>
               </li>
             ))}
           </ul>
         ) : null}
       </div>
+      {official?.official ? <p className="field-hint">Official: {official.description}</p> : null}
+      {official && !official.official ? <p className="field-warning">{value.trim()} is not in the official HSN / SAC list of the GST portal. Check the code.</p> : null}
     </Field>
   );
 }

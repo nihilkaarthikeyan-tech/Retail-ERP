@@ -24,6 +24,7 @@ import { NumberingModule } from './numbering/numbering.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { PartiesModule } from './parties/parties.module.js';
 import { PricingModule } from './pricing/pricing.module.js';
+import { OfficialHsnModule } from './gst/official-hsn.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RolesModule } from './roles/roles.module.js';
 import { PlatformModule } from './platform/platform.module.js';
@@ -35,6 +36,7 @@ import { UsersModule } from './users/users.module.js';
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
+    OfficialHsnModule,
     AuditModule,
     ModulesModule,
     LedgerModule,

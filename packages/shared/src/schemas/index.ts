@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { GSTIN_RE, PAN_RE } from '../company.js';
 import { isIsoDate } from '../financial-year.js';
 import { gstinProblem } from '../gst-core.js';
-import { isStateCode } from '../india.js';
+import { INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE, isStateCode } from '../india.js';
 import { NUMBER_PATTERN_TOKENS } from '../numbering.js';
 import { isPermissionKey } from '../permissions.js';
 
@@ -17,7 +17,7 @@ export const email = z.string().trim().toLowerCase().email().max(254);
 export const mobile = z
   .string()
   .trim()
-  .regex(/^[0-9]{10}$/, 'Mobile number must be 10 digits')
+  .regex(INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE)
   .optional()
   .nullable();
 /**

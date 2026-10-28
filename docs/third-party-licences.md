@@ -55,3 +55,9 @@ The direct libraries above pull in about 700 smaller packages. A scan (`pnpm lic
 ```bash
 pnpm licenses list
 ```
+
+## Official government data
+
+| Data | Where it comes from | Terms |
+| --- | --- | --- |
+| HSN / SAC codes and descriptions (`apps/api/data/gst/HSN_SAC-2026-10-26.xlsx`) | GST portal, https://tutorial.gst.gov.in/downloads/HSN_SAC.xlsx, published 26 October 2026, downloaded 28 October 2026 | Published free by the Government of India for taxpayers and their software; codes and descriptions only, used as published |

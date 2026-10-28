@@ -26,7 +26,8 @@ import {
   type UpdateUnitInput,
   updateUnitSchema,
 } from 'shared';
-import { OwnerAdminOnly, RequirePermission } from '../auth/decorators.js';
+import { OwnerAdminOnly, RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
+import { OfficialHsnService } from '../gst/official-hsn.service.js';
 import { type Actor, ReqActor } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { CatalogueSettingsService } from './catalogue-settings.service.js';
@@ -43,6 +44,7 @@ export class CatalogueController {
     private readonly units: UnitsService,
     private readonly masters: MastersService,
     private readonly settings: CatalogueSettingsService,
+    private readonly officialHsn: OfficialHsnService,
   ) {}
 
   // ---- Units ----
@@ -100,6 +102,15 @@ export class CatalogueController {
     @ReqActor() actor: Actor,
   ) {
     return this.masters.updateBrand(id, input, actor);
+  }
+
+  // ---- Official HSN / SAC list (the GST portal's, the same for every shop) ----
+  @Get('official-hsn') @RequireAnyPermission(VIEW, 'gst_rates.manage') searchOfficialHsn(@Query('search') search?: string) {
+    return this.officialHsn.search(search ?? '');
+  }
+  @Get('official-hsn/:code') @RequireAnyPermission(VIEW, 'gst_rates.manage') async officialHsnCode(@Param('code') code: string) {
+    const row = await this.officialHsn.find(code);
+    return row ? { ...row, official: true } : { code: code.trim(), description: null, isService: null, official: false };
   }
 
   // ---- HSN codes ----

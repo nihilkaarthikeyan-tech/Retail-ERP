@@ -3489,3 +3489,20 @@ model PlatformSession {
 
   @@index([adminId])
 }
+
+/// Owner, 28 October 2026: the official HSN (goods) and SAC (services) codes with their
+/// descriptions, from the GST portal's HSN_SAC.xlsx (apps/api/data/gst). The same for every
+/// shop; loaded when the API starts with a new file. Codes and descriptions only, no GST rates.
+model OfficialHsnCode {
+  /// 2, 4, 6 or 8 digits.
+  code        String  @id
+  description String
+  isService   Boolean @default(false)
+}
+
+/// Which version of each official list is loaded (key "official-hsn": the file name).
+model ReferenceDataVersion {
+  key      String   @id
+  version  String
+  loadedAt DateTime @default(now())
+}

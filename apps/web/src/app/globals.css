@@ -4916,3 +4916,21 @@ button.shell-nav-heading[aria-expanded="false"] .shell-nav-chevron {
 .check-list-short {
   max-height: 168px;
 }
+
+/* A heading inside a search list ("Official list (GST portal)" under the shop's own HSN codes). */
+.picker-group {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-top: 1px solid var(--line);
+}
+
+/* The heading a short official HSN description belongs to, under it in the list. */
+.picker-result-note {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}

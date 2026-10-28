@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 import { GST_RATE_KINDS } from '../gst-core.js';
-import { isStateCode } from '../india.js';
+import { INDIAN_MOBILE, isStateCode } from '../india.js';
 import { DENOMINATIONS } from '../pos.js';
 import { nonNegativeDecimalString, positiveDecimalString } from './catalogue.js';
 import { posBuyerSchema } from './gst-core.js';
@@ -262,7 +262,7 @@ export const posTransactionSchema = z
       .object({
         clientId: uuid,
         name: trimmed(120),
-        mobile: z.string().regex(/^[0-9]{10}$/),
+        mobile: z.string().regex(INDIAN_MOBILE),
         birthday: dayMonthShape.optional().nullable(),
         birthYear: z.number().int().optional().nullable(),
         anniversary: dayMonthShape.optional().nullable(),
