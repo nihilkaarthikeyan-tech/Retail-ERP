@@ -13,6 +13,8 @@ export function formatDateTime(iso: string | null | undefined): string {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    // Audit 6: Indian time whatever the computer's own time zone.
+    timeZone: "Asia/Kolkata",
   });
 }
 

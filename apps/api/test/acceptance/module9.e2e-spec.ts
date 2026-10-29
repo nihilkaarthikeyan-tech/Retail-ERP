@@ -345,7 +345,8 @@ describe('9.10 daily summary email, 9.11 downloads recorded', () => {
     expect(mailer.outbox).toHaveLength(1);
     const mail = mailer.outbox[0];
     expect(mail.to.sort()).toEqual(['meena@rademics.test', 'owner@rademics.test']);
-    expect(mail.subject).toContain(`daily summary for ${today()}`);
+    // Audit 6: the subject names the day as 29 Oct 2026.
+    expect(mail.subject).toContain(`daily summary for ${new Date(`${today()}T00:00:00Z`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}`);
     expect(mail.text).toContain('₹200.00 from 1 bills');
     expect(mail.text).toContain('This month so far');
 

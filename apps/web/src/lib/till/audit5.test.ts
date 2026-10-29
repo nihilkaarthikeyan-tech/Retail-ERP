@@ -314,7 +314,7 @@ describe("offline past midnight (audit 5, C2)", () => {
     await live.start();
     expect(live.shiftNeedsClosing()).toBe(true);
     const next = await live.loadDraft();
-    await expect(live.finish({ ...next.draft, lines: [line(BASMATI, "1")], payments: cash("120") })).rejects.toThrow(/shift is from 2026-10-15; close it/);
+    await expect(live.finish({ ...next.draft, lines: [line(BASMATI, "1")], payments: cash("120") })).rejects.toThrow(/shift is from 15 Oct 2026; close it/);
   });
 });
 

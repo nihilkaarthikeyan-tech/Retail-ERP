@@ -19,7 +19,15 @@ type Names = ReadonlyMap<string, string>;
 function show(value: unknown, names?: Names): string {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "string") return names?.get(value) ?? (UUID.test(value) ? "(a record)" : value);
+  if (typeof value === "string") {
+    if (names?.has(value)) return names.get(value)!;
+    if (UUID.test(value)) return "(a record)";
+    // Audit 6: stored dates and times shown the Indian way (a date at midnight UTC is a calendar date).
+    if (/^d{4}-d{2}-d{2}T00:00:00(.000)?Z$/.test(value)) return formatDate(value);
+    if (/^d{4}-d{2}-d{2}Td{2}:d{2}/.test(value)) return formatDateTime(value);
+    if (/^d{4}-d{2}-d{2}$/.test(value)) return formatDate(value);
+    return value;
+  }
   if (typeof value === "number") return String(value);
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.length ? value.map((v) => show(v, names)).join(", ") : "none";
   return JSON.stringify(value);

@@ -57,6 +57,10 @@ export class ShiftsService {
     for (const c of input.cash) if (!methods.has(c.paymentMethodId)) throw new BadRequestException('That payment method is not used on this till');
     const openedAt = input.openedAt ? new Date(input.openedAt) : new Date();
     if (openedAt.getTime() > Date.now() + 10 * 60_000) throw new BadRequestException('The till clock is ahead of the server; check the computer’s date and time');
+    // Audit 6: a clock that is behind would date the shift (and its bills) in the past; a shift can never open
+    // before this till's last shift closed. (An opening made offline and sent later is still accepted.)
+    const lastClosed = await this.prisma.shift.findFirst({ where: { tillId: till.id, status: 'closed' }, orderBy: { closedAt: 'desc' }, select: { closedAt: true } });
+    if (lastClosed?.closedAt && openedAt.getTime() < lastClosed.closedAt.getTime() - 60_000) throw new BadRequestException('The till clock is behind: this time is before the till’s last shift was closed. Check the computer’s date and time');
     try {
       const shift = await this.prisma.$transaction(async (tx) => {
         const s = await tx.shift.create({

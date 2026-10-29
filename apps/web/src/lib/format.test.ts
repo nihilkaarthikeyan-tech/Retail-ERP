@@ -1,6 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { financialYearFor, todayIso } from "./format";
+import { financialYearFor, formatDateTime, todayIso } from "./format";
 
 // 1 April 2026, 00:05 in India; still 31 March in UTC and in the Americas.
 const JUST_AFTER_MIDNIGHT_IST = new Date("2026-03-31T18:35:00Z");
@@ -33,6 +33,10 @@ describe.each(MACHINE_TIME_ZONES)("Indian business dates with machine time zone 
 
   it("financialYearFor puts 00:05 IST on 1 April in 2026-27", () => {
     expect(financialYearFor(JUST_AFTER_MIDNIGHT_IST)).toEqual({ startDate: "2026-04-01", endDate: "2027-03-31" });
+  });
+
+  it("formatDateTime shows the Indian date and time (audit 6)", () => {
+    expect(formatDateTime(JUST_AFTER_MIDNIGHT_IST.toISOString())).toMatch(/^01 Apr 2026, 12:05\s?am$/i);
   });
 
   it("financialYearFor puts 23:55 IST on 31 March in 2025-26", () => {

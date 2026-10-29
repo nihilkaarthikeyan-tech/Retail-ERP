@@ -5,7 +5,7 @@
 // never sent twice, even after a restart. Switched-off users get nothing.
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { addDays, businessDate, type CurrentUser, Decimal, grossMarginPercent, hasPermission, INDIA_TIME_ZONE, SUMMARY_FIGURES, type SummaryEmailSettingsInput, type SummaryFigure } from 'shared';
+import { addDays, businessDate, type CurrentUser, Decimal, grossMarginPercent, hasPermission, INDIA_TIME_ZONE, indianAmount, SUMMARY_FIGURES, type SummaryEmailSettingsInput, type SummaryFigure } from 'shared';
 import { AuditService } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { forEachShop } from '../prisma/each-shop.js';
@@ -24,7 +24,8 @@ function indiaTime(now = new Date()): string {
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-const rupees = (v: string | Decimal) => `₹${new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v.toString()))}`;
+// Audit 6: grouped from the decimal text, never through a float.
+const rupees = (v: string | Decimal) => `₹${indianAmount(v.toString())}`;
 
 @Injectable()
 export class SummaryEmailService {
@@ -196,7 +197,7 @@ export class SummaryEmailService {
       sections.push({ title: 'Till bills that could not be sent', rows: [['Waiting for a manager', String(n)]] });
     }
 
-    const subject = `${company.tradeName ?? company.legalName}: daily summary for ${day}`;
+    const subject = `${company.tradeName ?? company.legalName}: daily summary for ${new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
     const html = [
       `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">`,
       `<h2 style="margin:0 0 12px">${esc(subject)}</h2>`,

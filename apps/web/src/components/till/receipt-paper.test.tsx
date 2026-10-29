@@ -86,7 +86,7 @@ describe("audit 4: the till receipt on screen", () => {
 
   it("names the original bill and the buyer on a credit note", () => {
     render(<ReceiptPaper receipt={receipt({ kind: "return", gst: { ...gst, title: "Credit note", original: { number: "MAIN-T1-000001", date: "2026-10-01" }, buyer: { name: "Anil Kumar", gstin: null, address: "4 Lake View, Chennai", state: { code: "33", name: "Tamil Nadu" } } } })} />);
-    expect(text()).toMatch(/Against bill MAIN-T1-000001 dated 2026-10-01/);
+    expect(text()).toMatch(/Against bill MAIN-T1-000001 dated 01 Oct 2026/);
     expect(text()).toMatch(/Buyer: Anil Kumar/);
     expect(text()).toMatch(/4 Lake View, Chennai/);
     expect(text()).toMatch(/State: Tamil Nadu \(33\)/);

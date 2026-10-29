@@ -88,3 +88,14 @@ describe('labels', () => {
     expect(labelsPerSheet({ width: 50, height: 25, marginTop: 10, marginLeft: 5 })).toEqual({ across: 4, down: 11, perSheet: 44 });
   });
 });
+
+describe('indianAmount (audit 6)', () => {
+  it('groups lakhs and crores from the decimal text', async () => {
+    const { indianAmount } = await import('./printing.js');
+    expect(indianAmount('125000')).toBe('1,25,000.00');
+    expect(indianAmount('12345678.905')).toBe('1,23,45,678.91');
+    expect(indianAmount('-1234.5')).toBe('-1,234.50');
+    expect(indianAmount('999')).toBe('999.00');
+    expect(indianAmount('-0.001')).toBe('0.00');
+  });
+});

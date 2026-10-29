@@ -9,6 +9,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { type CurrentUser, hasPermission } from "shared";
 import { Icon, type IconName } from "@/components/icons";
 import { api, query } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { visibleMenu } from "@/lib/menu";
 import { useModules } from "@/lib/modules";
 import type { CustomerDto, ItemDto } from "@/lib/types";
@@ -112,7 +113,7 @@ function Panel({ user, onClose }: { user: CurrentUser; onClose: () => void }) {
       if (hasPermission(user, "pos.reports") || hasPermission(user, "pos.sell")) {
         jobs.push(
           api.get<{ rows: BillHit[] }>(`/pos/bills${query({ search: q, pageSize: 5 })}`).then((r) => {
-            for (const b of r.rows) found.push({ key: `bill-${b.id}`, group: "Bills", label: b.number, detail: `${b.till.code} · ${b.businessDate}${b.buyerName ? ` · ${b.buyerName}` : ""}`, href: `/pos/bills/${b.id}`, icon: "receipt" });
+            for (const b of r.rows) found.push({ key: `bill-${b.id}`, group: "Bills", label: b.number, detail: `${b.till.code} · ${formatDate(b.businessDate)}${b.buyerName ? ` · ${b.buyerName}` : ""}`, href: `/pos/bills/${b.id}`, icon: "receipt" });
           }),
         );
       }

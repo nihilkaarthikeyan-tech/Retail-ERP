@@ -140,7 +140,7 @@ export function PointsAndCards({ loyalty, giftCardsOn, online, namedCustomer, cu
       {open === "points" && loyalty ? (
         <div className="till-row" role="group" aria-label="Pay with points" onKeyDown={onEnter(() => spendPoints())}>
           <p className="muted">
-            {customerPoints ? `${customerPoints.available} points can be spent today (1 point = ₹${pointValue}). ` : ""}
+            {customerPoints ? `${customerPoints.available} points can be spent today (1 point = ${rupees(pointValue)}). ` : ""}
             {most > 0 ? `Up to ${most} points on this bill; at least ${loyalty.minRedeem}.` : `At least ${loyalty.minRedeem} points, and at most ${loyalty.maxSharePercent}% of the bill.`}
           </p>
           <input className="input till-input-big" inputMode="numeric" aria-label="Points to spend" value={typed} onChange={(e) => setTyped(e.target.value.replace(/\D/g, ""))} autoFocus />

@@ -27,7 +27,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     // data-theme is set by the boot script before React loads, so it may differ from the server HTML.
-    <html lang="en" className={`${geist.variable} ${geistMono.variable}`} data-theme="light" suppressHydrationWarning>
+    <html lang="en-IN" className={`${geist.variable} ${geistMono.variable}`} data-theme="light" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>

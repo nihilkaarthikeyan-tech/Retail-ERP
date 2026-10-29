@@ -106,8 +106,8 @@ describe("GST settings (plan 08 §5, 8.11)", () => {
 
 describe("GST rate list with price bands (G2)", () => {
   it("describes bands in plain words", () => {
-    expect(bandText({ priceFrom: null, priceUpTo: "2500.00" })).toBe("Up to ₹2500.00");
-    expect(bandText({ priceFrom: "2500.00", priceUpTo: null })).toBe("Above ₹2500.00");
+    expect(bandText({ priceFrom: null, priceUpTo: "2500.00" })).toBe("Up to ₹2,500.00");
+    expect(bandText({ priceFrom: "2500.00", priceUpTo: null })).toBe("Above ₹2,500.00");
     expect(bandText({ priceFrom: null, priceUpTo: null })).toBe("Any price");
   });
 

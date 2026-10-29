@@ -17,7 +17,7 @@ import { useAuth } from "@/lib/auth-context";
 import { type LabelDataDto, type LabelTemplatesDto, sheetLayout, sheetsOf } from "@/lib/documents";
 import { formatDate } from "@/lib/format";
 import { useModules } from "@/lib/modules";
-import type { GoodsReceiptHeader, Page } from "@/lib/purchasing";
+import { type GoodsReceiptHeader, type Page, rupees } from "@/lib/purchasing";
 import { useBusinessToday } from "@/lib/stock";
 import type { MarkdownDto } from "@/lib/styles-seasons";
 import type { ItemDto, ItemPage, PriceListDto, ScanResult } from "@/lib/types";
@@ -248,7 +248,7 @@ export function LabelsScreen() {
               {startMarkdown && !(markdowns.data ?? []).some((m) => m.id === startMarkdown) ? <option value={startMarkdown}>The markdown you came from</option> : null}
               {(markdowns.data ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.rule === "percent" ? `${m.value}% off` : `₹${m.value}`} from {formatDate(m.startDate)} · {m.itemCount} items{m.remark ? ` · ${m.remark}` : ""}
+                  {m.rule === "percent" ? `${m.value}% off` : rupees(m.value)} from {formatDate(m.startDate)} · {m.itemCount} items{m.remark ? ` · ${m.remark}` : ""}
                 </option>
               ))}
             </SelectInput>

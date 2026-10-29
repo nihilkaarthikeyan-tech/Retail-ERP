@@ -44,7 +44,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         {gst?.original ? (
           <div>
             Against bill {gst.original.number}
-            {gst.original.date ? ` dated ${gst.original.date}` : ""}
+            {gst.original.date ? ` dated ${formatDate(gst.original.date)}` : ""}
           </div>
         ) : null}
         {gst?.buyer ? (
@@ -172,7 +172,7 @@ export function ReceiptPaper({ receipt }: { receipt: PrintableReceipt }) {
         <div className="till-receipt-meta">
           <div>
             <strong>Home delivery</strong>
-            {r.delivery.deliverOn ? ` on ${r.delivery.deliverOn}` : ""}
+            {r.delivery.deliverOn ? ` on ${formatDate(r.delivery.deliverOn)}` : ""}
           </div>
           {r.delivery.name ? <div>{r.delivery.name}</div> : null}
           <div>{r.delivery.address}</div>

@@ -38,6 +38,7 @@ import {
   supplyLineTax,
   taxSituationOf,
 } from "shared";
+import { rupees } from "./format";
 import type { RefundParts, SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, SnapPrice, TillSnapshot } from "./types";
 
 const D = (v: DecimalInput) => new Decimal(v);
@@ -842,7 +843,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       billDiscount = bd.amount && D(bd.amount).gt(0) ? roundMoney(bd.amount) : roundMoney(base.mul(D(bd.percent!)).div(100));
       const pct = base.gt(0) ? billDiscount.div(base).mul(100) : ZERO;
       // Audit 5: an approval given for other lines or another discount is stale; the manager is asked again.
-      if (pct.gt(cashierLimit) && !billDiscountToken(draft)) approvals.push({ kind: "bill_discount", lineKey: null, reason: `A bill discount of ₹${billDiscount.toFixed(2)} is above the cashier's limit of ${cashierLimit.toFixed(2)}%` });
+      if (pct.gt(cashierLimit) && !billDiscountToken(draft)) approvals.push({ kind: "bill_discount", lineKey: null, reason: `A bill discount of ${rupees(billDiscount)} is above the cashier's limit of ${cashierLimit.toFixed(2)}%` });
     } else if (!draft.order) {
       // A bill that collects an order keeps the agreed prices: no bill offer (as the server).
       const best = bestBillOffer(offers, base);
@@ -1094,7 +1095,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       const payable = Decimal.max(net, 0).sub(credit).add(back?.total ?? ZERO);
       if (pointsPaid.add(giftCardsPaid).gt(payable)) problems.push("Points and gift cards pay more than the bill; take some off in Pay");
       const share = till.loyalty ? roundMoney(Decimal.max(net, 0).mul(D(till.loyalty.maxSharePercent)).div(100)) : null;
-      if (share && pointsPaid.gt(share)) problems.push(`At most ${D(till.loyalty!.maxSharePercent).toString()}% of the bill (₹${share.toFixed(2)}) can be paid with points; change the points in Pay`);
+      if (share && pointsPaid.gt(share)) problems.push(`At most ${D(till.loyalty!.maxSharePercent).toString()}% of the bill (${rupees(share)}) can be paid with points; change the points in Pay`);
     }
   }
   return {
@@ -1161,7 +1162,7 @@ export function checkPayments(net: Decimal, payments: DraftPayment[], methods: S
     return { paid, change: over.gt(0) && usesCash ? over : ZERO, short: over.lt(0) ? over.neg() : ZERO, problem };
   }
   const left = net.neg().sub(paid.neg());
-  if (left.lt(0)) problem = problem ?? `The refund must be exactly ₹${net.neg().toFixed(2)}`;
+  if (left.lt(0)) problem = problem ?? `The refund must be exactly ${rupees(net.neg())}`;
   return { paid, change: ZERO, short: left.gt(0) ? left : ZERO, problem };
 }
 

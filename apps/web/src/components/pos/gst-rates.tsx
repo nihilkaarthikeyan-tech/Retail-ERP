@@ -12,6 +12,7 @@ import { Alert, Button, DataTable, Dialog, SelectInput, TextInput, type Column }
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { rupees } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -34,8 +35,8 @@ const KIND_LABELS = { taxable: "Taxable", exempt: "Exempt", nil: "Nil-rated" } a
 
 /** "Up to ₹2,500", "Above ₹2,500", "Above ₹1,000 up to ₹2,500" or "Any price". */
 export function bandText(r: Pick<GstRateDto, "priceFrom" | "priceUpTo">): string {
-  const from = r.priceFrom ? `above ₹${r.priceFrom}` : "";
-  const to = r.priceUpTo ? `up to ₹${r.priceUpTo}` : "";
+  const from = r.priceFrom ? `above ${rupees(r.priceFrom)}` : "";
+  const to = r.priceUpTo ? `up to ${rupees(r.priceUpTo)}` : "";
   const text = [from, to].filter(Boolean).join(" ");
   return text ? text[0].toUpperCase() + text.slice(1) : "Any price";
 }

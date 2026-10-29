@@ -1,5 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 import { Badge } from "@/components/ui";
+import { formatDate } from "@/lib/format";
 import { HOLD_LABELS, STATUS_LABELS } from "@/lib/parties";
 import type { HoldType, PartyStatus } from "@/lib/types";
 
@@ -15,7 +16,7 @@ export function HoldBadge({ hold, until }: { hold: HoldType; until?: string | nu
   return (
     <Badge kind="warn">
       On hold: {HOLD_LABELS[hold].toLowerCase()}
-      {until ? ` until ${until}` : ""}
+      {until ? ` until ${formatDate(until)}` : ""}
     </Badge>
   );
 }

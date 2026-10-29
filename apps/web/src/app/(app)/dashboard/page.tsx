@@ -22,7 +22,8 @@ function useGreeting(): string {
   return useSyncExternalStore(
     noop,
     () => {
-      const hour = new Date().getHours();
+      // Audit 6: the hour in India, whatever the computer's time zone.
+      const hour = Number(new Intl.DateTimeFormat("en-IN", { hour: "numeric", hourCycle: "h23", timeZone: "Asia/Kolkata" }).format(new Date()));
       return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
     },
     () => "Welcome",

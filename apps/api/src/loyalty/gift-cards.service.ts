@@ -17,7 +17,7 @@
 // Every load, spend, refund and expiry is a card entry with the balance after
 // it; the card's balance always equals the sum of its entries.
 import { randomInt } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
   addDays,
@@ -49,6 +49,7 @@ import { moduleOffError, moduleOn } from '../modules/module-map.js';
 import { forEachShop } from '../prisma/each-shop.js';
 import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { D, fromIso, iso } from './loyalty.service.js';
+import { catchUpAtStart } from '../common/nightly-catch-up.js';
 
 const ZERO = new Decimal(0);
 /** How far ahead the expiring-cards report looks by default. */
@@ -72,7 +73,7 @@ export interface ReturnCard {
 }
 
 @Injectable()
-export class GiftCardsService {
+export class GiftCardsService implements OnApplicationBootstrap {
   private readonly log = new Logger(GiftCardsService.name);
 
   constructor(
@@ -380,6 +381,10 @@ export class GiftCardsService {
   }
 
   // ---- Nightly expiry (plan 13 §2) ----
+
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly gift card expiry', () => this.nightly());
+  }
 
   @Cron('25 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {

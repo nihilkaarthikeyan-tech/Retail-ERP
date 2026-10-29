@@ -13,7 +13,7 @@
 // points liability. Points spent are a payment method whose account is the
 // liability, so the shift entry debits it like any other payment. Expiry and a
 // change of the point value post at once.
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
   addDays,
@@ -54,6 +54,7 @@ import { type LedgerLineInput, LedgerService } from '../ledger/ledger.service.js
 import { moduleOffError, moduleOn } from '../modules/module-map.js';
 import { forEachShop } from '../prisma/each-shop.js';
 import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
+import { catchUpAtStart } from '../common/nightly-catch-up.js';
 
 type Amount = { toString(): string } | string | number;
 export const D = (v: Amount) => new Decimal(v.toString());
@@ -98,7 +99,7 @@ export interface ReturnPoints {
 }
 
 @Injectable()
-export class LoyaltyService {
+export class LoyaltyService implements OnApplicationBootstrap {
   private readonly log = new Logger(LoyaltyService.name);
 
   constructor(
@@ -583,6 +584,10 @@ export class LoyaltyService {
   }
 
   // ---- Nightly expiry (plan 13 §1) ----
+
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly points expiry', () => this.nightly());
+  }
 
   @Cron('20 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {

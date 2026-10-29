@@ -59,6 +59,16 @@ export class AttentionService {
       items.push({ key: 'go-live', label: 'Record your go-live date', detail: 'Until it is recorded, the trial data (and the books) can still be cleared', href: '/go-live', tone: 'warn', action: 'Go live' });
     }
 
+    // Audit 6: no financial year after the current one 15 days before it ends (an irregular year is not
+    // followed by itself): from its last day every bill and document would be refused.
+    if (user.isOwnerAdmin) {
+      const latest = await this.prisma.financialYear.findFirst({ where: { companyId: company.id }, orderBy: { endDate: 'desc' }, select: { endDate: true } });
+      const end = latest ? latest.endDate.toISOString().slice(0, 10) : null;
+      if (end && end >= today && end <= addDays(today, 15)) {
+        items.push({ key: 'next-year', label: 'Add the next financial year', detail: `The last financial year ends on ${new Date(`${end}T00:00:00Z`).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}; after it no bill or document can be saved`, href: '/financial-years', tone: 'warn', action: 'Add year' });
+      }
+    }
+
     if (hasPermission(user, 'stock.view')) {
       const low = await this.dashboards.belowReorder(company.id, scope.ids);
       if (low.length) items.push({ key: 'reorder', label: `${low.length} item${low.length === 1 ? '' : 's'} at or below reorder level`, href: '/purchases/reorder', tone: 'warn', action: 'Reorder' });

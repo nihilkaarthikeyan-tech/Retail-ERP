@@ -254,12 +254,19 @@ function isPoints(v: unknown): boolean {
   return typeof v === 'number' && Number.isInteger(v) && v >= 0;
 }
 
-/** The day before `expiresOn` (the last day a card works), as DD-MM-YYYY. A date, not money. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Audit 6: a calendar date (YYYY-MM-DD) as "27 Oct 2026", the way the rest of the product writes it. */
+export function indianDate(isoDate: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(isoDate);
+  return m ? `${m[3]} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : isoDate;
+}
+
+/** The day before `expiresOn` (the last day a card works), as "27 Oct 2026". A date, not money. */
 export function lastValidDay(expiresOn: string): string {
   const d = new Date(`${expiresOn}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - 1);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getUTCDate())}-${p(d.getUTCMonth() + 1)}-${d.getUTCFullYear()}`;
+  return indianDate(d.toISOString().slice(0, 10));
 }
 
 const GIFT_CARD_LABEL = { sold: 'Gift card sold', loaded: 'Gift card loaded', spent: 'Paid by gift card', refunded: 'Back on gift card' } as const;
@@ -267,10 +274,15 @@ const GIFT_CARD_LABEL = { sold: 'Gift card sold', loaded: 'Gift card loaded', sp
 // ---------------------------------------------------------------------------
 // Formatting (display only — no arithmetic on amounts).
 
-/** Shows an amount as received; a plain number is shown with 2 decimals. */
+/** Shows an amount as received, grouped the Indian way (1,25,000.00); a plain number is shown with 2 decimals. */
 export function showAmount(v: Amount | null | undefined): string {
   if (v === null || v === undefined) return '';
-  return typeof v === 'number' ? v.toFixed(2) : v.trim();
+  const s = typeof v === 'number' ? v.toFixed(2) : v.trim();
+  // Audit 6: only the digits before the point are grouped; the text is never turned into a number.
+  const m = /^([+-]?)(\d+)(\.\d+)?$/.exec(s);
+  if (!m || m[2].length <= 3) return s;
+  const whole = m[2];
+  return `${m[1]}${whole.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${whole.slice(-3)}${m[3] ?? ''}`;
 }
 
 /** Shows a quantity as received ("2", "1.250"). */
@@ -296,21 +308,21 @@ function rs(v: Amount | null | undefined): string {
   return 'Rs. ' + showAmount(v);
 }
 
-/** Bill date and time in Indian time (Asia/Kolkata), e.g. "15-10-2026 10:30". */
+/** Bill date and time in Indian time (Asia/Kolkata), e.g. "15 Oct 2026 10:30". */
 export function indianDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
     day: '2-digit',
-    month: '2-digit',
+    month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
   }).formatToParts(d);
   const p = (t: string) => parts.find((x) => x.type === t)?.value ?? '';
-  return `${p('day')}-${p('month')}-${p('year')} ${p('hour')}:${p('minute')}`;
+  return `${p('day')} ${p('month')} ${p('year')} ${p('hour')}:${p('minute')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +454,7 @@ export function buildReceipt(receipt: Receipt, paper: PaperWidth): Buffer {
   lines(wrap(`Date: ${indianDateTime(receipt.soldAt)}`, w));
   if (receipt.cashier) lines(wrap(`Cashier: ${receipt.cashier}`, w));
   if (receipt.customer) lines(wrap(`Customer: ${receipt.customer}`, w));
-  if (g?.original) lines(wrap(`Against bill ${g.original.number}${g.original.date ? ` dated ${g.original.date}` : ''}`, w));
+  if (g?.original) lines(wrap(`Against bill ${g.original.number}${g.original.date ? ` dated ${indianDate(g.original.date)}` : ''}`, w));
   if (g?.buyer) {
     if (g.buyer.name) lines(wrap(`Buyer: ${g.buyer.name}`, w));
     if (g.buyer.gstin) lines(wrap(`Buyer GSTIN: ${g.buyer.gstin}`, w));

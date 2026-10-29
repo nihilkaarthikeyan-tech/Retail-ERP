@@ -55,7 +55,11 @@ export type SummaryFigure = keyof typeof SUMMARY_FIGURES;
 export const summaryEmailSettingsSchema = z.object({
   enabled: z.boolean(),
   /** Indian time, HH:MM. */
-  sendAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time as HH:MM'),
+  sendAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time as HH:MM')
+    // Audit 6: the check runs every 5 minutes; a time after 23:55 would fall into the next day.
+    .refine((t) => t <= '23:55', 'Choose a time up to 23:55'),
   recipientIds: z.array(uuid).max(50),
   figures: z.array(z.string().refine((f) => f in SUMMARY_FIGURES, 'Unknown figure')).min(1, 'Choose at least one figure'),
 });

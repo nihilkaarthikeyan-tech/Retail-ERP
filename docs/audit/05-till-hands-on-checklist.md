@@ -34,6 +34,7 @@ Before you start: the shop has its full item list and prices loaded, the Till He
 17. Scan a barcode the till does not know, then a known one straight away: only the known item is added, with a clear message for the unknown one. ___
 18. With the cash amount box selected, scan an item by mistake: the bill must **not** finish; the till asks to check the amount. ___
 19. Scan straight after "Bill finished": the item goes on the new bill. ___
+19a. Windows and Chrome are set to English (India), so date boxes show day first (27/10/2026). ___
 
 ## 5. Internet off
 

@@ -6,7 +6,7 @@ import { businessDate, HOLD_TYPES, PARTY_STATUSES, supplierHoldSchema } from "sh
 import { HoldBadge, PartyStatusBadge } from "@/components/parties/status-badge";
 import { Alert, Button, RadioInput, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { blankToNull } from "@/lib/format";
+import { blankToNull, formatDate } from "@/lib/format";
 import { effectiveHold, HOLD_LABELS, STATUS_LABELS } from "@/lib/parties";
 import type { HoldType, PartyStatus, SupplierDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
@@ -72,7 +72,7 @@ export function SupplierHold({ supplier, canEdit, onSaved }: SupplierHoldProps) 
         <PartyStatusBadge status={supplier.status} />
         <HoldBadge hold={inForce} until={supplier.holdUntil} />
       </div>
-      {supplier.holdType !== "none" && inForce === "none" ? <Alert kind="info">The hold ended on {supplier.holdUntil}; it no longer applies.</Alert> : null}
+      {supplier.holdType !== "none" && inForce === "none" ? <Alert kind="info">The hold ended on {formatDate(supplier.holdUntil)}; it no longer applies.</Alert> : null}
       <Alert kind="error">{error}</Alert>
       {saved ? <Alert kind="success">Hold settings saved.</Alert> : null}
       <fieldset disabled={!canEdit}>

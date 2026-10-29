@@ -51,3 +51,14 @@ describe('financial years', () => {
     expect(isIsoDate('2026-4-1')).toBe(false);
   });
 });
+
+describe('nextFinancialYear across February (audit 6)', () => {
+  it('keeps the 28th or 29th right in leap years, and April to March as before', async () => {
+    const { nextFinancialYear: next } = await import('./financial-year.js');
+    expect(next({ startDate: '2026-03-01', endDate: '2027-02-28' })).toEqual({ startDate: '2027-03-01', endDate: '2028-02-29' });
+    expect(next({ startDate: '2027-03-01', endDate: '2028-02-29' })).toEqual({ startDate: '2028-03-01', endDate: '2029-02-28' });
+    expect(next({ startDate: '2026-04-01', endDate: '2027-03-31' })).toEqual({ startDate: '2027-04-01', endDate: '2028-03-31' });
+    // After a short first year ending 31 March, a regular year follows.
+    expect(next({ startDate: '2026-10-01', endDate: '2027-03-31' })).toEqual({ startDate: '2027-04-01', endDate: '2028-03-31' });
+  });
+});

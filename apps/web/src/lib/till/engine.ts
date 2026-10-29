@@ -6,6 +6,8 @@
 // TypeScript with its storage, API and clock passed in, so it is unit-tested.
 import { businessDate, type CurrentUser, Decimal, type OpenShiftInput, type PosTransactionInput } from "shared";
 import { ApiError, errorMessage } from "../api";
+import { formatDate } from "../format";
+import { rupees } from "./format";
 import type { TillDeviceInfo } from "../till-device";
 import { NumberCounter, prefixFor } from "./numbers";
 import { buildTransaction, checkPayments, type ComputedBill, type DraftBill, emptyDraft, hasNamedCustomer, isDraftEmpty, isNoBillReturn, priceBill, usesOnAccount, usesPointsOrCards } from "./pricing";
@@ -105,7 +107,7 @@ export class PriceChangedError extends Error {
     readonly serverTotal: string,
     readonly tillTotal: string,
   ) {
-    super(`The server total is ₹${serverTotal}, the till showed ₹${tillTotal}. Prices changed; check the bill again.`);
+    super(`The server total is ${rupees(serverTotal)}, the till showed ${rupees(tillTotal)}. Prices changed; check the bill again.`);
     this.name = "PriceChangedError";
   }
 }
@@ -660,7 +662,7 @@ export class TillEngine {
     const clientId = this.uuid();
     const shift: LocalShift = { clientId, id: null, businessDate: businessDate(at), openedAt: at.toISOString(), openedByName, openingCash: cashId ? [{ paymentMethodId: cashId, amount: amount.toFixed(2) }] : [] };
     const payload: OpenShiftInput = { clientId, tillId: this.device.tillId, openedAt: at.toISOString(), cash: shift.openingCash };
-    await this.queue.enqueue({ clientId, kind: "shift_open", label: `Shift opened ${shift.businessDate}`, payload });
+    await this.queue.enqueue({ clientId, kind: "shift_open", label: `Shift opened ${formatDate(shift.businessDate)}`, payload });
     await this.store.set(SHIFT_KEY, shift);
     this.set({ shift });
     await this.updateCounts();
@@ -681,12 +683,12 @@ export class TillEngine {
     if (a.lte(0)) throw new Error("Enter an amount above zero");
     if (!reason.trim()) throw new Error("Give a reason");
     const limit = this.cashOutApprovalAbove();
-    if (direction === "out" && limit !== null && a.gt(new Decimal(limit)) && !approvalToken) throw new Error(`Cash out above ₹${new Decimal(limit).toFixed(2)} needs a manager's PIN`);
+    if (direction === "out" && limit !== null && a.gt(new Decimal(limit)) && !approvalToken) throw new Error(`Cash out above ${rupees(new Decimal(limit))} needs a manager's PIN`);
     const clientId = this.uuid();
     await this.queue.enqueue({
       clientId,
       kind: "cash_movement",
-      label: `Cash ${direction} ₹${a.toFixed(2)}`,
+      label: `Cash ${direction} ${rupees(a)}`,
       shiftClientId: shift.clientId,
       payload: { clientId, direction, amount: a.toFixed(2), reason: reason.trim(), at: this.now().toISOString(), ...(approvalToken ? { approvalToken } : {}) },
     });
@@ -825,7 +827,7 @@ export class TillEngine {
       // Audit 5 (C2): offline past midnight the bill goes on the open shift of the day before
       // (dated by its sale time; the server flags it). Online, that shift is closed first.
       const onlineNow = this.state.online && !this.state.signedOut;
-      if (onlineNow || date < shift.businessDate) throw new Error(`This till's shift is from ${shift.businessDate}; close it and open a new one`);
+      if (onlineNow || date < shift.businessDate) throw new Error(`This till's shift is from ${formatDate(shift.businessDate)}; close it and open a new one`);
     }
     const bill = priceBill(draft, { snapshot, date, couponUses: await this.countCouponUses(draft.clientId) });
     if (bill.problems.length) throw new Error(bill.problems[0]);
@@ -833,7 +835,7 @@ export class TillEngine {
     const methods = snapshot.till.paymentMethods.filter((m) => m.active);
     const pay = checkPayments(bill.due, draft.payments, methods);
     if (pay.problem) throw new Error(pay.problem);
-    if (pay.short.gt(0)) throw new Error(bill.net.gte(0) ? `₹${pay.short.toFixed(2)} is still to be paid` : `₹${pay.short.toFixed(2)} is still to be refunded`);
+    if (pay.short.gt(0)) throw new Error(bill.net.gte(0) ? `${rupees(pay.short)} is still to be paid` : `${rupees(pay.short)} is still to be refunded`);
     const onAccount = usesOnAccount(draft.payments, methods);
     if (onAccount && !hasNamedCustomer(draft, snapshot.till.walkInCustomerId)) throw new Error(ON_ACCOUNT_NAMED);
     if (onAccount && (!this.state.online || this.state.signedOut)) throw new Error(ON_ACCOUNT_OFFLINE);

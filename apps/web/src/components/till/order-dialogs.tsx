@@ -10,6 +10,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Badge, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import type { TillEngine } from "@/lib/till/engine";
 import { rupees } from "@/lib/till/format";
 import type { DraftCustomer } from "@/lib/till/pricing";
@@ -167,7 +168,7 @@ export function OrdersDialog({
         <>
           <p>
             <strong>{order.customer?.name}</strong> {order.customer?.mobile ? <span className="muted">{order.customer.mobile}</span> : null} · {ORDER_STATUS[order.status]}
-            {order.expectedOn ? ` · expected ${order.expectedOn}` : ""}
+            {order.expectedOn ? ` · expected ${formatDate(order.expectedOn)}` : ""}
           </p>
           <table className="table">
             <tbody>
@@ -450,7 +451,7 @@ export function AlterationsDialog({
               return (
                 <li key={j.id} className="till-approval">
                   <span>
-                    <span className="mono">{j.number}</span> {j.name} · {j.lines.map((l) => `${l.garment}: ${l.work}`).join("; ")} · {JOB_STATUS[j.status]} · due {j.promisedOn}
+                    <span className="mono">{j.number}</span> {j.name} · {j.lines.map((l) => `${l.garment}: ${l.work}`).join("; ")} · {JOB_STATUS[j.status]} · due {formatDate(j.promisedOn)}
                     {j.overdue ? (
                       <>
                         {" "}

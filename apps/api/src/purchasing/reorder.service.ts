@@ -2,7 +2,7 @@
 // Reorder suggestions (plan 05 §1 item 7, answer 5): items below their reorder
 // level per store become suggestions; ticked ones become draft purchase
 // orders, one per supplier and store. Runs nightly on the Indian date (rule 15).
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { businessDate, type CreateOrdersFromSuggestionsInput, type CurrentUser, Decimal, INDIA_TIME_ZONE, reorderSuggestion } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
@@ -11,12 +11,13 @@ import { forEachShop } from '../prisma/each-shop.js';
 import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { defaultNeededBy, PurchaseOrdersService } from './purchase-orders.service.js';
+import { catchUpAtStart } from '../common/nightly-catch-up.js';
 
 /** Orders that still bring goods (drafts too, so a suggestion turned into a draft is not suggested again). */
 const ON_ORDER_STATUSES = ['draft', 'to_receive_and_bill', 'to_receive', 'on_hold'] as const;
 
 @Injectable()
-export class ReorderService {
+export class ReorderService implements OnApplicationBootstrap {
   private readonly log = new Logger(ReorderService.name);
 
   constructor(
@@ -55,6 +56,10 @@ export class ReorderService {
       reorderQuantity: r.reorderQuantity.toString(),
       suggestedQuantity: r.suggestedQuantity.toString(),
     }));
+  }
+
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly reorder run', () => this.nightly());
   }
 
   @Cron('30 2 * * *', { timeZone: INDIA_TIME_ZONE })

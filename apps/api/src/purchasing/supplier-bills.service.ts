@@ -2,7 +2,7 @@
 // Supplier bills and debit notes (blueprint 07 processes 5–6; plan 05 §4,
 // answers 1, 2 and 4). Amounts and account roles are stored; module 7 posts
 // them. Supplier balances and payments come with module 7 (decision 51).
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
   businessDate,
@@ -40,6 +40,7 @@ import { GoodsReceiptsService, type ReceiptHeader, type ResolvedReceiptLine } fr
 import { D, fromIso, iso, PurchaseCommon } from './purchase-common.service.js';
 import { PurchasePostings } from './purchase-postings.service.js';
 import { PurchaseOrdersService } from './purchase-orders.service.js';
+import { catchUpAtStart } from '../common/nightly-catch-up.js';
 
 export const billInclude = {
   supplier: { select: { id: true, code: true, name: true } },
@@ -88,7 +89,7 @@ interface PreparedBill {
 }
 
 @Injectable()
-export class SupplierBillsService {
+export class SupplierBillsService implements OnApplicationBootstrap {
   private readonly log = new Logger(SupplierBillsService.name);
 
   constructor(
@@ -847,6 +848,10 @@ export class SupplierBillsService {
       });
     }
     return ended.length;
+  }
+
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly bill-hold release', () => this.nightly());
   }
 
   @Cron('10 2 * * *', { timeZone: INDIA_TIME_ZONE })

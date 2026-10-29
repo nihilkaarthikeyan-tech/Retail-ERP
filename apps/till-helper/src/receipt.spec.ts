@@ -55,7 +55,7 @@ describe('receipt for scenario 6.1 (cash sale, 80 mm paper)', () => {
       ...BOLD_OFF,
       ...LEFT,
       ...t(row('Bill: S1-T1-000123', 'Till: T1', w)),
-      ...t('Date: 15-10-2026 10:30'),
+      ...t('Date: 15 Oct 2026 10:30'),
       ...t(rule),
       ...t(row('Item', 'Amount', w)),
       ...t(rule),
@@ -118,9 +118,9 @@ describe('receipt on 58 mm paper (32 characters)', () => {
     r.gstTable = [{ rate: '18', taxable: '1234567.89', cgst: '111111.11', sgst: '111111.11', igst: '0.00' }];
     const lines = asText(buildReceipt(r, 58));
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(32);
-    expect(lines).toContain(row('GST 18% taxable', '1234567.89', 32));
-    expect(lines).toContain(row('  CGST', '111111.11', 32));
-    expect(lines).toContain(row('  SGST', '111111.11', 32));
+    expect(lines).toContain(row('GST 18% taxable', '12,34,567.89', 32));
+    expect(lines).toContain(row('  CGST', '1,11,111.11', 32));
+    expect(lines).toContain(row('  SGST', '1,11,111.11', 32));
   });
 
   it('wraps a long item name and its serial numbers', () => {
@@ -137,7 +137,7 @@ describe('receipt on 58 mm paper (32 characters)', () => {
     const lines = asText(buildReceipt(r, 58));
     expect(lines).toContain('Extra Long Product Name For A');
     expect(lines).toContain('Mobile Phone Charger 65W');
-    expect(lines).toContain(row('  1 x 1499.00', '1499.00', 32));
+    expect(lines).toContain(row('  1 x 1,499.00', '1,499.00', 32));
     expect(lines).toContain('  S/N: SN-000111222333,');
     expect(lines).toContain('  SN-000111222334');
   });
@@ -195,7 +195,7 @@ describe('receipt variants', () => {
 
 describe('dates in Indian time', () => {
   it('puts 00:05 in India on 1 April on 1 April, not 31 March (UTC)', () => {
-    expect(indianDateTime('2026-03-31T18:35:00.000Z')).toBe('01-04-2026 00:05');
+    expect(indianDateTime('2026-03-31T18:35:00.000Z')).toBe('01 Apr 2026 00:05');
   });
 });
 
@@ -241,7 +241,7 @@ describe('plan 08: GST details on the receipt', () => {
     expect(bos.join(' ')).toMatch(/Composition taxable person, not eligible to collect tax/);
     const cn = asText(buildReceipt({ ...sampleSale(), kind: 'return', gst: { ...gst, title: 'Credit note', invoiceKind: 'consumer', buyer: null, original: { number: 'MAIN-T1-2026-27-000001', date: '2026-10-18' }, creditNoteLate: true } }, 80));
     expect(cn).toContain('CREDIT NOTE');
-    expect(cn.join(' ')).toMatch(/Against bill MAIN-T1-2026-27-000001\s+dated 2026-10-18/);
+    expect(cn.join(' ')).toMatch(/Against bill MAIN-T1-2026-27-000001\s+dated 18 Oct 2026/);
     expect(cn.join(' ')).toMatch(/after the GST time limit/);
   });
   it('refuses a GST block without a title', () => {
@@ -277,10 +277,10 @@ describe('plan 13: gift cards and loyalty points', () => {
     expect(text).toContain('GIFT CARD RECEIPT');
     expect(text).not.toContain('TAX INVOICE');
     expect(text.some((l) => /^GST\s/.test(l))).toBe(false);
-    expect(text).toContain(row('Gift card sold', 'Rs. 1000.00', 48));
+    expect(text).toContain(row('Gift card sold', 'Rs. 1,000.00', 48));
     expect(text).toContain('Card: 6123 4567 8901 2345');
-    expect(text).toContain(row('Balance on card', 'Rs. 1000.00', 48));
-    expect(text).toContain('Valid until 20-10-2027');
+    expect(text).toContain(row('Balance on card', 'Rs. 1,000.00', 48));
+    expect(text).toContain('Valid until 20 Oct 2027');
     expect(buf.includes(Buffer.from([...CENTRE, ...BARCODE_16, ...LEFT]))).toBe(true);
   });
 
@@ -342,7 +342,7 @@ describe('audit 4 (28 October 2026): what a GST receipt must carry', () => {
     expect(t).toMatch(/GST 5%: taxable Rs\. 228\.57, CGST Rs\. 5\.72, SGST Rs\. 5\.71/);
     expect(t).toMatch(/GST 18%: taxable Rs\. 111\.86, CGST Rs\. 10\.07, SGST Rs\. 10\.07/);
     const igst = text({ ...sampleSale(), gst, taxTable: false, gstTable: [{ rate: '5', taxable: '1000.00', cgst: '0.00', sgst: '0.00', igst: '50.00' }] });
-    expect(igst).toMatch(/GST 5%: taxable Rs\. 1000\.00, IGST Rs\. 50\.00/);
+    expect(igst).toMatch(/GST 5%: taxable Rs\. 1,000\.00, IGST Rs\. 50\.00/);
     expect(checkReceipt({ ...sampleSale(), taxTable: 'no' }).ok).toBe(false);
   });
   it('a bill of supply shows no tax, even with rows', () => {

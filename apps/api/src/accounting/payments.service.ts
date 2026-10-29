@@ -5,7 +5,7 @@
 // card commission, a short payment written off) settle more of the party's
 // bills on a receipt, or take part of a transfer.
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { type CurrentUser, type DocListQuery, Decimal, hasPermission, type PaymentInput, settleOldestFirst, type SettleInput } from 'shared';
+import { businessDate, type CurrentUser, type DocListQuery, Decimal, hasPermission, type PaymentInput, settleOldestFirst, type SettleInput } from 'shared';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
@@ -223,7 +223,7 @@ export class PaymentsService {
       const amount = D(input.amount);
       if (amount.gt(bill.owed)) throw new BadRequestException(`The bill owes only ₹${bill.owed.toFixed(2)}`);
       if (amount.gt(by.owed.neg())) throw new BadRequestException(`Only ₹${by.owed.neg().toFixed(2)} of it is unused`);
-      const s = await this.ledger.link(tx, { companyId: company.id, partyType: input.partyType, partyId: input.partyId, billType: input.billType, billId: input.billId, byType: input.byType, byId: input.byId, amount, date: iso(new Date())!, actorId: actor.userId });
+      const s = await this.ledger.link(tx, { companyId: company.id, partyType: input.partyType, partyId: input.partyId, billType: input.billType, billId: input.billId, byType: input.byType, byId: input.byId, amount, date: businessDate(), actorId: actor.userId });
       await this.audit.record(tx, actor, { action: 'create', entityType: 'settlement', entityId: s.id, changes: { bill: bill.number, by: by.number, amount: amount.toFixed(2) } });
     });
     return this.openItems(input.partyType, input.partyId);

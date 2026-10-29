@@ -21,6 +21,18 @@ function belowThousand(n: number): string {
   return [h ? `${ONES[h]} Hundred` : '', rest ? belowHundred(rest) : ''].filter(Boolean).join(' ');
 }
 
+/**
+ * Audit 6: an amount written the Indian way, 1,25,000.00 (rounded to paise; no ₹ sign).
+ * Worked on the decimal text, never through a float.
+ */
+export function indianAmount(amount: DecimalInput): string {
+  const fixed = roundMoney(new Decimal(amount)).toFixed(2);
+  const negative = fixed.startsWith('-') && /[1-9]/.test(fixed);
+  const [whole, paise] = fixed.replace(/^-/, '').split('.');
+  const grouped = whole.length <= 3 ? whole : `${whole.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',')},${whole.slice(-3)}`;
+  return `${negative ? '-' : ''}${grouped}.${paise}`;
+}
+
 /** A whole number in words with Indian grouping: thousand, lakh, crore. */
 export function indianNumberInWords(value: number | bigint): string {
   let n = BigInt(value);

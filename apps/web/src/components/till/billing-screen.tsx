@@ -805,7 +805,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <p className="muted" data-testid="delivery-note">
               Home delivery to {draft.delivery.name ? `${draft.delivery.name}, ` : ""}
               {draft.delivery.address}
-              {draft.delivery.deliverOn ? ` on ${draft.delivery.deliverOn}` : ""}
+              {draft.delivery.deliverOn ? ` on ${formatDate(draft.delivery.deliverOn)}` : ""}
               {bill.delivery ? (bill.delivery.charge.gt(0) ? `, charge ${rupees(bill.delivery.charge)}` : ", no delivery charge") : ""}.{" "}
               {deliveryOn ? (
                 <Button size="small" variant="link" onClick={() => setDialog("delivery")}>

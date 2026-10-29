@@ -1,5 +1,5 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import {
   businessDate,
@@ -19,6 +19,7 @@ import { CompanyService } from '../company/company.service.js';
 import type { FinancialYear } from '../generated/prisma/client.js';
 import { forEachShop } from '../prisma/each-shop.js';
 import { PrismaService, SystemPrisma } from '../prisma/prisma.service.js';
+import { catchUpAtStart } from '../common/nightly-catch-up.js';
 
 const SYSTEM_ACTOR: Actor = { userId: null, ipAddress: null };
 /** The nightly job creates the next year this many days before the current one ends. */
@@ -33,7 +34,7 @@ function fromIsoDate(date: string): Date {
 }
 
 @Injectable()
-export class FinancialYearsService {
+export class FinancialYearsService implements OnApplicationBootstrap {
   private readonly log = new Logger(FinancialYearsService.name);
 
   constructor(
@@ -127,6 +128,10 @@ export class FinancialYearsService {
   }
 
   /** Runs at 02:00 Indian time; "today" is the Indian calendar date. */
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly financial-year check', () => this.nightly());
+  }
+
   @Cron('0 2 * * *', { timeZone: INDIA_TIME_ZONE })
   async nightly(): Promise<void> {
     // Plan 14: shop by shop.
@@ -152,7 +157,10 @@ export class FinancialYearsService {
         where: { companyId: company.id },
         orderBy: { endDate: 'desc' },
       });
-      if (!latest || latest.isIrregular) continue; // after a short year, the next is created by hand
+      if (!latest) continue;
+      // Audit 6: after a short year that ends on 31 March, the next is a regular April to March year;
+      // any other irregular year is followed by hand ("Needs your attention" reminds the owner).
+      if (latest.isIrregular && !toIsoDate(latest.endDate).endsWith('-03-31')) continue;
       if (daysUntil(today, toIsoDate(latest.endDate)) > CREATE_NEXT_YEAR_DAYS_BEFORE_END) continue;
       const next = nextFinancialYear({ startDate: toIsoDate(latest.startDate), endDate: toIsoDate(latest.endDate) });
       const year = await this.prisma.$transaction((tx) =>

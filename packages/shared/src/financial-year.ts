@@ -56,12 +56,15 @@ export function rangesOverlap(a: DateRange, b: DateRange): boolean {
   return toUtc(a.startDate) <= toUtc(b.endDate) && toUtc(b.startDate) <= toUtc(a.endDate);
 }
 
-/** Next year = (old end + 1 day) to (old end + 1 year). */
+/**
+ * Next year = (old end + 1 day) to the day before the same date a year later. Audit 6: worked from
+ * the new start, so a year ending in February keeps its 28th or 29th right in leap years.
+ */
 export function nextFinancialYear(previous: DateRange): DateRange {
   const startDate = addDays(previous.endDate, 1);
-  const end = toUtc(previous.endDate);
+  const end = toUtc(startDate);
   end.setUTCFullYear(end.getUTCFullYear() + 1);
-  return { startDate, endDate: fromUtc(end) };
+  return { startDate, endDate: addDays(fromUtc(end), -1) };
 }
 
 export function daysUntil(from: string, to: string): number {

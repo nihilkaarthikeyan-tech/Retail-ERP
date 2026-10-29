@@ -29,6 +29,7 @@ import { Badge, Button, TextInput } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
+import { rupees } from "@/lib/purchasing";
 import { useModules } from "@/lib/modules";
 
 /** The "My modules" page (switching optional modules on and off, and the shop type). */
@@ -81,7 +82,7 @@ export function isAtDefault(s: SettingDef, value: unknown, def: unknown): boolea
 function shown(s: SettingDef, value: unknown, lookups: Record<string, LookupState>): string {
   if (s.kind === "boolean") return value ? "On" : "Off";
   if (s.kind === "choice") return s.choices?.find((c) => c.value === value)?.label ?? String(value ?? "—");
-  if (s.kind === "money") return isEmpty(value) ? "None" : `₹${String(value)}`;
+  if (s.kind === "money") return isEmpty(value) ? "None" : rupees(String(value));
   if (s.kind === "percent") return isEmpty(value) ? "None" : `${String(value)}%`;
   if (s.kind === "date") return isEmpty(value) ? s.defaultText : formatDate(String(value));
   if (s.kind === "reference") {
@@ -105,7 +106,7 @@ function shown(s: SettingDef, value: unknown, lookups: Record<string, LookupStat
         if (Array.isArray(value)) return value.length ? value.join(", ") : "None";
         if (value && typeof value === "object") {
           const entries = Object.entries(value as Record<string, unknown>);
-          return entries.length ? entries.map(([k, v]) => `${k}: ₹${String(v)}`).join(", ") : "None";
+          return entries.length ? entries.map(([k, v]) => `${k}: ${rupees(String(v))}`).join(", ") : "None";
         }
         return "None";
     }

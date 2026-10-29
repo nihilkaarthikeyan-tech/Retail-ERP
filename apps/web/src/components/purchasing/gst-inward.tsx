@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { INDIAN_STATES, MATCH_STATUS_LABELS, type MatchRow, type MatchStatus } from "shared";
+import { Decimal, INDIAN_STATES, MATCH_STATUS_LABELS, type MatchRow, type MatchStatus } from "shared";
 import { Alert, Badge, Button, DataTable, SelectInput, type Column } from "@/components/ui";
 import { api, downloadFile, errorMessage, query } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -188,7 +188,7 @@ export function InputCreditMatching() {
     side ? (
       <>
         {rupees(side.taxable)}
-        <div className="muted">GST {rupees((Number(side.cgst) + Number(side.sgst) + Number(side.igst)).toFixed(2))}</div>
+        <div className="muted">GST {rupees(new Decimal(side.cgst).add(side.sgst).add(side.igst).toFixed(2))}</div>
       </>
     ) : (
       <span className="muted">—</span>

@@ -37,6 +37,8 @@ services:
       API_PORT: "4000"
       WEB_ORIGIN: ${PUBLIC_URL}
       COOKIE_SECURE: "true"
+      # Audit 6: a nightly job missed while the API was down runs a minute after start-up.
+      NIGHTLY_CATCH_UP: "1"
       TRUST_PROXY: loopback, uniquelocal
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}

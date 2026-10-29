@@ -5,7 +5,7 @@
 // through the browser's Print / Save as PDF. Drafts are marked DRAFT and
 // cancelled documents CANCELLED; every print is recorded in the history.
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { amountInWords, BILL_OF_SUPPLY_DECLARATION, businessDate, type CurrentUser, Decimal, gstDocumentTitle, hasPermission, hsnForPrint, INDIAN_STATES, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput, taxSituationOf } from 'shared';
+import { amountInWords, BILL_OF_SUPPLY_DECLARATION, businessDate, indianAmount, type CurrentUser, Decimal, gstDocumentTitle, hasPermission, hsnForPrint, INDIAN_STATES, type PermissionKey, type PrintKind, type PrintSettingsInput, type StandardTermsInput, taxSituationOf } from 'shared';
 import { LedgerReportsService } from '../accounting/ledger-reports.service.js';
 import { AlterationsService } from '../orders/alterations.service.js';
 import { OrdersService } from '../orders/orders.service.js';
@@ -500,7 +500,7 @@ export class PrintService {
               rate: money(l.rate),
               discount: D(l.discountPercent).gt(0) ? `${D(l.discountPercent).toFixed(2)}%` : D(l.discountAmount).gt(0) ? money(l.discountAmount) : '',
               taxable: money(l.taxableAmount),
-              gst: `${D(l.gstRate).toString()}% · ${money(D(l.cgst).add(D(l.sgst)).add(D(l.igst)))}`,
+              gst: `${D(l.gstRate).toString()}% · ${indianAmount(D(l.cgst).add(D(l.sgst)).add(D(l.igst)))}`,
               total: money(l.lineTotal),
             }
           : {}),
@@ -807,7 +807,7 @@ export class PrintService {
       const tax = b.lines.reduce((s, l) => s.add(D(l.cgst)).add(D(l.sgst)).add(D(l.igst)), new Decimal(0));
       const rates = [...new Set(b.lines.map((l) => `${l.gstRate.toString()}%`))].join(', ');
       const pos = b.placeOfSupply ? `${INDIAN_STATES[b.placeOfSupply] ?? b.placeOfSupply} (${b.placeOfSupply})` : '';
-      return [[`Reverse charge on ${b.number}`, `GST ${rates}: ₹${money(tax)} payable by us${pos ? `; place of supply ${pos}` : ''}${b.supplier.gstin ? `; supplier GSTIN ${b.supplier.gstin}` : ''}`]];
+      return [[`Reverse charge on ${b.number}`, `GST ${rates}: ₹${indianAmount(tax)} payable by us${pos ? `; place of supply ${pos}` : ''}${b.supplier.gstin ? `; supplier GSTIN ${b.supplier.gstin}` : ''}`]];
     });
     return {
       ...this.base('payment', title, lh),
@@ -893,7 +893,7 @@ export class PrintService {
     return {
       ...this.base('statement', 'Statement of account', lh),
       number: null,
-      date: iso(new Date()),
+      date: businessDate(),
       mark: null,
       party,
       details: [['Opening balance', s.opening]],

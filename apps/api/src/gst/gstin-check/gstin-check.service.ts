@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Plan 15 (owner, 28 October 2026): checking a GSTIN with the GST network. A check never stops a
 // shop from saving: when the network cannot be asked, the record is checked again later.
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { gstinProblem, INDIA_TIME_ZONE, isStateCode } from 'shared';
 import type { Actor } from '../../common/request-context.js';
@@ -9,6 +9,7 @@ import type { Prisma } from '../../generated/prisma/client.js';
 import { forEachShop } from '../../prisma/each-shop.js';
 import { PrismaService, SystemPrisma } from '../../prisma/prisma.service.js';
 import { FakeGstinProvider, GstinApiProvider, GstinCheckUnavailable, type GstinFacts, type GstinNetworkStatus, type GstinProvider } from './gstin-provider.js';
+import { catchUpAtStart } from '../../common/nightly-catch-up.js';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -54,7 +55,7 @@ function chooseProvider(): GstinProvider {
 }
 
 @Injectable()
-export class GstinCheckService {
+export class GstinCheckService implements OnApplicationBootstrap {
   private readonly log = new Logger(GstinCheckService.name);
   readonly provider: GstinProvider = chooseProvider();
 
@@ -152,6 +153,10 @@ export class GstinCheckService {
       }
     }
     return done;
+  }
+
+  onApplicationBootstrap(): void {
+    catchUpAtStart(this.log, 'Nightly GSTIN re-check', () => this.nightly());
   }
 
   @Cron('15 3 * * *', { timeZone: INDIA_TIME_ZONE })
