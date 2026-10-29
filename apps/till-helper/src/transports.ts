@@ -14,21 +14,118 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PrinterConfig } from './config.js';
 
+/** What stops a printer from printing, as the till is told (owner decision C9, 29 October 2026). */
+export type PrinterProblem = 'no_paper' | 'cover_open' | 'offline';
+
+/** The printer's answer to the status questions; `known: false` when it did not answer (not a failure). */
+export type PrinterStatus = { known: false } | { known: true; problem: PrinterProblem | null; paperLow: boolean };
+
 /** Something that can deliver bytes to the printer. */
 export interface Transport {
   send(bytes: Buffer): Promise<void>;
+  /** Asks the printer about paper, cover and offline; only printers that can answer have it. */
+  status?(): Promise<PrinterStatus>;
 }
 
 export class PrinterError extends Error {}
 
 const TIMEOUT_MS = 10_000;
+/** How long to wait for each status reply; a printer that does not answer in time counts as "not known". */
+export const STATUS_REPLY_MS = 700;
+/** How long the status connection may take in all, so a print still finishes well inside the till's 15 s. */
+const STATUS_TIMEOUT_MS = 2_500;
+
+// ---------------------------------------------------------------------------
+// Printer status (ESC/POS real-time status, DLE EOT n). The printer answers
+// each question with one byte, even while it is offline or out of paper:
+//   n = 1 printer status: bit 3 = offline;
+//   n = 2 offline cause:  bit 2 = cover open, bit 5 = stopped at paper end, bit 6 = error;
+//   n = 4 paper sensor:   bits 2-3 = paper nearly out, bits 5-6 = paper out.
+// Every status byte has bits 1 and 4 set and bits 0 and 7 clear, which tells it
+// apart from anything else the printer might send.
+
+const DLE = 0x10;
+const EOT = 0x04;
+export const STATUS_QUESTIONS = [1, 2, 4] as const;
+
+export function statusQuestion(n: (typeof STATUS_QUESTIONS)[number]): Buffer {
+  return Buffer.from([DLE, EOT, n]);
+}
+
+export function isStatusByte(b: number): boolean {
+  return (b & 0x93) === 0x12;
+}
+
+/** Turns the three status bytes into what the till is told. */
+export function decodeStatus(printer: number, cause: number, paper: number): PrinterStatus {
+  const paperOut = (paper & 0x60) !== 0 || (cause & 0x20) !== 0;
+  const coverOpen = (cause & 0x04) !== 0;
+  const offline = (printer & 0x08) !== 0 || (cause & 0x40) !== 0;
+  const problem: PrinterProblem | null = paperOut ? 'no_paper' : coverOpen ? 'cover_open' : offline ? 'offline' : null;
+  return { known: true, problem, paperLow: !paperOut && (paper & 0x0c) !== 0 };
+}
+
+/** The little of a socket the status questions need (a fake one in tests). */
+export interface StatusSocket {
+  write(data: Buffer): unknown;
+  on(event: 'data', listener: (data: Buffer) => void): unknown;
+  removeListener(event: 'data', listener: (data: Buffer) => void): unknown;
+}
+
+function askOne(socket: StatusSocket, n: (typeof STATUS_QUESTIONS)[number], replyMs: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = (b: number | null) => {
+      clearTimeout(timer);
+      socket.removeListener('data', onData);
+      resolve(b);
+    };
+    const onData = (data: Buffer) => {
+      const b = data.find(isStatusByte);
+      if (b !== undefined) done(b);
+    };
+    timer = setTimeout(() => done(null), replyMs);
+    socket.on('data', onData);
+    socket.write(statusQuestion(n));
+  });
+}
+
+/** Asks the three status questions one after the other; no answer to any of them means "not known". */
+export async function askPrinterStatus(socket: StatusSocket, replyMs = STATUS_REPLY_MS): Promise<PrinterStatus> {
+  const answers: number[] = [];
+  for (const n of STATUS_QUESTIONS) {
+    const b = await askOne(socket, n, replyMs);
+    if (b === null) return { known: false };
+    answers.push(b);
+  }
+  return decodeStatus(answers[0]!, answers[1]!, answers[2]!);
+}
 
 /** Raw TCP ("port 9100" / JetDirect) to a network printer. */
-export function networkTransport(host: string, port = 9100, timeoutMs = TIMEOUT_MS): Transport {
+export function networkTransport(host: string, port = 9100, timeoutMs = TIMEOUT_MS, connectTo: typeof connect = connect): Transport {
   return {
+    // Its own short connection before the receipt: a printer that cannot be reached is an error,
+    // one that does not answer the questions is "not known" and the receipt is still sent.
+    status: () =>
+      new Promise<PrinterStatus>((resolve, reject) => {
+        const socket = connectTo({ host, port });
+        let done = false;
+        const finish = (result: PrinterStatus | Error) => {
+          if (done) return;
+          done = true;
+          socket.destroy();
+          if (result instanceof Error) reject(new PrinterError(`Network printer ${host}:${port}: ${result.message}`));
+          else resolve(result);
+        };
+        socket.setTimeout(Math.min(timeoutMs, STATUS_TIMEOUT_MS), () => finish({ known: false }));
+        socket.once('error', finish);
+        socket.once('connect', () => {
+          askPrinterStatus(socket).then(finish, () => finish({ known: false }));
+        });
+      }),
     send: (bytes) =>
       new Promise<void>((resolve, reject) => {
-        const socket = connect({ host, port });
+        const socket = connectTo({ host, port });
         let done = false;
         const finish = (err?: Error) => {
           if (done) return;
@@ -120,6 +217,20 @@ export function transportFor(printer: PrinterConfig): Transport | null {
       return serialTransport(printer.port, printer.baudRate);
     default:
       return null;
+  }
+}
+
+/** Owner decision C9: whether the helper can ask this printer about paper and cover, said plainly for /status. */
+export function printerStatusCheck(printer: PrinterConfig): { readable: boolean; note: string | null } {
+  switch (printer.kind) {
+    case 'network':
+      return { readable: true, note: 'Paper, cover and offline are checked before each receipt.' };
+    case 'windows':
+      return { readable: false, note: 'A USB printer shared in Windows cannot report paper or cover; check the paper by eye.' };
+    case 'serial':
+      return { readable: false, note: 'The paper and cover of a serial printer are not read; check the paper by eye.' };
+    default:
+      return { readable: false, note: null };
   }
 }
 

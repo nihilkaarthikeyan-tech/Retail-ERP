@@ -14,7 +14,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 /** Every table of transactions, in groups for the step log; all are emptied together. */
 const TRANSACTION_TABLES: { step: string; tables: string[] }[] = [
   { step: 'Accounts: ledger, journals, payments, opening bills, closings', tables: ['LedgerLine', 'LedgerEntry', 'Settlement', 'JournalLine', 'Journal', 'PaymentAllocation', 'PaymentDeduction', 'Payment', 'OpeningBill', 'YearEndClosing'] },
-  { step: 'Till: bills, payments, shifts and closings', tables: ['PosPayment', 'PosBillLine', 'PosBill', 'ShiftClosingLine', 'ShiftClosing', 'CashMovement', 'ShiftCash', 'Shift', 'PosSyncProblem', 'PosApproval', 'PosCashierToken'] },
+  { step: 'Till: bills, payments, shifts and closings', tables: ['PosPayment', 'PosBillLine', 'PosBill', 'ShiftClosingLine', 'ShiftClosing', 'CashMovement', 'ShiftCash', 'Shift', 'PosSyncProblem', 'PosDrawerOpening', 'PosApproval', 'PosCashierToken'] },
   { step: 'Stock: movements, totals, documents, batches and serial numbers', tables: ['StockLedgerEntry', 'StockPosition', 'BatchPosition', 'SerialNumber', 'StockDocumentLine', 'StockDocument', 'Batch'] },
   { step: 'Purchasing: orders, receipts, bills, charges and suggestions', tables: ['LandedChargeShare', 'LandedChargeItem', 'LandedCharge', 'ReorderSuggestion', 'SupplierBillLine', 'SupplierBill', 'GoodsReceiptLine', 'GoodsReceipt', 'PurchaseOrderLine', 'PurchaseOrder'] },
   { step: 'Document number counters, imports and summary emails', tables: ['NumberSeriesCounter', 'ImportRow', 'ImportJob', 'SummaryEmailRun'] },

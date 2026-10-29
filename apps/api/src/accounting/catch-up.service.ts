@@ -4,7 +4,6 @@
 // shifts. It runs at start-up and does nothing once everything is posted, so it
 // is safe to run any number of times.
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
-import { businessDate } from 'shared';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { PosPostings } from '../pos/pos-postings.service.js';
 import { forEachShop } from '../prisma/each-shop.js';
@@ -79,7 +78,7 @@ export class CatchUpService implements OnApplicationBootstrap {
         async (tx) => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`catch-up:${s.id}`}))`;
           if ((await tx.shift.findUniqueOrThrow({ where: { id: s.id }, select: { ledgerEntryId: true } })).ledgerEntryId) return false;
-          const entryId = await this.pos.postShift(tx, s.id, businessDate(s.closedAt ?? new Date()), null);
+          const entryId = await this.pos.postShift(tx, s.id, null);
           await tx.shift.update({ where: { id: s.id }, data: { ledgerEntryId: entryId } });
           return entryId !== null;
         },

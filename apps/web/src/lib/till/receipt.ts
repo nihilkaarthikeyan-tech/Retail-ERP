@@ -261,8 +261,9 @@ export async function pairHelper(code: string): Promise<void> {
   } catch {
     throw new Error("The Till Helper is not running on this computer");
   }
-  const body = (await res.json().catch(() => ({}))) as { token?: string; message?: string };
-  if (!res.ok || !body.token) throw new Error(body.message ?? "Pairing failed");
+  // The helper refuses with { ok: false, error, code }, e.g. "Wrong pairing code".
+  const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string; message?: string };
+  if (!res.ok || !body.token) throw new Error(body.error ?? body.message ?? "Pairing failed");
   localStorage.setItem(HELPER_TOKEN_KEY, body.token);
 }
 
@@ -276,15 +277,56 @@ export async function helperStatus(): Promise<{ ok: boolean; printer: unknown; d
   }
 }
 
-/** Prints through the helper; false when it is not there or refused, so the caller uses the browser. */
-export async function printWithHelper(receipts: PrintableReceipt[]): Promise<boolean> {
-  for (const receipt of receipts) {
-    const res = await helperFetch("/print", "POST", { receipt }, 8000);
-    if (!res?.ok) return false;
-  }
-  return true;
+/** Longer than the helper's own 10 s per job (plus its paper check), so the helper's answer is not cut off. */
+export const HELPER_PRINT_WAIT_MS = 15_000;
+
+/** Why the helper did not print, in a few words for the cashier (owner decision C9: paper, cover, offline). */
+const PRINT_PROBLEM: Record<string, string> = {
+  no_paper: "out of paper",
+  cover_open: "cover open",
+  offline: "offline",
+  printer_error: "not answering",
+  printer_not_configured: "not set up in the Till Helper",
+};
+
+export interface HelperPrintResult {
+  printed: PrintableReceipt[];
+  /** To print through the browser instead. */
+  failed: PrintableReceipt[];
+  /** Why the helper did not print them; null when the till is not paired (the browser prints as usual). */
+  reason: string | null;
+  /** The helper's code (no_paper, cover_open, offline, printer_error, …), or null. */
+  code: string | null;
 }
 
+/**
+ * Prints through the helper, one receipt after the other. Says which printed and
+ * why the rest did not; after the first failure the rest are not tried (the
+ * printer would fail them too) and go to the browser.
+ */
+export async function printWithHelper(receipts: PrintableReceipt[]): Promise<HelperPrintResult> {
+  if (!helperToken()) return { printed: [], failed: [...receipts], reason: null, code: null };
+  const printed: PrintableReceipt[] = [];
+  for (const [i, receipt] of receipts.entries()) {
+    const res = await helperFetch("/print", "POST", { receipt }, HELPER_PRINT_WAIT_MS);
+    if (res?.ok) {
+      printed.push(receipt);
+      continue;
+    }
+    let code: string | null = null;
+    let error: string | null = null;
+    if (res) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+      code = body.code ?? null;
+      error = body.error ?? null;
+    }
+    const reason = !res ? "the Till Helper is not answering" : ((code && PRINT_PROBLEM[code]) ?? error ?? "the Till Helper refused it");
+    return { printed, failed: receipts.slice(i), reason, code };
+  }
+  return { printed, failed: [], reason: null, code: null };
+}
+
+/** Opens the cash drawer through the helper; false when it did not (not paired, no drawer, printer not answering). */
 export async function openDrawer(): Promise<boolean> {
   const res = await helperFetch("/drawer/open", "POST", {});
   return !!res?.ok;

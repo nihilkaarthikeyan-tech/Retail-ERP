@@ -94,6 +94,9 @@ export interface ApprovalRequest {
   /** Shown to the manager and stored in the history, e.g. "ITM-000001 12%". */
   details: string;
   reason: string;
+  /** Audit 5: the figure approved, which the server checks the bill or closing against. */
+  amount?: string;
+  percent?: string;
 }
 
 /** A manager types their PIN; the till gets a single-use approval for one action. */
@@ -114,7 +117,7 @@ export function ManagerApprovalDialog({ api, online, request, onApproved, onClos
           chooseLabel="Manager"
           submitLabel="Approve"
           onSubmit={async (managerId, pin) => {
-            const res = await api.approve({ managerId, pin, action: request!.action, details: request!.details.slice(0, 200) });
+            const res = await api.approve({ managerId, pin, action: request!.action, details: request!.details.slice(0, 200), ...(request!.amount ? { amount: request!.amount } : {}), ...(request!.percent ? { percent: request!.percent } : {}) });
             onApproved(res.token, res.manager);
           }}
         />

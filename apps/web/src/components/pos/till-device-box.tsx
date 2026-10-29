@@ -125,7 +125,7 @@ export function HelperPairingBox() {
 
   async function pair() {
     setError(null);
-    if (!/^d{6}$/.test(code.trim())) {
+    if (!/^\d{6}$/.test(code.trim())) {
       setError("Type the 6-digit code the Till Helper shows.");
       return;
     }

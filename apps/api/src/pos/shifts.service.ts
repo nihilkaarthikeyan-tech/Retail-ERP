@@ -10,6 +10,7 @@ import {
   type CurrentUser,
   Decimal,
   denominationTotal,
+  type DrawerOpeningInput,
   expectedAtClose,
   hasPermission,
   type OpenShiftInput,
@@ -19,7 +20,7 @@ import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { D, fromIso, iso, PosCommon } from './pos-common.service.js';
+import { D, fromIso, iso, type PendingApproval, PosCommon } from './pos-common.service.js';
 import { PosPostings } from './pos-postings.service.js';
 
 const shiftInclude = {
@@ -29,6 +30,11 @@ const shiftInclude = {
   closing: { include: { lines: true } },
 } satisfies Prisma.ShiftInclude;
 type ShiftRow = Prisma.ShiftGetPayload<{ include: typeof shiftInclude }>;
+
+/** Audit 5: a shift opening that reached the server within 10 minutes of being made was opened online. */
+const OPENED_ONLINE_WITHIN_MS = 10 * 60_000;
+/** Audit 5: the office cancels only an empty shift opened online at least this long ago (an abandoned shift). */
+const CANCEL_AFTER_HOURS = 12;
 
 @Injectable()
 export class ShiftsService {
@@ -72,6 +78,8 @@ export class ShiftsService {
     } catch (err) {
       const raced = await this.prisma.shift.findUnique({ where: { tillId_clientId: { tillId: till.id, clientId: input.clientId } }, include: shiftInclude });
       if (raced) return this.toDto(raced);
+      // Audit 5: the database keeps one open shift per till, so two openings at the same moment cannot both win.
+      if ((err as { code?: string }).code === 'P2002' && (await this.prisma.shift.count({ where: { tillId: till.id, status: 'open' } }))) throw new BadRequestException(`Till ${till.code} already has an open shift; close it first`);
       throw err;
     }
   }
@@ -91,7 +99,44 @@ export class ShiftsService {
     });
     // Audit 1 (28 October 2026): the reports right reads shifts of a switched-off till, but only in the person's own stores.
     assertStoreAccess(user, shift.till.storeId);
-    return { ...this.toDto(shift), expected: await this.expected(this.prisma, shift) };
+    // Audit 5 (C4): the drawer openings of the shift, with who opened it and why.
+    const openings = await this.prisma.posDrawerOpening.findMany({ where: { shiftId: shift.id }, orderBy: { at: 'asc' } });
+    return { ...this.toDto(shift), expected: await this.expected(this.prisma, shift), drawerOpenings: openings.map(openingDto) };
+  }
+
+  /**
+   * Audit 5 (C4, owner 29 October 2026): every opening of the cash drawer is recorded, sent again
+   * safely with the same clientId. A No-sale opening needs a manager's approval (open_drawer).
+   */
+  async drawerOpening(input: DrawerOpeningInput, actor: Actor, user: CurrentUser, deviceToken: string | undefined) {
+    this.common.requireRight(user, 'pos.sell');
+    const till = await this.common.usableTill(this.prisma, input.tillId, user);
+    await this.common.assertDevice(this.prisma, till.id, deviceToken);
+    const again = await this.prisma.posDrawerOpening.findUnique({ where: { tillId_clientId: { tillId: till.id, clientId: input.clientId } } });
+    if (again) return openingDto(again);
+    const at = new Date(input.at);
+    const pending: PendingApproval[] = [];
+    const approvedById =
+      input.kind === 'no_sale' ? await this.common.useApproval(this.prisma, input.approvalToken, till.id, ['open_drawer'], 'no sale', pending, { at: at.getTime() < Date.now() ? at : undefined }) : null;
+    // The till's shift at the time; an opening is still recorded when it arrives after the shift closed.
+    const shift = await this.prisma.shift.findFirst({ where: { tillId: till.id, openedAt: { lte: at }, OR: [{ closedAt: null }, { closedAt: { gte: at } }], status: { not: 'cancelled' } }, orderBy: { openedAt: 'desc' } });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await this.common.markApprovalsUsed(tx, pending);
+        const row = await tx.posDrawerOpening.create({ data: { tillId: till.id, shiftId: shift?.id ?? null, clientId: input.clientId, kind: input.kind, at, billClientId: input.billClientId ?? null, approvedById, byId: user.id } });
+        await this.audit.record(tx, actor, {
+          action: 'create',
+          entityType: 'cash_drawer',
+          entityId: row.id,
+          changes: { till: till.code, shiftId: row.shiftId, kind: row.kind, billClientId: row.billClientId, byId: user.id, at: at.toISOString(), ...(approvedById ? { approvedBy: approvedById } : {}) },
+        });
+        return openingDto(row);
+      });
+    } catch (err) {
+      const raced = await this.prisma.posDrawerOpening.findUnique({ where: { tillId_clientId: { tillId: till.id, clientId: input.clientId } } });
+      if (raced) return openingDto(raced);
+      throw err;
+    }
   }
 
   private async getRow(db: Db, id: string): Promise<ShiftRow> {
@@ -108,10 +153,25 @@ export class ShiftsService {
     const again = await this.prisma.cashMovement.findUnique({ where: { shiftId_clientId: { shiftId, clientId: input.clientId } } });
     if (again) return movementDto(again);
     if (shift.status !== 'open') throw new BadRequestException('The shift is closed');
+    // Audit 5 (C5, owner 29 October 2026): a cash out above the set amount needs a manager's PIN for that amount.
+    const settings = await this.common.settings(this.prisma, shift.companyId);
+    const amount = D(input.amount);
+    const limit = D(settings.cashOutApprovalAbove);
+    const pending: PendingApproval[] = [];
+    let approvedById: string | null = null;
+    if (input.direction === 'out' && amount.gt(limit)) {
+      if (!input.approvalToken) throw new ForbiddenException(`A cash out above ₹${limit.toFixed(2)} needs a manager's PIN`);
+      approvedById = await this.common.useApproval(this.prisma, input.approvalToken, shift.tillId, ['cash_out'], `cash out ₹${amount.toFixed(2)}`, pending, {
+        // A queued cash out is checked at the time it was taken, not when it reached the server.
+        at: input.at ? new Date(input.at) : undefined,
+        figure: (a) => (a.amount && a.amount.eq(amount) ? null : `The manager approved a cash out of ${a.amount ? `₹${a.amount.toFixed(2)}` : 'another amount'}; this one is ₹${amount.toFixed(2)}. Ask the manager again`),
+      });
+    }
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const m = await tx.cashMovement.create({ data: { shiftId, clientId: input.clientId, direction: input.direction, amount: D(input.amount).toFixed(2), reason: input.reason, byId: user.id, at: input.at ? new Date(input.at) : new Date() } });
-        await this.audit.record(tx, actor, { action: 'create', entityType: 'cash_movement', entityId: m.id, changes: { direction: m.direction, amount: m.amount.toString(), reason: m.reason, till: shift.till.code } });
+        await this.common.markApprovalsUsed(tx, pending);
+        const m = await tx.cashMovement.create({ data: { shiftId, clientId: input.clientId, direction: input.direction, amount: amount.toFixed(2), reason: input.reason, byId: user.id, at: input.at ? new Date(input.at) : new Date() } });
+        await this.audit.record(tx, actor, { action: 'create', entityType: 'cash_movement', entityId: m.id, changes: { direction: m.direction, amount: m.amount.toString(), reason: m.reason, till: shift.till.code, ...(approvedById ? { approvedBy: approvedById } : {}) } });
         return movementDto(m);
       });
     } catch (err) {
@@ -188,7 +248,10 @@ export class ShiftsService {
     let approvedById: string | null = null;
     if (biggest.gt(D(settings.cashDifferenceApprovalAmount))) {
       if (!input.remarks?.trim()) throw new BadRequestException(`The difference is more than ₹${D(settings.cashDifferenceApprovalAmount).toFixed(2)}; write a remark`);
-      approvedById = await this.common.useApproval(this.prisma, input.approvalToken, till.id, ['cash_difference'], `shift ${shift.id}`);
+      // Audit 5: the approval is for the difference the manager saw; a different count needs a new approval.
+      approvedById = await this.common.useApproval(this.prisma, input.approvalToken, till.id, ['cash_difference'], `shift ${shift.id}`, undefined, {
+        figure: (a) => (a.amount && a.amount.eq(biggest) ? null : `The manager approved a difference of ${a.amount ? `₹${a.amount.toFixed(2)}` : 'another amount'}; the count now differs by ₹${biggest.toFixed(2)}. Ask the manager again`),
+      });
     }
     const closed = await this.prisma.$transaction(async (tx) => {
       // Audit 2 (28 October 2026): the shift row is locked first, so a bill being saved at this moment
@@ -197,7 +260,7 @@ export class ShiftsService {
       const fresh = await tx.shift.findUniqueOrThrow({ where: { id: shiftId } });
       if (fresh.status !== 'open') throw new BadRequestException(`The shift is already ${fresh.status}`);
       const lines = countAgainst(await this.expected(tx, shift));
-      if (biggestOf(lines).gt(D(settings.cashDifferenceApprovalAmount)) && !approvedById) {
+      if ((biggestOf(lines).gt(D(settings.cashDifferenceApprovalAmount)) && !approvedById) || (approvedById && !biggestOf(lines).eq(biggest))) {
         throw new BadRequestException('A bill was saved while closing; count again');
       }
       const summary = await this.summary(tx, shift.id);
@@ -224,7 +287,7 @@ export class ShiftsService {
       });
       await tx.shift.update({ where: { id: shiftId }, data: { status: 'closed', closedAt: new Date(), closedById: user.id } });
       // Decision 39: the shift's bills reach the ledger now, in the same transaction as the closing.
-      const ledgerEntryId = await this.postings.postShift(tx, shiftId, businessDate(), actor.userId);
+      const ledgerEntryId = await this.postings.postShift(tx, shiftId, actor.userId);
       await tx.shift.update({ where: { id: shiftId }, data: { ledgerEntryId } });
       await this.audit.record(tx, actor, {
         action: 'update',
@@ -271,13 +334,25 @@ export class ShiftsService {
     };
   }
 
-  /** Only a shift with no bills can be cancelled (blueprint 09). */
+  /**
+   * Only a shift with no bills can be cancelled (blueprint 09). Audit 5 (29 October 2026): the office
+   * cannot see bills still waiting on a till that is offline (C1 lets it bill for 48 hours), so it may
+   * cancel only an empty shift that was opened online (not from the till's queue) more than 12 hours ago,
+   * an abandoned shift; any other shift is closed on the till, where the queue is sent first.
+   */
   async cancel(shiftId: string, reason: string, actor: Actor, user: CurrentUser) {
     this.common.requireRight(user, 'pos.shift.manage');
     const shift = await this.getRow(this.prisma, shiftId);
     await this.common.usableTill(this.prisma, shift.tillId, user);
     if (shift.status !== 'open') throw new BadRequestException(`The shift is already ${shift.status}`);
     if (await this.prisma.posBill.count({ where: { shiftId } })) throw new ForbiddenException('A shift with bills cannot be cancelled; close it instead');
+    // Opened from the till's queue: the opening reached the server well after the till opened the shift.
+    const openedOffline = shift.createdAt.getTime() - shift.openedAt.getTime() > OPENED_ONLINE_WITHIN_MS;
+    if (openedOffline || Date.now() - shift.openedAt.getTime() < CANCEL_AFTER_HOURS * 3600_000) {
+      throw new ForbiddenException(
+        `Till ${shift.till.code} may still have bills of this shift that have not reached the server${openedOffline ? ' (the shift was opened while the till was offline)' : ''}. Close the shift on the till instead. The office can cancel only an empty shift opened online more than ${CANCEL_AFTER_HOURS} hours ago.`,
+      );
+    }
     const after = await this.prisma.$transaction(async (tx) => {
       await tx.shift.update({ where: { id: shiftId }, data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: reason } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'shift', entityId: shiftId, changes: { status: { old: 'open', new: 'cancelled' } }, reason });
@@ -323,4 +398,8 @@ export class ShiftsService {
 
 function movementDto(m: { id: string; clientId: string; direction: string; amount: { toFixed(n: number): string }; reason: string; byId: string; at: Date }) {
   return { id: m.id, clientId: m.clientId, direction: m.direction, amount: m.amount.toFixed(2), reason: m.reason, byId: m.byId, at: m.at };
+}
+
+function openingDto(o: { id: string; clientId: string; tillId: string; shiftId: string | null; kind: string; at: Date; billClientId: string | null; approvedById: string | null; byId: string }) {
+  return { id: o.id, clientId: o.clientId, tillId: o.tillId, shiftId: o.shiftId, kind: o.kind, at: o.at, billClientId: o.billClientId, approvedById: o.approvedById, byId: o.byId };
 }

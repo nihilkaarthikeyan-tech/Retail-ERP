@@ -44,6 +44,17 @@ export interface SnapTill {
   loyalty?: SnapLoyalty | null;
   /** Plan 13: gift cards are sold and spent online only (null while Gift cards is off). */
   giftCards?: { validityMonths: number } | null;
+  /** Audit 5 (C6): receipts printed after each bill (0 = none printed by itself, 1–3 copies). */
+  receiptCopies?: number;
+  /** Audit 5 (C7): the cash counted at this till's last close, suggested as the next opening float. */
+  lastCloseCash?: { paymentMethodId: string; amount: string }[];
+  /** Audit 5 (C5): cash out above this amount needs a manager's PIN. */
+  cashOutApprovalAbove?: string;
+  /** Audit 5 (C8): the cashier counts the drawer before seeing the expected cash. */
+  blindCount?: boolean;
+  /** Audit 5 (C1): hours offline before the till warns, and before it stops billing. */
+  offlineWarnHours?: number;
+  offlineStopHours?: number;
 }
 
 /** Plan 13: what the till needs of the loyalty scheme. */

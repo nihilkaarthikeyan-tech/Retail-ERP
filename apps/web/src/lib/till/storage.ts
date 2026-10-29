@@ -10,6 +10,8 @@ export interface KeyValueStore {
   delete(key: string): Promise<void>;
   /** All entries whose key starts with the prefix, in key order. */
   entries<T>(prefix: string): Promise<[string, T][]>;
+  /** True when nothing outlives the page (no IndexedDB): bills cannot be kept offline (audit 5). */
+  readonly volatile?: boolean;
 }
 
 /** Keeps values in memory (tests, and browsers without IndexedDB). Values are copied like IndexedDB does. */
@@ -35,6 +37,11 @@ export class MemoryStore implements KeyValueStore {
       .sort()
       .map((k) => [k, structuredClone(this.data.get(k)) as T]);
   }
+}
+
+/** The fallback when the browser has no IndexedDB: kept only while the page is open. */
+export class VolatileStore extends MemoryStore {
+  readonly volatile = true;
 }
 
 const OBJECT_STORE = "kv";
@@ -107,8 +114,22 @@ export class IndexedDbStore implements KeyValueStore {
   }
 }
 
-/** The store for a till on this computer: IndexedDB when the browser has it. */
+/**
+ * The store for a till on this computer: IndexedDB when the browser has it.
+ * Without it, a memory store that the engine knows cannot keep offline bills.
+ */
 export function tillStore(tillId: string): KeyValueStore {
-  if (typeof indexedDB === "undefined") return new MemoryStore();
+  if (typeof indexedDB === "undefined") return new VolatileStore();
   return new IndexedDbStore(`retail-erp-till-${tillId}`);
+}
+
+/** Asks the browser once not to clear the till's database when the disk runs low (audit 5). */
+export async function askPersistentStorage(): Promise<boolean> {
+  try {
+    if (typeof navigator === "undefined" || !navigator.storage?.persist) return false;
+    if (await navigator.storage.persisted?.()) return true;
+    return await navigator.storage.persist();
+  } catch {
+    return false;
+  }
 }

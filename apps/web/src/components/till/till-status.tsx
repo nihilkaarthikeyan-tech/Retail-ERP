@@ -1,10 +1,12 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // The sync status always on screen (pos-offline plan §7): green "Online",
 // amber "Offline, N waiting", red "N could not be sent" (with the list).
+// Audit 5: a server fault is "Server not answering", not "Offline"; a till the
+// server no longer knows is red; long offline spells warn, then stop billing.
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Dialog } from "@/components/ui";
+import { Alert, Button, Dialog } from "@/components/ui";
 import type { TillEngine } from "@/lib/till/engine";
 import { dateTimeIn, timeIn } from "@/lib/till/format";
 import type { QueueItem } from "@/lib/till/queue";
@@ -16,13 +18,21 @@ export interface StatusInfo {
   problems: number;
   fetchedAt: string | null;
   stale: boolean;
+  /** Audit 5: the server answers with faults of its own. */
+  serverTrouble?: boolean;
+  /** Audit 5: the server says this computer is no longer registered as this till. */
+  tillNotRegistered?: boolean;
+  /** Audit 5 (C1): a warning after long offline, or the reason billing stopped. */
+  away?: { level: "warn" | "stop"; message: string } | null;
 }
 
 export function statusText(s: StatusInfo): { tone: "ok" | "warn" | "danger"; text: string } {
+  if (s.tillNotRegistered) return { tone: "danger", text: "Not registered as this till" };
   // A problem can be a shift opening or a cash entry as well as a bill; the details list says which.
   if (s.problems > 0) return { tone: "danger", text: `${s.problems} not sent: see why` };
-  if (s.signedOut) return { tone: "warn", text: s.waiting ? `Signed out, ${s.waiting} waiting` : "Signed out" };
-  if (!s.online) return { tone: "warn", text: `Offline, ${s.waiting} waiting` };
+  if (s.signedOut) return { tone: "warn", text: s.waiting ? `Sign in again, ${s.waiting} waiting` : "Sign in again" };
+  if (!s.online && s.serverTrouble) return { tone: "warn", text: `Server not answering, ${s.waiting} waiting` };
+  if (!s.online) return { tone: s.away?.level === "stop" ? "danger" : "warn", text: `Offline, ${s.waiting} waiting` };
   if (s.waiting > 0) return { tone: "warn", text: `Sending, ${s.waiting} waiting` };
   return { tone: "ok", text: "Online" };
 }
@@ -38,6 +48,11 @@ export function TillStatus({ engine, info }: { engine: TillEngine; info: StatusI
       </button>
       {!info.online && info.fetchedAt ? <span className="till-status-note">Last price update {timeIn(info.fetchedAt)}</span> : null}
       {info.stale ? <span className="till-status-note till-status-stale">Prices may be out of date (over 24 hours old)</span> : null}
+      {info.away ? (
+        <span className="till-status-note till-status-stale" role="status">
+          {info.away.message}
+        </span>
+      ) : null}
       <QueueDialog engine={engine} open={open} onClose={() => setOpen(false)} info={info} />
     </div>
   );
@@ -72,7 +87,19 @@ function QueueDialog({ engine, open, onClose, info }: { engine: TillEngine; open
 
   return (
     <Dialog open={open} title="Waiting to be sent" onClose={onClose}>
-      <p>{info.online ? "The till is connected." : "The till is offline; bills are kept here and sent automatically when the connection returns."}</p>
+      {info.tillNotRegistered ? (
+        <Alert kind="error">
+          This computer is no longer registered as this till. Nothing more is sent from it, and nothing is thrown away: ask a manager to register it again under Billing counter → Tills.
+        </Alert>
+      ) : null}
+      <p>
+        {info.online
+          ? "The till is connected."
+          : info.serverTrouble
+            ? "The server is reached but is not answering properly; bills are kept here and sent automatically when it recovers."
+            : "The till is offline; bills are kept here and sent automatically when the connection returns."}
+      </p>
+      {info.away ? <p>{info.away.message}</p> : null}
       {info.signedOut ? (
         <p>
           The session has ended. <a href="/login">Sign in again</a> to send the waiting bills; billing goes on meanwhile.

@@ -15,11 +15,11 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Decimal, hasPermission, type ModuleKey } from "shared";
 import { Alert, Button } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
-import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, type TillEngine } from "@/lib/till/engine";
+import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, SEND_UNCERTAIN, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
 import { tillModuleOn, withoutSwitchedOff } from "@/lib/till/modules";
-import { type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
-import { openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
+import { billDiscountStamp, type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, listPriceFor, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
+import { helperToken, openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
 import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillCustomerPoints, TillOrder } from "@/lib/till/types";
 import { formatDate } from "@/lib/format";
 import { BillOptionsDialog, CustomerDialog, HelperDialog, ParkedDialog } from "./bill-dialogs";
@@ -57,6 +57,22 @@ interface Done {
   offline: boolean;
   /** Plan 11 part 2: the server's warnings, e.g. stock set aside for a customer order was sold. */
   warnings: string[];
+  /** The receipts were printed once already, so "Print" prints a duplicate. */
+  printed: boolean;
+}
+
+/** Keys closer together than this are a barcode scanner, not a person. */
+const SCAN_GAP_MS = 50;
+/** Fast keys in a row on the "Bill finished" panel that count as a scan. */
+const SCAN_BURST = 3;
+export const DRAWER_FAILED = "The cash drawer did not open: check the Till Helper";
+const NO_SALE: ApprovalRequest = { action: "open_drawer", details: "No sale: open the cash drawer", reason: "Opening the cash drawer without a sale needs a manager's PIN" };
+
+/** Owner decision C6: how many receipts print by themselves (0 = none); the till's auto print switch must also be on. */
+export function autoCopies(till: { autoPrint: boolean; receiptCopies?: number | null }): number {
+  if (!till.autoPrint) return 0;
+  const n = till.receiptCopies ?? 1;
+  return Number.isInteger(n) ? Math.min(3, Math.max(0, n)) : 1;
 }
 
 interface BillingScreenProps {
@@ -87,6 +103,10 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const [done, setDone] = useState<Done | null>(null);
   const [print, setPrint] = useState<{ receipts: PrintableReceipt[]; job: number }>({ receipts: [], job: 0 });
   const [notice, setNotice] = useState<string | null>(null);
+  /** What the receipt printer or cash drawer could not do for the last bill (shown on "Bill finished" too). */
+  const [deviceNotes, setDeviceNotes] = useState<string[]>([]);
+  /** Owner decision C4: the manager's PIN for "No sale / open drawer". */
+  const [noSale, setNoSale] = useState(false);
   const [clearArmed, setClearArmed] = useState(false);
   /** Plan 11 C1: choosing the salesperson for one line (its key), or for the bill (null). */
   const [staffLine, setStaffLine] = useState<string | null>(null);
@@ -98,6 +118,10 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const searchRef = useRef<HTMLInputElement>(null);
   /** The text the latest catalogue was fetched for, so a scan is retried once only. */
   const refetched = useRef<string | null>(null);
+  /** The latest onScan, for a retry after the catalogue is fetched (it sees the new copy). */
+  const scanRef = useRef<(e?: FormEvent, code?: string) => void>(() => {});
+  /** Fast keys on the "Bill finished" panel (a scan); `capturing` once the panel is closed and they go to the box. */
+  const burst = useRef<{ text: string; last: number; capturing: boolean }>({ text: "", last: 0, capturing: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -112,7 +136,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   }, [engine]);
 
   const today = engine.today();
-  const bill = useMemo(() => (draft ? priceBill(draft, { snapshot, date: today }) : null), [draft, snapshot, today]);
+  const bill = useMemo(() => (draft ? priceBill(draft, { snapshot, date: today, couponUses: state.couponUses }) : null), [draft, snapshot, today, state.couponUses]);
   const results = useMemo(() => (search.trim().length >= 2 && !scan(snapshot, search) ? searchItems(snapshot, search, 12) : []), [snapshot, search]);
   const stock = useMemo(() => new Map(snapshot.stock.map((s) => [s.itemId, s.quantity])), [snapshot.stock]);
   const methods = till.paymentMethods.filter((m) => m.active);
@@ -149,11 +173,17 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   const staff = salespersonOn ? (snapshot.salesStaff ?? []) : [];
   const staffOf = (id: string | null | undefined) => (id ? staff.find((s) => s.id === id) : undefined);
   const canReturn = hasPermission(state.user, "pos.return");
-  const shiftOld = !!state.shift && state.shift.businessDate !== today;
+  // Audit 5 (C2): offline, yesterday's open shift may go on into today; online it must be closed first.
+  const shiftOld = engine.shiftNeedsClosing();
   const empty = !draft || isDraftEmpty(draft);
-  const blocked = !bill || empty || bill.problems.length > 0 || bill.approvals.length > 0 || shiftOld;
+  const blocked = !bill || empty || bill.problems.length > 0 || bill.approvals.length > 0 || shiftOld || !!draft?.sendUncertain || state.tillNotRegistered;
 
   function change(next: DraftBill) {
+    // Audit 5: a bill whose answer never came is checked with the server before it can be changed.
+    if (draft?.sendUncertain) {
+      setNotice(SEND_UNCERTAIN);
+      return;
+    }
     setDraft(next);
     void engine.saveDraft(next);
   }
@@ -169,10 +199,11 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (selected === key) setSelected(null);
   }
 
-  function addItem(item: SnapItem, unitId: string, barcode: string | null) {
+  function addItem(item: SnapItem, unitId: string, barcode: string | null, clearBox = true) {
     if (!draft) return;
     setScanError(null);
     setNotice(null);
+    setDeviceNotes([]);
     const same = item.trackSerials ? undefined : draft.lines.find((l) => l.itemId === item.id && l.unitId === unitId && !l.priceOverride && (l.discountPercent || "0") === "0" && !l.salesStaffId && !l.orderLineId);
     if (same) {
       const next = new Decimal(same.quantity || "0").add(1).toString();
@@ -185,31 +216,35 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     }
     setPadMode("qty");
     setPadValue("");
-    setSearch("");
+    if (clearBox) setSearch("");
     searchRef.current?.focus();
   }
 
-  function onScan(e?: FormEvent) {
+  /** `code` is a scan to try again (or one read on the "Bill finished" panel) instead of the box. */
+  function onScan(e?: FormEvent, code?: string) {
     e?.preventDefault();
-    const text = search.trim();
+    const text = (code ?? search).trim();
     if (!text) return;
+    // A retried code leaves alone whatever the cashier has typed in the box since.
+    const fromBox = code === undefined || search.trim() === text;
     const hit = scan(snapshot, text);
     if (hit) {
       refetched.current = null;
-      return addItem(hit.item, hit.unitId, hit.barcode);
+      return addItem(hit.item, hit.unitId, hit.barcode, fromBox);
     }
     const found = searchItems(snapshot, text, 12);
     if (found.length === 1) {
       refetched.current = null;
-      return addItem(found[0], found[0].baseUnitId, null);
+      return addItem(found[0], found[0].baseUnitId, null, fromBox);
     }
     if (found.length) return;
     // An item or barcode added in the back office reaches the till's copy within 15 minutes; while
     // online, fetch it now and scan once more (with the bill as it is then) rather than say
-    // "Nothing found" to a waiting customer (launch check, 27 October 2026).
+    // "Nothing found" to a waiting customer (launch check, 27 October 2026). Audit 5: the code
+    // scanned is the one tried again, not whatever is in the box by then.
     if (online && refetched.current !== text) {
       refetched.current = text;
-      void engine.refresh().then(() => setTimeout(() => searchRef.current?.form?.requestSubmit(), 0));
+      void engine.refresh().then(() => setTimeout(() => scanRef.current(undefined, text), 0));
       return;
     }
     refetched.current = null;
@@ -276,10 +311,38 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     setDialog(null);
   }
 
-  async function printReceipts(receipts: PrintableReceipt[]) {
-    if (!receipts.length) return;
-    const ok = await printWithHelper(receipts);
-    if (!ok) setPrint((p) => ({ receipts, job: p.job + 1 }));
+  /** Prints `copies` of each receipt through the Till Helper; what it could not print goes to the browser. */
+  async function printReceipts(receipts: PrintableReceipt[], copies = 1) {
+    if (!receipts.length || copies < 1) return;
+    const all = Array.from({ length: copies }, () => receipts).flat();
+    const res = await printWithHelper(all);
+    if (!res.failed.length) return;
+    // The browser's print window prints each receipt once (it has its own number of copies).
+    const failed = receipts.filter((r) => res.failed.includes(r));
+    setPrint((p) => ({ receipts: failed, job: p.job + 1 }));
+    const reason = res.reason;
+    if (reason) setDeviceNotes((n) => [...n, `Receipt printer: ${reason} — printed in the browser instead.`]);
+  }
+
+  /** Owner decision C4: the drawer opened for a cash payment is recorded with its bill. */
+  async function openDrawerFor(billClientId: string) {
+    const opened = await openDrawer();
+    if (opened) void engine.recordDrawerOpening("sale", { billClientId }).catch(() => undefined);
+    // A till without a Till Helper opens its drawer by key; only a paired one is expected to open it.
+    else if (helperToken()) setDeviceNotes((n) => [...n, DRAWER_FAILED]);
+  }
+
+  /** Owner decision C4: "No sale / open drawer" after a manager's PIN, recorded with the approval. */
+  async function noSaleApproved(approvalToken: string) {
+    setNoSale(false);
+    setNotice(null);
+    if (!(await openDrawer())) return setNotice(DRAWER_FAILED);
+    try {
+      await engine.recordDrawerOpening("no_sale", { approvalToken });
+      setNotice("Cash drawer opened (no sale). It is recorded.");
+    } catch (err) {
+      setNotice(`Cash drawer opened, but it could not be recorded: ${errorMessage(err)}`);
+    }
   }
 
   function printable(receipts: Receipt[]): PrintableReceipt[] {
@@ -293,13 +356,20 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     setPayError(null);
     try {
       // After a manager's approval the saved bill is sent again: same identity and numbers.
-      const input = withoutSwitchedOff(again ?? (creditApprovalToken ? (await engine.loadDraft()).draft : draft), snapshot);
+      const chosen = withoutSwitchedOff(again ?? (creditApprovalToken ? (await engine.loadDraft()).draft : draft), snapshot);
+      // The bill's identity is given here when it has none yet (the engine keeps one it is given), so the
+      // drawer opening can be recorded against it.
+      const clientId = chosen.clientId ?? engine.uuid();
+      const input = { ...chosen, clientId };
       const res = await engine.finish(input, { creditApprovalToken });
+      if (res.notice) setNotice(res.notice);
       const receipts = printable(res.receipts);
+      const copies = autoCopies(till);
       setDialog(null);
-      setDone({ receipts, change: res.change, offline: res.offline, warnings: res.warnings ?? [] });
-      if (res.paidCash) void openDrawer();
-      if (till.autoPrint) void printReceipts(receipts);
+      setDeviceNotes([]);
+      setDone({ receipts, change: res.change, offline: res.offline, warnings: res.warnings ?? [], printed: copies > 0 });
+      if (res.paidCash) void openDrawerFor(clientId);
+      if (copies > 0) void printReceipts(receipts, copies);
       const next = await engine.loadDraft();
       setDraft(next.draft);
       setSelected(null);
@@ -376,8 +446,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     }
   }
 
-  async function reprint() {
-    const last = await engine.lastReceipts();
+  /** Prints receipts again as duplicates: online the server's copy (marked and logged there), else the till's own. */
+  async function reprint(receipts?: Receipt[]) {
+    const last = receipts ?? (await engine.lastReceipts());
     if (!last.length) return setNotice("No bill to print again yet.");
     const copies: Receipt[] = [];
     for (const r of last) {
@@ -396,7 +467,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
 
   /** What the manager sees for a return without a bill: the items and the refund. */
   function noBillRequest(d: DraftBill): ApprovalRequest {
-    const back = priceBill(d, { snapshot, date: today }).ret?.total.abs() ?? new Decimal(0);
+    const back = priceBill(d, { snapshot, date: today, couponUses: state.couponUses }).ret?.total.abs() ?? new Decimal(0);
     const items = (d.ret?.lines ?? []).map((l) => `${l.code} x ${l.quantity}`).join(", ");
     return { action: "return_without_bill", details: `No bill, ${rupees(back)} back: ${items}`, reason: `Return without a bill: ${rupees(back)} back to the customer. A manager must approve it.` };
   }
@@ -407,7 +478,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     const line = need.lineKey ? draft.lines.find((l) => l.key === need.lineKey) : null;
     const item = line ? snapshot.items.find((i) => i.id === line.itemId) : null;
     const details = need.kind === "bill_discount" ? `bill discount ${draft.billDiscount?.amount ?? `${draft.billDiscount?.percent}%`}` : `${item?.code ?? ""} ${need.kind === "price_change" ? `price ${line?.priceOverride}` : `${line?.discountPercent}%`}`;
-    setApproval({ need, request: { action: need.kind, details, reason: need.reason } });
+    // Audit 5: the bill discount approved (percent when typed as one, else rupees) is checked by the server.
+    const figure = need.kind !== "bill_discount" ? {} : draft.billDiscount?.percent ? { percent: draft.billDiscount.percent } : draft.billDiscount?.amount ? { amount: new Decimal(draft.billDiscount.amount).toFixed(2) } : {};
+    setApproval({ need, request: { action: need.kind, details, reason: need.reason, ...figure } });
   }
 
   function approved(token: string, manager: { name: string }) {
@@ -416,7 +489,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (need.kind === "return_without_bill") {
       if (draft.ret) change({ ...draft, ret: { ...draft.ret, approvalToken: token, approvedBy: manager.name } });
     } else if (need.lineKey) patchLine(need.lineKey, { approvalToken: token, approvedBy: manager.name });
-    else if (draft.billDiscount) change({ ...draft, billDiscount: { ...draft.billDiscount, approvalToken: token, approvedBy: manager.name } });
+    else if (draft.billDiscount) change({ ...draft, billDiscount: { ...draft.billDiscount, approvalToken: token, approvedBy: manager.name, approvedFor: billDiscountStamp(draft) } });
     setApproval(null);
   }
 
@@ -431,17 +504,68 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     await finish(undefined, again);
   }
 
+  // Audit 5: a bill whose answer never came is checked with the server before it can be changed.
+  useEffect(() => {
+    if (!draft?.sendUncertain || !online) return;
+    let cancelled = false;
+    void engine.resolveUncertain(draft).then(async (r) => {
+      if (cancelled || r === null) return;
+      if (r !== "not_saved") {
+        setDone({ receipts: printable(r.receipts), change: r.change, offline: false, warnings: r.warnings ?? [], printed: false });
+        if (r.notice) setNotice(r.notice);
+      }
+      setDraft((await engine.loadDraft()).draft);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // printable reads the till and cashier, which do not change while a bill waits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, draft, online]);
+
   // ---- Keyboard (listed on screen) ----
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
   useEffect(() => {
+    scanRef.current = onScan;
     keyRef.current = (e: KeyboardEvent) => {
+      // Audit 5: a barcode scanned while "Bill finished" shows closes it and goes into the scan box.
+      const now = Date.now();
+      const printable = e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey;
+      const b = burst.current;
+      if (b.capturing) {
+        if (now - b.last < SCAN_GAP_MS && (printable || e.key === "Enter")) {
+          e.preventDefault();
+          if (e.key === "Enter") {
+            burst.current = { text: "", last: 0, capturing: false };
+            onScan(undefined, b.text);
+          } else {
+            burst.current = { ...b, text: b.text + e.key, last: now };
+            setSearch(b.text + e.key);
+          }
+          return;
+        }
+        // The scan ended without an Enter: the code stays in the box and typing carries on as normal.
+        burst.current = { text: "", last: 0, capturing: false };
+      }
+      if (done && printable) {
+        const text = now - b.last < SCAN_GAP_MS ? b.text + e.key : e.key;
+        burst.current = { text, last: now, capturing: text.length >= SCAN_BURST };
+        if (text.length >= SCAN_BURST) {
+          e.preventDefault();
+          setDone(null);
+          setScanError(null);
+          setSearch(text);
+          searchRef.current?.focus();
+        }
+        return;
+      }
       if (done && e.key === "Enter") {
         e.preventDefault();
         setDone(null);
         searchRef.current?.focus();
         return;
       }
-      if (dialog || approval || creditApproval || belowCost) return;
+      if (dialog || approval || creditApproval || belowCost || noSale) return;
       const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       switch (e.key) {
         case "F2":
@@ -529,8 +653,16 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               </Button>
             </div>
           ) : null}
+          {draft?.sendUncertain ? <Alert kind="info">{SEND_UNCERTAIN}</Alert> : null}
           {shiftOld ? <Alert kind="error">This shift is from {formatDate(state.shift?.businessDate)}. Close it and open a new one before billing.</Alert> : null}
           {notice ? <Alert kind="info">{notice}</Alert> : null}
+          {deviceNotes.length && !done ? (
+            <Alert kind="error">
+              {deviceNotes.map((n, i) => (
+                <div key={i}>{n}</div>
+              ))}
+            </Alert>
+          ) : null}
           {priceChanged ? (
             <div className="alert alert-error" role="alert">
               <strong>Prices changed.</strong> The server works this bill out at {rupees(priceChanged.serverTotal)}; the till showed {rupees(priceChanged.tillTotal)}.{" "}
@@ -573,7 +705,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           {results.length ? (
             <ul className="till-results" aria-label="Matching items">
               {results.map((i) => {
-                const price = snapshot.prices.find((p) => p.itemId === i.id && !p.customerId);
+                // Audit 5: the price the bill will use (the till's price list, the customer, today), not the first price row.
+                const price = listPriceFor(snapshot, i, i.baseUnitId, "1", draft.customer?.id ?? null, today);
                 return (
                   <li key={i.id}>
                     <button type="button" className="till-list-button" onClick={() => addItem(i, i.baseUnitId, null)}>
@@ -581,7 +714,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
                         {i.name} <span className="muted mono">{i.code}</span>
                       </span>
                       <span>
-                        {price ? rupees(price.price) : ""}
+                        {price ? rupees(price) : ""}
                         {stock.has(i.id) ? <span className="muted"> · stock {qty(stock.get(i.id)!)}</span> : null}
                       </span>
                     </button>
@@ -946,6 +1079,9 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <button type="button" className="till-action" onClick={() => setDialog("cash")}>
               Cash in / out
             </button>
+            <button type="button" className="till-action" disabled={!online} title={online ? undefined : "Needs the connection (manager PIN)"} onClick={() => setNoSale(true)}>
+              No sale / open drawer
+            </button>
             <button type="button" className="till-action" onClick={() => void reprint()}>
               Print last again
             </button>
@@ -989,6 +1125,13 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
             <h2 id="till-done-title">Bill finished</h2>
             {done.offline ? <Alert kind="info">Saved on the till; it will be sent when the connection returns.</Alert> : null}
             {done.warnings.length ? <Alert kind="info">{done.warnings.join(" ")}</Alert> : null}
+            {deviceNotes.length ? (
+              <div className="alert alert-error" role="alert" data-testid="device-notes">
+                {deviceNotes.map((n, i) => (
+                  <div key={i}>{n}</div>
+                ))}
+              </div>
+            ) : null}
             <div className="till-change till-change-huge">
               <span>Change</span>
               <strong data-testid="done-change">{rupees(done.change)}</strong>
@@ -999,7 +1142,16 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               ))}
             </div>
             <div className="actions">
-              <Button onClick={() => void printReceipts(done.receipts)}>Print</Button>
+              <Button
+                onClick={() => {
+                  // Audit 5: once printed (by itself or here), printing again is a duplicate, marked and logged.
+                  if (done.printed) return void reprint(done.receipts);
+                  setDone({ ...done, printed: true });
+                  void printReceipts(done.receipts);
+                }}
+              >
+                {done.printed ? "Print a duplicate" : "Print"}
+              </Button>
               <Button
                 variant="primary"
                 className="till-big"
@@ -1148,10 +1300,12 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           onSell={async (body) => {
             const res = await engine.sellGiftCard({ clientId: giftSaleId, ...body });
             const receipts = printable([res.receipt]);
+            const copies = autoCopies(till);
             setDialog(null);
-            setDone({ receipts, change: "0.00", offline: false, warnings: [] });
-            if (methods.find((m) => m.id === body.paymentMethodId)?.kind === "cash") void openDrawer();
-            if (till.autoPrint) void printReceipts(receipts);
+            setDeviceNotes([]);
+            setDone({ receipts, change: "0.00", offline: false, warnings: [], printed: copies > 0 });
+            if (methods.find((m) => m.id === body.paymentMethodId)?.kind === "cash") void openDrawerFor(giftSaleId);
+            if (copies > 0) void printReceipts(receipts, copies);
           }}
           onClose={() => setDialog(null)}
         />
@@ -1167,6 +1321,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       />
       {dialog === "helper" ? <HelperDialog open onClose={() => setDialog(null)} /> : null}
       <ManagerApprovalDialog api={engine.api} online={state.online} request={approval?.request ?? null} onApproved={approved} onClose={() => setApproval(null)} />
+      <ManagerApprovalDialog api={engine.api} online={state.online} request={noSale ? NO_SALE : null} onApproved={(token) => void noSaleApproved(token)} onClose={() => setNoSale(false)} />
       <ManagerApprovalDialog
         api={engine.api}
         online={state.online}

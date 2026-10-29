@@ -1,11 +1,13 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "@/lib/auth-context";
+import { StaticModulesProvider } from "@/lib/modules";
 import { getTillDevice } from "@/lib/till-device";
 import { CancelBillDialog } from "./cancel-bill-dialog";
 import { GstRatesView } from "./gst-rates";
 import { OfferForm } from "./offer-form";
+import { PosReports } from "./pos-reports";
 import type { GstRateDto, PosBillDto, TillDto } from "./pos-shared";
 import { TillDeviceBox } from "./till-device-box";
 
@@ -309,5 +311,42 @@ describe("OfferForm", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save offer" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(writes(fetchMock)[0].body).toMatchObject({ kind: "mix_match", setQuantity: 2, setPrice: null, cheapestFree: true });
+  });
+});
+
+describe("Sync problems (audit 5, C3)", () => {
+  const problem = { id: "s1111111-1111-4111-8111-111111111111", till: "T1", clientId: "c2222222-2222-4222-8222-222222222222", kind: "bill", error: "Open a shift on this till first", createdAt: "2026-10-29T05:00:00.000Z", resolvedAt: null, resolution: null };
+
+  function setup() {
+    const fetchMock = mockApi({
+      "/auth/me": () => ({ status: 200, body: user(["pos.reports", "pos.shift.manage"]) }),
+      "/pos/tills": () => ({ status: 200, body: [] }),
+      "/pos/reports/sync-problems": () => ({ status: 200, body: [problem] }),
+      [`POST /pos/sync-problems/${problem.id}/post`]: () => ({ status: 200, body: { sale: { number: "MAT1/2627/000042" }, return: null } }),
+    });
+    render(
+      <AuthProvider>
+        <StaticModulesProvider modules={{}}>
+          <PosReports />
+        </StaticModulesProvider>
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Sync problems" }));
+    return fetchMock;
+  }
+
+  it("posts a refused bill into the till's open shift", async () => {
+    const fetchMock = setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Post into shift" }));
+    const dialog = await screen.findByRole("dialog", { name: "Post into shift" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Post into shift" }));
+    expect(await screen.findByText(/MAT1\/2627\/000042 was posted into the till's open shift/)).toBeTruthy();
+    expect(writes(fetchMock).map((w) => w.path)).toContain(`/pos/sync-problems/${problem.id}/post`);
+  });
+
+  it("says plainly that marking a bill resolved does not record the sale", async () => {
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Mark resolved" }));
+    expect(await screen.findByText(/the sale will NOT reach stock and the accounts/)).toBeTruthy();
   });
 });

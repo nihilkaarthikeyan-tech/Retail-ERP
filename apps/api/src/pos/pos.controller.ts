@@ -17,6 +17,8 @@ import {
   deliveryQuerySchema,
   type DeliveryUpdateInput,
   deliveryUpdateSchema,
+  type DrawerOpeningInput,
+  drawerOpeningSchema,
   type GstRateInput,
   gstRateSchema,
   type OfferInput,
@@ -191,6 +193,14 @@ export class PosController {
   @Post('bills') @RequirePermission('pos.sell') postBill(@Body(zod(posTransactionSchema)) input: PosTransactionInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Headers(TILL_TOKEN_HEADER) token?: string) {
     return this.bills.post(input, actor, user, token);
   }
+  // Audit 5: after an uncertain failure the till asks whether its bill reached the server (its own till only).
+  @Get('bills/by-client/:clientId') @RequirePermission('pos.sell') billByClient(@Param('clientId', id()) clientId: string, @ReqUser() user: AuthUser, @Headers(TILL_TOKEN_HEADER) token?: string) {
+    return this.bills.byClient(clientId, user, token);
+  }
+  // Audit 5 (C4): every opening of the cash drawer is recorded.
+  @Post('drawer-openings') @RequirePermission('pos.sell') drawerOpening(@Body(zod(drawerOpeningSchema)) input: DrawerOpeningInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Headers(TILL_TOKEN_HEADER) token?: string) {
+    return this.shifts.drawerOpening(input, actor, user, token);
+  }
   @Get('bills') @RequireAnyPermission('pos.sell', 'pos.reports') listBills(@Query(zod(posBillQuerySchema)) q: PosBillQuery, @ReqUser() user: AuthUser) {
     return this.bills.list(q, user);
   }
@@ -242,5 +252,9 @@ export class PosController {
   }
   @Post('sync-problems/:id/resolve') @HttpCode(200) @RequirePermission('pos.shift.manage') resolve(@Param('id', id()) problemId: string, @Body(zod(reasonSchema)) input: ReasonInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.reports.resolveSyncProblem(problemId, input.reason, actor, user);
+  }
+  // Audit 5 (C3): the office posts a bill the server refused into the till's open shift.
+  @Post('sync-problems/:id/post') @HttpCode(200) @RequirePermission('pos.shift.manage') postIntoShift(@Param('id', id()) problemId: string, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+    return this.bills.postSyncProblem(problemId, actor, user);
   }
 }

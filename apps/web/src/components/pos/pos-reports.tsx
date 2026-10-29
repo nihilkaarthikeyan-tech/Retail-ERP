@@ -84,6 +84,23 @@ export interface OfflineRow {
   offline: boolean;
   total: string;
   flags: string[];
+  /** Audit 5 (pos-offline §5): per flagged line, what was charged and what the server's list, offer, rate and limits said. */
+  lines?: { lineNo: number; item: { code: string; name: string }; charged: { listPrice: string; price: string; offerDiscount: string; gstRate: string; lineTotal: string }; server: Record<string, string> }[];
+}
+
+/** What was charged against what the server said, in plain words, one line of the bill at a time. */
+export function chargedAgainstList(r: OfflineRow): string[] {
+  return (r.lines ?? []).map((l) => {
+    const s = l.server;
+    const parts: string[] = [];
+    if (s.price !== undefined && s.price !== l.charged.price) parts.push(`charged ${rupees(l.charged.price)}, the price list said ${rupees(s.price)}`);
+    if (s.offerDiscount !== undefined && s.offerDiscount !== l.charged.offerDiscount) parts.push(`offer ${rupees(l.charged.offerDiscount)} off, the offers said ${rupees(s.offerDiscount)}`);
+    if (s.gstRate !== undefined && Number(s.gstRate) !== Number(l.charged.gstRate)) parts.push(`GST ${l.charged.gstRate}%, the rate list said ${s.gstRate}%`);
+    if (s.discountPercent !== undefined) parts.push(`discount ${s.discountPercent}% (cashier's limit ${s.cashierLimitPercent}%, item's maximum ${s.maxDiscountPercent}%)`);
+    if (s.costFloor !== undefined) parts.push(`sold for ${rupees(l.charged.lineTotal)}, cost ${rupees(s.costFloor)} a piece`);
+    if (s.mrp !== undefined && Number(l.charged.price) > Number(s.mrp)) parts.push(`price ${rupees(l.charged.price)} above the MRP ${rupees(s.mrp)}`);
+    return `${l.item.code} ${l.item.name}: ${parts.join("; ") || "see the bill"}`;
+  });
 }
 
 export interface SyncProblemRow {
@@ -122,6 +139,8 @@ export interface ShiftDetailDto {
     lines: { paymentMethodId: string; opening: string; expected: string; counted: string; difference: string }[];
   } | null;
   expected: { paymentMethodId: string; name: string; kind: string; opening: string; received: string; change: string; cashIn: string; cashOut: string; expected: string }[];
+  /** Audit 5 (C4): every opening of the cash drawer during the shift. */
+  drawerOpenings?: { id: string; kind: "sale" | "no_sale"; at: string; billClientId: string | null; approvedById: string | null; byId: string }[];
 }
 
 /** One report column: what the table shows and what goes into the CSV file. */
@@ -200,6 +219,23 @@ const OFFLINE: ReportColumn<OfflineRow>[] = [
   { key: "till", header: "Till", value: (r) => r.till },
   { key: "offline", header: "Offline", value: (r) => (r.offline ? "Yes" : "No") },
   { key: "flags", header: "To check", value: (r) => flagsText(r.flags), render: (r) => <FlagBadges flags={r.flags} /> },
+  {
+    key: "difference",
+    header: "Charged and what the list said",
+    value: (r) => chargedAgainstList(r).join(" | "),
+    render: (r) => {
+      const text = chargedAgainstList(r);
+      return text.length ? (
+        <ul className="changes">
+          {text.map((t) => (
+            <li key={t}>{t}</li>
+          ))}
+        </ul>
+      ) : (
+        <span className="muted">—</span>
+      );
+    },
+  },
   { key: "total", header: "Total", align: "right", value: (r) => r.total, render: (r) => rupees(r.total) },
 ];
 
@@ -416,6 +452,18 @@ function ShiftDetails({ id }: { id: string }) {
           </ul>
         </>
       ) : null}
+      {s.drawerOpenings?.length ? (
+        <>
+          <h3>Cash drawer opened</h3>
+          <ul className="changes">
+            {s.drawerOpenings.map((d) => (
+              <li key={d.id}>
+                {indianTime(d.at)} {d.kind === "no_sale" ? "No sale, approved by a manager" : "With a sale"}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       {s.status === "closed" ? (
         <>
           <h3>In the accounts</h3>
@@ -432,9 +480,28 @@ function SyncProblems() {
   const [all, setAll] = useState(false);
   const rows = useLoad(() => api.get<SyncProblemRow[]>(`/pos/reports/sync-problems${query({ all: all ? "true" : undefined })}`), [all]);
   const [resolving, setResolving] = useState<SyncProblemRow | null>(null);
+  const [posting, setPosting] = useState<SyncProblemRow | null>(null);
+  const [posted, setPosted] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /** Audit 5 (C3): the bill goes into the till's open shift, with its stock and accounts, flagged "posted by the office". */
+  async function post() {
+    if (!posting) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api.post<{ sale: { number: string } | null; return: { number: string } | null }>(`/pos/sync-problems/${posting.id}/post`, {});
+      setPosted(`Bill ${[r.return?.number, r.sale?.number].filter(Boolean).join(" and ")} was posted into the till's open shift.`);
+      setPosting(null);
+      await rows.reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function resolve() {
     if (!resolving) return;
@@ -469,16 +536,32 @@ function SyncProblems() {
             value: () => "",
             render: (r: SyncProblemRow) =>
               r.resolvedAt ? null : (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    setReason("");
-                    setError(null);
-                    setResolving(r);
-                  }}
-                >
-                  Mark resolved
-                </Button>
+                <span className="row-actions">
+                  {r.kind === "bill" ? (
+                    <Button
+                      size="small"
+                      variant="primary"
+                      onClick={() => {
+                        setError(null);
+                        setPosted(null);
+                        setPosting(r);
+                      }}
+                    >
+                      Post into shift
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setReason("");
+                      setError(null);
+                      setPosted(null);
+                      setResolving(r);
+                    }}
+                  >
+                    Mark resolved
+                  </Button>
+                </span>
               ),
           },
         ] satisfies ReportColumn<SyncProblemRow>[])
@@ -487,11 +570,31 @@ function SyncProblems() {
 
   return (
     <>
-      <p className="muted">Bills or shift records a till sent that the server could not save. Fix the cause (for example add the missing price), then mark the problem resolved.</p>
+      <p className="muted">
+        Bills or shift records a till sent that the server could not save. The sale happened, so fix the cause if needed (for example add the missing price) and post the bill into the till&apos;s open shift: its stock and accounts are then
+        recorded and it is listed on &quot;Offline bills to check&quot;.
+      </p>
+      {posted ? <Alert kind="success">{posted}</Alert> : null}
       <CheckInput id="sync-all" label="Show resolved problems too" checked={all} onChange={(e) => setAll(e.target.checked)} />
       <ReportTable name="sync-problems" columns={columns} rows={rows.data} error={rows.error} loading={rows.loading} rowKey={(r) => r.id} empty="No sync problems." />
+      <Dialog open={posting !== null} title="Post into shift" onClose={() => setPosting(null)}>
+        {posting ? <p className="muted">{posting.error}</p> : null}
+        <p>The bill is saved as the till sent it, into the till&apos;s open shift, with its stock and accounts. It is marked &quot;posted by the office&quot; and listed on &quot;Offline bills to check&quot;.</p>
+        <Alert kind="error">{error}</Alert>
+        <div className="actions">
+          <Button variant="primary" busy={busy} onClick={() => void post()}>
+            Post into shift
+          </Button>
+          <Button onClick={() => setPosting(null)}>Cancel</Button>
+        </div>
+      </Dialog>
       <Dialog open={resolving !== null} title="Mark resolved" onClose={() => setResolving(null)}>
         {resolving ? <p className="muted">{resolving.error}</p> : null}
+        {resolving?.kind === "bill" ? (
+          <Alert kind="info">
+            <strong>Marking it resolved does not save the bill: the sale will NOT reach stock and the accounts.</strong> Use &quot;Post into shift&quot; to record it, or enter it again by hand.
+          </Alert>
+        ) : null}
         <Alert kind="error">{error}</Alert>
         <TextareaInput id="sync-reason" label="What was done" required rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
         <div className="actions">

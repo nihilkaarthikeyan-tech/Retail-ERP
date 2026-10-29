@@ -134,14 +134,21 @@ export class OffersService {
     return c;
   }
 
-  /** Coupon use is counted when the bill is saved and taken back when it is cancelled. */
-  async countCouponUse(db: Db, couponId: string, delta: 1 | -1): Promise<void> {
+  /**
+   * Coupon use is counted when the bill is saved and taken back when it is cancelled. Returns false
+   * when the coupon was already used up; that is refused unless `allowOver` (audit 5: an offline bill
+   * was sold with it already, so it is counted anyway and the caller flags the bill).
+   */
+  async countCouponUse(db: Db, couponId: string, delta: 1 | -1, allowOver = false): Promise<boolean> {
     if (delta === 1) {
       const n = await db.$executeRaw`UPDATE "Coupon" SET "usedCount" = "usedCount" + 1 WHERE "id" = ${couponId}::uuid AND ("maxUses" IS NULL OR "usedCount" < "maxUses")`;
-      if (n === 0) throw new BadRequestException('The coupon has been used up');
-    } else {
-      await db.$executeRaw`UPDATE "Coupon" SET "usedCount" = GREATEST("usedCount" - 1, 0) WHERE "id" = ${couponId}::uuid`;
+      if (n > 0) return true;
+      if (!allowOver) throw new BadRequestException('The coupon has been used up');
+      await db.$executeRaw`UPDATE "Coupon" SET "usedCount" = "usedCount" + 1 WHERE "id" = ${couponId}::uuid`;
+      return false;
     }
+    await db.$executeRaw`UPDATE "Coupon" SET "usedCount" = GREATEST("usedCount" - 1, 0) WHERE "id" = ${couponId}::uuid`;
+    return true;
   }
 
   async activeOffers(db: Db, ctx: OfferContext): Promise<Offer[]> {

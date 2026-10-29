@@ -6,7 +6,7 @@
 // cost of goods sold against stock. A separate drawer entry moves the starting
 // float and cash in/out between cash in hand and the till, takes the counted
 // cash back to cash in hand and posts any shortage, so the till's account is
-// zero after every shift. Plan 13: points earned on the bills post here too
+// zero after every shift; it is dated on the shift's business date. Plan 13: points earned on the bills post here too
 // (loyalty expense against the points liability); points and gift cards paid
 // with are payment methods whose accounts are those liabilities.
 import { Injectable } from '@nestjs/common';
@@ -26,7 +26,7 @@ export class PosPostings {
     private readonly loyalty: LoyaltyService,
   ) {}
 
-  async postShift(tx: Db, shiftId: string, closingDate: string, actorId: string | null): Promise<string | null> {
+  async postShift(tx: Db, shiftId: string, actorId: string | null): Promise<string | null> {
     const shift = await tx.shift.findUniqueOrThrow({
       where: { id: shiftId },
       include: { till: true, openingCash: true, cashMovements: true, closing: { include: { lines: true } } },
@@ -130,7 +130,9 @@ export class PosPostings {
     drawer.push({ role: 'cash_short_over', storeId, debit: difference.neg(), remark: 'Cash difference at closing' }, { role: 'cash_in_till', storeId, credit: difference.neg() });
     const drawerEntry = await this.ledger.post(tx, {
       companyId,
-      date: closingDate,
+      // Audit 5 (29 October 2026): the drawer belongs to the shift's own business date, like its float and
+      // bills, not to the day it was closed (a shift closed after midnight, C2); a locked day moves on as above.
+      date: iso(shift.businessDate),
       documentType: 'pos_shift',
       documentId: shiftId,
       documentNumber: `${shift.till.code} ${iso(shift.businessDate)}`,

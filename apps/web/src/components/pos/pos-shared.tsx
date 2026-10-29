@@ -61,6 +61,10 @@ export interface PosSettingsDto {
   deliveryItemId?: string | null;
   /** Plan 11 part 2: the service item an alteration charge is billed as. */
   alterationItemId?: string | null;
+  /** Audit 5 (C5): a cash out above this needs a manager's PIN. */
+  cashOutApprovalAbove?: string;
+  /** Audit 5 (C8): count the drawer before the expected cash is shown. */
+  blindCount?: boolean;
 }
 
 export type OfferKind = "percent" | "amount" | "special_price" | "free_goods" | "buy_get" | "mix_match";
@@ -257,6 +261,18 @@ export const FLAG_LABELS: Record<string, string> = {
   credit_note_buyer_missing: "Credit note to a walk-in customer without the customer’s name and state (Rule 53(1A))",
   hsn_missing: "A business invoice has an item without an HSN code; add the code to the item",
   return_other_gstin: "Return of a bill made under another GSTIN; the credit note must come from that GSTIN",
+  // Audit 5: things the office changed while the till was offline; the bill was kept as sold.
+  coupon_used_up: "The coupon was used up, ended or not valid for this customer when the bill reached the server",
+  item_off: "An item was switched off or ended, or its unit removed, while the till was offline",
+  discount_over_limit: "A discount was above the cashier's limit or the item's maximum (worked out from what was charged)",
+  above_mrp: "Sold above the MRP while the till was offline",
+  below_cost: "Sold below the cost price",
+  method_off: "Paid with a payment method taken off the till while it was offline",
+  number_prefix_old: "Numbered with the till's earlier invoice prefix (it was changed while the till was offline)",
+  approval_late: "The manager's approval had run out (10 minutes) before the sale",
+  sold_time_odd: "The time of sale is in the future or before the shift opened; check the till computer's clock",
+  cashier_switch_expired: "The cashier's PIN switch had ended; the bill is under the person signed in on the till",
+  posted_by_office: "The server refused this bill at first; the office posted it into the shift",
 };
 
 export function flagLabel(flag: string): string {

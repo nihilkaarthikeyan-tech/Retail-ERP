@@ -5,7 +5,7 @@ import { useState, type FormEvent } from "react";
 import { posSettingsSchema } from "shared";
 import { AlterationChargeSettings, DeliverySettings } from "@/components/pos/delivery-settings";
 import { posRights, type PosSettingsDto } from "@/components/pos/pos-shared";
-import { Alert, Badge, Button, SelectInput, TextInput } from "@/components/ui";
+import { Alert, Badge, Button, CheckInput, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useModules } from "@/lib/modules";
@@ -16,6 +16,9 @@ import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 function SettingsForm({ settings, canEdit, onSaved }: { settings: PosSettingsDto; canEdit: boolean; onSaved: (s: PosSettingsDto) => void }) {
   const [amount, setAmount] = useState(settings.cashDifferenceApprovalAmount);
   const [copies, setCopies] = useState(settings.printReceiptCopies);
+  // Audit 5 (C5, C8): the cash out that needs a manager, and counting before seeing the expected cash.
+  const [cashOut, setCashOut] = useState(settings.cashOutApprovalAbove ?? "2000.00");
+  const [blind, setBlind] = useState(settings.blindCount ?? false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -25,7 +28,7 @@ function SettingsForm({ settings, canEdit, onSaved }: { settings: PosSettingsDto
     e.preventDefault();
     setError(null);
     setSaved(false);
-    const parsed = posSettingsSchema.safeParse({ cashDifferenceApprovalAmount: amount.trim(), printReceiptCopies: copies });
+    const parsed = posSettingsSchema.safeParse({ cashDifferenceApprovalAmount: amount.trim(), printReceiptCopies: copies, cashOutApprovalAbove: cashOut.trim(), blindCount: blind });
     setErrors(issuesToFieldErrors(parsed));
     if (!parsed.success) return;
     setBusy(true);
@@ -76,7 +79,31 @@ function SettingsForm({ settings, canEdit, onSaved }: { settings: PosSettingsDto
             </option>
           ))}
         </SelectInput>
+        <TextInput
+          id="pos-cash-out"
+          label="Cash out needing a manager (₹)"
+          inputMode="decimal"
+          value={cashOut}
+          disabled={!canEdit}
+          error={errors.cashOutApprovalAbove}
+          hint="Taking more cash than this out of the drawer during a shift needs a manager's PIN."
+          onChange={(e) => {
+            setCashOut(e.target.value);
+            setSaved(false);
+          }}
+        />
       </div>
+      <CheckInput
+        id="pos-blind-count"
+        label="Count the cash before seeing the expected amount"
+        description="At closing the cashier counts the drawer first; the expected cash and the difference show only after the count is entered."
+        checked={blind}
+        disabled={!canEdit}
+        onChange={(e) => {
+          setBlind(e.target.checked);
+          setSaved(false);
+        }}
+      />
       {canEdit ? (
         <div className="actions">
           <Button type="submit" variant="primary" busy={busy}>
@@ -145,7 +172,9 @@ export default function PosSettingsPage() {
       <Alert kind="error">{settings.error}</Alert>
       {settings.data ? (
         <>
-          <p className="muted">A cash difference above {rupees(settings.data.cashDifferenceApprovalAmount)} at closing needs a manager.</p>
+          <p className="muted">
+            A cash difference above {rupees(settings.data.cashDifferenceApprovalAmount)} at closing needs a manager, and so does a cash out above {rupees(settings.data.cashOutApprovalAbove ?? "2000")}.
+          </p>
           <SettingsForm settings={settings.data} canEdit={rights.setup} onSaved={settings.setData} />
           <GoLive settings={settings.data} isOwner={rights.owner} onSaved={settings.setData} />
           {isOn("delivery") ? <DeliverySettings settings={settings.data} canEdit={rights.setup} onSaved={settings.setData} /> : null}

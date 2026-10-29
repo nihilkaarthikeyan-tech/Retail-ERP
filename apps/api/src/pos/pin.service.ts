@@ -90,8 +90,10 @@ export class PinService {
     const till = await this.common.usableTill(this.prisma, input.tillId, user);
     const manager = await this.userWithRight(input.managerId, 'pos.approve', till.storeId);
     await this.checkPin(manager.id, input.pin);
-    const token = await this.common.createApproval(this.prisma, till.id, manager.id, input.action, input.details ?? null);
-    await this.audit.record(this.prisma, { userId: manager.id, ipAddress: actor.ipAddress }, { action: 'update', entityType: 'pos_approval', entityId: till.id, changes: { action: input.action, details: input.details ?? null, till: till.code, requestedBy: user.id } });
+    // Audit 5: the cash difference, cash out or bill discount approved is kept and compared when the approval is used.
+    const figure = { amount: input.amount ?? null, percent: input.percent ?? null };
+    const token = await this.common.createApproval(this.prisma, till.id, manager.id, input.action, input.details ?? null, figure);
+    await this.audit.record(this.prisma, { userId: manager.id, ipAddress: actor.ipAddress }, { action: 'update', entityType: 'pos_approval', entityId: till.id, changes: { action: input.action, details: input.details ?? null, till: till.code, requestedBy: user.id, ...(figure.amount ? { amount: figure.amount } : {}), ...(figure.percent ? { percent: figure.percent } : {}) } });
     return { token, manager: { id: manager.id, name: [manager.firstName, manager.lastName].filter(Boolean).join(' ') } };
   }
 

@@ -7,10 +7,16 @@ import type { HelperConfig } from './config.js';
 import { EscPos } from './escpos.js';
 import type { Pairing } from './pairing.js';
 import { buildReceipt, checkReceipt } from './receipt.js';
-import { printerName, type Transport } from './transports.js';
+import { printerName, type PrinterProblem, type PrinterStatus, printerStatusCheck, type Transport } from './transports.js';
 import { VERSION } from './version.js';
 
 export const TOKEN_HEADER = 'x-helper-token';
+/** What the till shows the cashier when the printer reports a problem (owner decision C9). */
+export const PROBLEM_MESSAGE: Record<PrinterProblem, string> = {
+  no_paper: 'The receipt printer is out of paper. Put in a new roll.',
+  cover_open: 'The receipt printer cover is open. Close it.',
+  offline: 'The receipt printer is offline. Check it is switched on and shows no error light.',
+};
 const MAX_BODY_BYTES = 1024 * 1024;
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
@@ -69,9 +75,20 @@ export function createHelperServer(deps: ServerDeps): Server {
 
   // One print job at a time, so two receipts never mix on the paper.
   let queue: Promise<unknown> = Promise.resolve();
-  const sendToPrinter = (bytes: Buffer): Promise<void> => {
+  const sendToPrinter = (bytes: Buffer, checkFirst = false): Promise<void> => {
     const job = queue.then(async () => {
       if (!transport) throw new HttpError(503, 'No receipt printer is set up in the Till Helper', 'printer_not_configured');
+      // Owner decision C9: a printer that can answer is asked about paper and cover first.
+      if (checkFirst && transport.status) {
+        let status: PrinterStatus;
+        try {
+          status = await transport.status();
+        } catch (err) {
+          throw new HttpError(503, `Printer did not respond: ${(err as Error).message}`, 'printer_error');
+        }
+        if (status.known && status.problem) throw new HttpError(503, PROBLEM_MESSAGE[status.problem], status.problem);
+        if (status.known && status.paperLow) log('Receipt paper is nearly out');
+      }
       try {
         await transport.send(bytes);
       } catch (err) {
@@ -157,6 +174,9 @@ export function createHelperServer(deps: ServerDeps): Server {
               configured: transport !== null,
               kind: config.printer.kind === 'none' ? null : config.printer.kind,
               name: printerName(config.printer),
+              // Owner decision C9: whether paper and cover can be read from this printer.
+              statusReadable: printerStatusCheck(config.printer).readable,
+              statusNote: printerStatusCheck(config.printer).note,
             },
             drawer: { configured: transport !== null && config.drawer.enabled },
           },
@@ -168,7 +188,7 @@ export function createHelperServer(deps: ServerDeps): Server {
         const checked = checkReceipt(body?.receipt);
         if (!checked.ok) return refuse(400, checked.error, 'bad_receipt', true);
         const bytes = buildReceipt(checked.receipt, config.paperWidth);
-        await sendToPrinter(bytes);
+        await sendToPrinter(bytes, true);
         log(`Printed ${checked.receipt.kind} ${checked.receipt.number}${checked.receipt.duplicate ? ' (duplicate)' : ''}`);
         return send(200, { ok: true }, true);
       }

@@ -13,7 +13,7 @@ import { type QueueItem, type QueueResult, SendQueue } from "./queue";
 import { localReceipts } from "./receipt";
 import { isStale, loadSnapshot, REFRESH_MS, refreshSnapshot } from "./snapshot";
 import type { KeyValueStore } from "./storage";
-import { isOfflineError, priceChangedTotal, type TillApi } from "./till-api";
+import { alreadySavedBill, type BillByClient, type DrawerOpeningInput, isNetworkError, isOfflineError, isServerFault, isTillNotRegistered, priceChangedTotal, type TillApi } from "./till-api";
 import type { BillDto, GiftCardSaleResult, LocalShift, Person, Receipt, ServerShift, StoredSnapshot, TillCustomerPoints, TillGiftCard, TransactionResult } from "./types";
 
 const DRAFT_KEY = "draft";
@@ -23,6 +23,13 @@ const LAST_RECEIPTS_KEY = "meta:last-receipts";
 const PARKED = "parked:";
 const RECENT = "recent:";
 const SHIFT_IDS = "shiftid:";
+/** Audit 5 (C1): when the till last heard from the server (a signed-in answer). */
+const LAST_CONTACT_KEY = "meta:last-contact";
+/** Audit 5: coupons used by bills that reached the server after the last refresh of the saved copy. */
+const COUPON_LOG = "couponlog:";
+/** Audit 5 (C1): the owner's defaults when the saved copy does not say. */
+const OFFLINE_WARN_HOURS = 24;
+const OFFLINE_STOP_HOURS = 48;
 /** The till keeps 30 days of its own bills for returns (pos-offline §8). */
 const RECENT_DAYS = 30;
 
@@ -51,6 +58,14 @@ export interface EngineState {
   problems: number;
   /** Problem with loading the till set-up (shown when there is no saved copy). */
   error: string | null;
+  /** Audit 5: the server answers, but with a fault of its own (shown as such, not as "offline"). */
+  serverTrouble: boolean;
+  /** Audit 5: the server says this computer is no longer registered as this till; nothing is sent. */
+  tillNotRegistered: boolean;
+  /** Audit 5 (C1): the last time the server answered (ISO), kept across restarts. */
+  lastContact: string | null;
+  /** Audit 5: coupon uses by this till not yet in the saved copy, by code (pass to priceBill). */
+  couponUses: Record<string, number>;
 }
 
 export interface ParkedBill {
@@ -75,6 +90,10 @@ export interface FinishResult {
   paidCash: boolean;
   /** Plan 11 part 2: the server's warnings (e.g. stock set aside for a customer order was sold). */
   warnings?: string[];
+  /** The bill's identity (for recording the drawer opening of a cash bill, audit 5 C4). */
+  clientId?: string;
+  /** Audit 5: a plain note for the cashier, e.g. the bill had already been saved. */
+  notice?: string;
 }
 
 /** Plan 11 part 2: orders, customer credit and alteration charges are checked on the server, so never kept offline. */
@@ -127,6 +146,19 @@ export const POINTS_LATER = "Points for this bill are added when the till is bac
 export const NO_BILL_RETURN_OFFLINE = "A return without a bill needs the connection: a manager approves it on the server. Try again when the till is online, or find the original bill.";
 export const NO_BILL_RETURN_DROPPED = "The connection dropped while sending this return. A return without a bill needs the connection, so it was not kept on the till: try again when the till is online.";
 export const APPROVAL_SPENT = "A manager approval on this bill was already used or has expired. Ask the manager again (Manager PIN), then finish the bill.";
+
+/** Audit 5: the till's messages for the connection problems found in the billing counter audit. */
+export const TILL_NOT_REGISTERED_MESSAGE = "This computer is no longer registered as this till. The bills on it are kept; ask a manager to register it again under Billing counter → Tills.";
+export const SIGN_IN_AGAIN = "The session has ended: sign in again. The waiting bills are sent once you have signed in.";
+export const SEND_UNCERTAIN = "The connection dropped while this bill was being sent, so it may already be saved. The till checks with the server before the bill can be changed: wait until the till is online, then try again.";
+export const ALREADY_SAVED = "This bill had already reached the server; the saved bill is shown.";
+export const NO_DISK = "This browser cannot keep bills on this computer (its storage is blocked or full), so a bill cannot be kept offline. Connect to the internet to bill, and ask for this site's data to be allowed.";
+export function offlineStopMessage(hours: number): string {
+  return `Offline for more than ${hours} hours: connect to the internet to bill again`;
+}
+export function offlineWarnMessage(hours: number, stopHours: number): string {
+  return `Offline for more than ${hours} hours: connect to the internet soon. Billing stops after ${stopHours} hours offline.`;
+}
 
 /**
  * The server refused an online sale line priced below cost (400, plan 11 A2).
@@ -194,7 +226,22 @@ export class TillEngine {
   private readonly session: SessionLike | null;
   private readonly now: () => Date;
   readonly uuid: () => string;
-  private state: EngineState = { ready: false, snapshot: null, shift: null, online: false, signedOut: false, user: null, cashier: null, waiting: 0, problems: 0, error: null };
+  private state: EngineState = {
+    ready: false,
+    snapshot: null,
+    shift: null,
+    online: false,
+    signedOut: false,
+    user: null,
+    cashier: null,
+    waiting: 0,
+    problems: 0,
+    error: null,
+    serverTrouble: false,
+    tillNotRegistered: false,
+    lastContact: null,
+    couponUses: {},
+  };
   private listeners = new Set<() => void>();
   private lastRefresh = 0;
   private draftChain: Promise<unknown> = Promise.resolve();
@@ -207,7 +254,13 @@ export class TillEngine {
     this.now = deps.now ?? (() => new Date());
     this.uuid = deps.uuid ?? defaultUuid;
     this.counter = new NumberCounter(this.store);
-    this.queue = new SendQueue(this.store, (item) => this.send(item), this.now, (item, res) => this.onSent(item, res));
+    this.queue = new SendQueue(
+      this.store,
+      (item) => this.send(item),
+      this.now,
+      (item, res) => this.onSent(item, res),
+      () => this.reachable(),
+    );
   }
 
   // ---- State for the screen ----
@@ -232,8 +285,8 @@ export class TillEngine {
 
   /** Loads what is saved on the till, then tries the server. Billing works either way. */
   async start(): Promise<void> {
-    const [snapshot, shift, user] = await Promise.all([loadSnapshot(this.store), this.store.get<LocalShift>(SHIFT_KEY), this.store.get<CurrentUser>(USER_KEY)]);
-    this.set({ snapshot, shift: shift ?? null, user: user ?? null, cashier: this.readCashier() });
+    const [snapshot, shift, user, lastContact] = await Promise.all([loadSnapshot(this.store), this.store.get<LocalShift>(SHIFT_KEY), this.store.get<CurrentUser>(USER_KEY), this.store.get<string>(LAST_CONTACT_KEY)]);
+    this.set({ snapshot, shift: shift ?? null, user: user ?? null, cashier: this.readCashier(), lastContact: lastContact ?? null });
     await this.updateCounts();
     await this.pruneRecent();
     this.set({ ready: true });
@@ -246,10 +299,12 @@ export class TillEngine {
     try {
       const me = await this.api.me();
       await this.store.set(USER_KEY, me);
-      this.set({ online: true, signedOut: false, user: me });
+      this.set({ online: true, signedOut: false, serverTrouble: false, user: me });
+      await this.touch();
     } catch (err) {
-      if (err instanceof ApiError && err.statusCode === 401) this.set({ online: true, signedOut: true });
-      else this.set({ online: false });
+      if (err instanceof ApiError && err.statusCode === 401) this.set({ online: true, signedOut: true, serverTrouble: false });
+      // Audit 5: a server fault is not "offline"; the till still bills offline meanwhile.
+      else this.set({ online: false, serverTrouble: isServerFault(err) });
       await this.updateCounts();
       return;
     }
@@ -263,11 +318,71 @@ export class TillEngine {
     try {
       const snapshot = await refreshSnapshot(this.store, (since) => this.api.snapshot(since), this.now);
       this.lastRefresh = Date.now();
-      this.set({ snapshot, error: null, online: true });
+      this.set({ snapshot, error: null, online: true, tillNotRegistered: false });
+      await this.updateCounts();
     } catch (err) {
-      if (isOfflineError(err)) this.set({ online: false });
+      if (isTillNotRegistered(err)) this.set({ tillNotRegistered: true, error: TILL_NOT_REGISTERED_MESSAGE });
+      else if (isNetworkError(err)) this.set({ online: false });
       else this.set({ error: errorMessage(err) });
     }
+  }
+
+  /** Audit 5 (C1): the server answered; kept on the till so a restart knows how long it has been offline. */
+  private async touch(): Promise<void> {
+    const at = this.now().toISOString();
+    this.set({ lastContact: at });
+    await this.store.set(LAST_CONTACT_KEY, at);
+  }
+
+  /** For the queue: after a network failure, does the server answer at all? */
+  private async reachable(): Promise<boolean> {
+    try {
+      await this.api.me();
+      return true;
+    } catch (err) {
+      return !isNetworkError(err);
+    }
+  }
+
+  /**
+   * Audit 5 (C1): how long the till has been without the server: "warn" after
+   * till.offlineWarnHours (24), "stop" after till.offlineStopHours (48), when
+   * new bills are refused. Counted from the last answer (or the last refresh).
+   */
+  offlineLevel(): { level: "ok" | "warn" | "stop"; warnHours: number; stopHours: number } {
+    const till = this.state.snapshot?.till;
+    const warnHours = till?.offlineWarnHours ?? OFFLINE_WARN_HOURS;
+    const stopHours = till?.offlineStopHours ?? OFFLINE_STOP_HOURS;
+    const since = this.state.lastContact ?? this.state.snapshot?.fetchedAt ?? null;
+    if ((this.state.online && !this.state.signedOut) || !since) return { level: "ok", warnHours, stopHours };
+    const hours = (this.now().getTime() - new Date(since).getTime()) / 3_600_000;
+    return { level: hours >= stopHours ? "stop" : hours >= warnHours ? "warn" : "ok", warnHours, stopHours };
+  }
+
+  /** Audit 5 (C6): receipts to print after each bill: 0 (none by itself) to 3. */
+  receiptCopies(): number {
+    const till = this.state.snapshot?.till;
+    if (!till) return 1;
+    const n = till.receiptCopies ?? (till.autoPrint ? 1 : 0);
+    return Math.max(0, Math.min(3, Math.trunc(Number(n) || 0)));
+  }
+
+  /** Audit 5 (C7): the opening float suggested from the cash counted at the last close, or null. */
+  suggestedFloat(): string | null {
+    const cashId = this.defaultCashMethodId();
+    const rows = (this.state.snapshot?.till.lastCloseCash ?? []).filter((r) => r.paymentMethodId === cashId);
+    if (!rows.length) return null;
+    return rows.reduce((s, r) => s.add(new Decimal(r.amount || "0")), new Decimal(0)).toFixed(2);
+  }
+
+  /**
+   * Audit 5 (C2): the open shift is from an earlier day and the till is online,
+   * so it must be closed before billing. Offline, billing goes on into the new
+   * day on that shift (closing needs the connection).
+   */
+  shiftNeedsClosing(): boolean {
+    const shift = this.state.shift;
+    return !!shift && shift.businessDate !== this.today() && this.state.online && !this.state.signedOut;
   }
 
   isSnapshotStale(): boolean {
@@ -284,7 +399,10 @@ export class TillEngine {
       server = await this.api.currentShift();
       this.shiftProblem = null;
     } catch (err) {
-      if (isOfflineError(err)) this.set({ online: false });
+      if (isTillNotRegistered(err)) {
+        this.set({ tillNotRegistered: true });
+        this.shiftProblem = TILL_NOT_REGISTERED_MESSAGE;
+      } else if (isNetworkError(err)) this.set({ online: false });
       // Audit 1 (28 October 2026): keep the server's reason (for example a till of another shop) to show it.
       else this.shiftProblem = err instanceof Error ? err.message : String(err);
       return null;
@@ -315,16 +433,75 @@ export class TillEngine {
   /** Sends the queue; `force` ignores the retry delay ("Send now"). */
   async sync(force = false): Promise<QueueResult> {
     const result = await this.queue.process({ force });
-    if (result.offline) this.set({ online: false });
-    else if (result.sent) this.set({ online: true });
+    if (result.offline) this.set({ online: false, serverTrouble: false });
+    else if (result.sent) this.set({ online: true, tillNotRegistered: false });
+    // Audit 5: the server is reached but failing on an item: not "offline".
+    if (result.serverTrouble) this.set({ serverTrouble: true });
+    else if (result.sent) this.set({ serverTrouble: false });
     if (result.signedOut) this.set({ signedOut: true });
+    if (result.tillNotRegistered) this.set({ tillNotRegistered: true });
     await this.updateCounts();
     return result;
   }
 
   async updateCounts(): Promise<void> {
     const c = await this.queue.counts();
-    this.set({ waiting: c.waiting, problems: c.problems });
+    this.set({ waiting: c.waiting, problems: c.problems, couponUses: await this.countCouponUses() });
+  }
+
+  /**
+   * Audit 5: coupon uses the saved copy does not count yet: bills in the queue,
+   * and bills that reached the server after the last refresh (from the log).
+   */
+  private async countCouponUses(exceptClientId?: string | null): Promise<Record<string, number>> {
+    const uses: Record<string, number> = {};
+    const add = (code: string) => {
+      uses[code] = (uses[code] ?? 0) + 1;
+    };
+    const queued = new Set<string>();
+    for (const i of await this.queue.items()) {
+      if (i.kind !== "bill") continue;
+      queued.add(i.clientId);
+      const code = (i.payload as PosTransactionInput).couponCode;
+      if (code && i.clientId !== exceptClientId) add(code.trim().toUpperCase());
+    }
+    const since = this.state.snapshot?.fetchedAt ?? "";
+    for (const [key, e] of await this.store.entries<{ code: string; at: string }>(COUPON_LOG)) {
+      const id = key.slice(COUPON_LOG.length);
+      // Saved before the last refresh: the saved copy's own count has it.
+      if (e.at <= since) {
+        await this.store.delete(key);
+        continue;
+      }
+      if (!queued.has(id) && id !== exceptClientId) add(e.code);
+    }
+    return uses;
+  }
+
+  private async logCoupon(clientId: string, code: string | null | undefined): Promise<void> {
+    if (code) await this.store.set(`${COUPON_LOG}${clientId}`, { code: code.trim().toUpperCase(), at: this.now().toISOString() });
+  }
+
+  /** Audit 5: asks whether a bill sent with this clientId was saved; null when the server cannot be asked. */
+  private async checkSaved(clientId: string | null): Promise<BillByClient | null> {
+    if (!clientId) return { saved: false };
+    try {
+      return await this.api.billByClient(clientId);
+    } catch (err) {
+      if (isNetworkError(err)) this.set({ online: false });
+      return null;
+    }
+  }
+
+  /** Sends a bill; a 409 "already saved with other content" counts as sent with the saved bill (audit 5). */
+  private async postQueuedBill(body: PosTransactionInput): Promise<TransactionResult> {
+    try {
+      return await this.api.postBill(body);
+    } catch (err) {
+      const saved = alreadySavedBill(err);
+      if (saved) return saved;
+      throw err;
+    }
   }
 
   private async send(item: QueueItem): Promise<unknown> {
@@ -341,8 +518,20 @@ export class TillEngine {
         const token = item.cashierId ? this.cashierTokens()[item.cashierId] : undefined;
         if (token) body.cashierToken = token;
         else delete body.cashierToken;
-        return this.api.postBill(body);
+        try {
+          return await this.postQueuedBill(body);
+        } catch (err) {
+          if (!token || !item.cashierId || !(err instanceof ApiError) || err.statusCode !== 401) throw err;
+          // Audit 5: the cashier's switch has expired (it lives only in this browser session):
+          // the bill goes as the signed-in user. A second 401 means the session itself ended.
+          delete body.cashierToken;
+          const res = await this.postQueuedBill(body);
+          this.forgetCashier(item.cashierId);
+          return res;
+        }
       }
+      case "drawer_opening":
+        return this.api.drawerOpening(item.payload as DrawerOpeningInput);
     }
   }
 
@@ -358,7 +547,9 @@ export class TillEngine {
       }
     } else if (item.kind === "bill") {
       await this.rememberResult(response as TransactionResult);
+      await this.logCoupon(item.clientId, (item.payload as PosTransactionInput).couponCode);
     }
+    await this.touch();
   }
 
   // ---- The signed-in cashier and PIN switching (decision 68) ----
@@ -385,6 +576,19 @@ export class TillEngine {
     if (this.state.cashier) return this.state.cashier;
     const u = this.state.user;
     return u ? { id: u.id, name: [u.firstName, u.lastName].filter(Boolean).join(" "), token: null } : null;
+  }
+
+  /** Drops a cashier's expired switch; the signed-in user bills again (audit 5). */
+  private forgetCashier(cashierId: string): void {
+    const tokens = this.cashierTokens();
+    delete tokens[cashierId];
+    try {
+      this.session?.setItem(`${CASHIER_KEY}:tokens`, JSON.stringify(tokens));
+      if (this.state.cashier?.id === cashierId) this.session?.removeItem(CASHIER_KEY);
+    } catch {
+      // The session store is gone; the switch ends with the page.
+    }
+    if (this.state.cashier?.id === cashierId) this.set({ cashier: null });
   }
 
   async switchCashier(userId: string, pin: string): Promise<Cashier> {
@@ -464,38 +668,89 @@ export class TillEngine {
     return shift;
   }
 
-  async cashMovement(direction: "in" | "out", amount: string, reason: string): Promise<void> {
+  /** Audit 5 (C5): cash out above this needs a manager's PIN (approval action cash_out); null = never. */
+  cashOutApprovalAbove(): string | null {
+    return this.state.snapshot?.till.cashOutApprovalAbove ?? null;
+  }
+
+  /** Cash in or out; `approvalToken` is the manager's approval for a cash out above the limit (audit 5, C5). */
+  async cashMovement(direction: "in" | "out", amount: string, reason: string, approvalToken?: string): Promise<void> {
     const shift = this.state.shift;
     if (!shift) throw new Error("Open a shift first");
     const a = new Decimal(amount || "0");
     if (a.lte(0)) throw new Error("Enter an amount above zero");
     if (!reason.trim()) throw new Error("Give a reason");
+    const limit = this.cashOutApprovalAbove();
+    if (direction === "out" && limit !== null && a.gt(new Decimal(limit)) && !approvalToken) throw new Error(`Cash out above ₹${new Decimal(limit).toFixed(2)} needs a manager's PIN`);
     const clientId = this.uuid();
     await this.queue.enqueue({
       clientId,
       kind: "cash_movement",
       label: `Cash ${direction} ₹${a.toFixed(2)}`,
       shiftClientId: shift.clientId,
-      payload: { clientId, direction, amount: a.toFixed(2), reason: reason.trim(), at: this.now().toISOString() },
+      payload: { clientId, direction, amount: a.toFixed(2), reason: reason.trim(), at: this.now().toISOString(), ...(approvalToken ? { approvalToken } : {}) },
     });
     await this.updateCounts();
     void this.sync();
   }
 
+  /**
+   * Audit 5 (C4): records an opening of the cash drawer (sent to the server in
+   * the queue, so offline too). "sale" for a cash bill (with the bill's
+   * clientId), "no_sale" for the No-sale button (with the manager's approval).
+   */
+  async recordDrawerOpening(kind: "sale" | "no_sale", opts: { billClientId?: string; approvalToken?: string } = {}): Promise<void> {
+    const clientId = this.uuid();
+    const payload: DrawerOpeningInput = {
+      clientId,
+      tillId: this.device.tillId,
+      kind,
+      at: this.now().toISOString(),
+      ...(opts.billClientId ? { billClientId: opts.billClientId } : {}),
+      ...(opts.approvalToken ? { approvalToken: opts.approvalToken } : {}),
+    };
+    await this.queue.enqueue({ clientId, kind: "drawer_opening", label: kind === "sale" ? "Drawer opened for a cash bill" : "Drawer opened (no sale)", payload });
+    await this.updateCounts();
+    if (this.state.online) void this.sync();
+  }
+
+  /**
+   * Audit 5 (C3): a shift cannot close while a bill on the till could not be
+   * sent; the office posts it into the shift first. A problem bill the server
+   * already has (the office posted it) is taken off the list as sent.
+   */
+  private async refuseWhileProblems(): Promise<void> {
+    for (const item of await this.queue.items()) {
+      if (item.status !== "problem" || item.kind !== "bill") continue;
+      const check = await this.checkSaved(item.clientId);
+      if (check?.saved) {
+        await this.queue.remove(item);
+        await this.onSent(item, check.transaction);
+      }
+    }
+    await this.updateCounts();
+    const problems = (await this.queue.items()).filter((i) => i.status === "problem");
+    const bills = problems.filter((i) => i.kind === "bill").length;
+    if (bills) throw new Error(`${bills} ${bills === 1 ? "bill" : "bills"} could not be sent: the office must post ${bills === 1 ? "it" : "them"} first (Offline bills to check → Post into shift)`);
+    if (problems.length) throw new Error(`${problems.length} ${problems.length === 1 ? "entry" : "entries"} could not be sent: see the sync status list (Try again or Remove) before closing`);
+  }
+
   /** Closing needs the connection and an empty queue, so the count is checked against every bill (pos-offline §8). */
-  async closingInfo(): Promise<{ shift: ServerShift; approvalAmount: string }> {
+  async closingInfo(): Promise<{ shift: ServerShift; approvalAmount: string; blindCount: boolean }> {
     const { waiting } = await this.queue.counts();
     if (waiting > 0) throw new Error(`${waiting} ${waiting === 1 ? "entry is" : "entries are"} still waiting to be sent; the shift can be closed once they are sent`);
     if (!this.state.online) throw new Error("Closing a shift needs the connection");
+    await this.refuseWhileProblems();
     const shift = await this.syncShift();
     if (!shift) throw new Error(this.shiftProblem ?? "This till has no open shift on the server");
     const settings = await this.api.settings().catch(() => ({ cashDifferenceApprovalAmount: "100.00" }));
-    return { shift, approvalAmount: settings.cashDifferenceApprovalAmount };
+    return { shift, approvalAmount: settings.cashDifferenceApprovalAmount, blindCount: !!this.state.snapshot?.till.blindCount };
   }
 
   async closeShift(shiftId: string, body: Parameters<TillApi["closeShift"]>[1]): Promise<ServerShift> {
     const { waiting } = await this.queue.counts();
     if (waiting > 0) throw new Error(`${waiting} still waiting to be sent`);
+    await this.refuseWhileProblems();
     const closed = await this.api.closeShift(shiftId, body);
     await this.store.delete(SHIFT_KEY);
     this.set({ shift: null });
@@ -507,7 +762,38 @@ export class TillEngine {
   price(draft: DraftBill): ComputedBill | null {
     const snapshot = this.state.snapshot;
     if (!snapshot) return null;
-    return priceBill(draft, { snapshot, date: this.today() });
+    return priceBill(draft, { snapshot, date: this.today(), couponUses: this.state.couponUses });
+  }
+
+  /**
+   * Audit 5: for a bill whose answer never came (draft.sendUncertain), asks the
+   * server. Saved: the bill is finished with the server's receipt (show it as
+   * done). Not saved: the mark is taken off and the cashier may change it
+   * (same identity and numbers). null: the server cannot be asked yet; keep
+   * the bill as it is.
+   */
+  async resolveUncertain(given?: DraftBill): Promise<FinishResult | "not_saved" | null> {
+    const draft = given ?? (await this.store.get<DraftBill>(DRAFT_KEY));
+    if (!draft?.sendUncertain) return "not_saved";
+    const check = await this.checkSaved(draft.clientId);
+    if (!check) return null;
+    if (check.saved) return this.finishedOnline(check.transaction, draft, null, ALREADY_SAVED);
+    const free = { ...draft, sendUncertain: undefined };
+    await this.saveDraft(free);
+    return "not_saved";
+  }
+
+  /** A bill the server saved: kept for returns and reprints, the bill being made cleared. */
+  private async finishedOnline(result: TransactionResult, draft: DraftBill, paidCash: boolean | null, notice?: string): Promise<FinishResult> {
+    await this.rememberResult(result);
+    await this.touch();
+    await this.store.set(LAST_RECEIPTS_KEY, result.receipts);
+    await this.returnedOnCopy(draft);
+    if (draft.clientId) await this.logCoupon(draft.clientId, draft.couponCode);
+    await this.newDraft();
+    await this.updateCounts();
+    const cash = paidCash ?? [result.sale, result.return].some((b) => b?.payments.some((p) => p.paymentMethod.kind === "cash" && !new Decimal(p.amount).isZero()));
+    return { receipts: result.receipts, offline: false, change: result.change, paidCash: cash, warnings: result.warnings ?? [], clientId: draft.clientId ?? undefined, ...(notice ? { notice } : {}) };
   }
 
   /**
@@ -524,11 +810,24 @@ export class TillEngine {
     const shift = this.state.shift;
     if (!snapshot) throw new Error("The till has no price list yet; connect once to download it");
     if (!shift) throw new Error("Open a shift first");
+    if (this.state.tillNotRegistered) throw new Error(TILL_NOT_REGISTERED_MESSAGE);
+    if (input.sendUncertain) {
+      // Audit 5: it may be saved already; the server is asked before it is sent again.
+      const known = await this.resolveUncertain(input);
+      if (known === null) throw new Error(SEND_UNCERTAIN);
+      if (known !== "not_saved") return known;
+      input = { ...input, sendUncertain: undefined };
+    }
     const draft: DraftBill = { ...input, numbers: { ...input.numbers } };
     const soldAt = draft.soldAt ? new Date(draft.soldAt) : this.now();
     const date = businessDate(soldAt);
-    if (shift.businessDate !== date) throw new Error(`This till's shift is from ${shift.businessDate}; close it and open a new one`);
-    const bill = priceBill(draft, { snapshot, date });
+    if (shift.businessDate !== date) {
+      // Audit 5 (C2): offline past midnight the bill goes on the open shift of the day before
+      // (dated by its sale time; the server flags it). Online, that shift is closed first.
+      const onlineNow = this.state.online && !this.state.signedOut;
+      if (onlineNow || date < shift.businessDate) throw new Error(`This till's shift is from ${shift.businessDate}; close it and open a new one`);
+    }
+    const bill = priceBill(draft, { snapshot, date, couponUses: await this.countCouponUses(draft.clientId) });
     if (bill.problems.length) throw new Error(bill.problems[0]);
     if (bill.approvals.length) throw new Error(bill.approvals[0].reason);
     const methods = snapshot.till.paymentMethods.filter((m) => m.active);
@@ -557,16 +856,32 @@ export class TillEngine {
     const opts = { clientId: draft.clientId, tillId: this.device.tillId, shiftClientId: shift.clientId, soldAt: draft.soldAt, numbers: draft.numbers };
     const paidCash = draft.payments.some((p) => methods.find((m) => m.id === p.methodId)?.kind === "cash" && p.amount.trim() !== "" && !new Decimal(p.amount).isZero());
 
-    if (this.state.online && !this.state.signedOut) {
-      const tx = buildTransaction(draft, bill, methods, { ...opts, offline: false, cashierToken: cashier?.token ?? undefined });
+    let cashierToken = cashier?.token ?? undefined;
+    let withoutSwitch = false;
+    while (this.state.online && !this.state.signedOut) {
+      const tx = buildTransaction(draft, bill, methods, { ...opts, offline: false, cashierToken });
       if (options.creditApprovalToken) tx.creditApprovalToken = options.creditApprovalToken;
       try {
         const result = await this.api.postBill(tx);
-        await this.rememberResult(result);
-        await this.store.set(LAST_RECEIPTS_KEY, result.receipts);
-        await this.newDraft();
-        return { receipts: result.receipts, offline: false, change: result.change, paidCash, warnings: result.warnings ?? [] };
+        if (withoutSwitch && cashier) this.forgetCashier(cashier.id);
+        return await this.finishedOnline(result, draft, paidCash);
       } catch (err) {
+        const unauthorized = err instanceof ApiError && err.statusCode === 401;
+        // The bill went through without the cashier's switch: that switch had expired.
+        if (withoutSwitch && cashier && !unauthorized) this.forgetCashier(cashier.id);
+        const saved = alreadySavedBill(err);
+        // Audit 5: this clientId was saved before (an earlier try whose answer never came): show that bill.
+        if (saved) return this.finishedOnline(saved, draft, null, ALREADY_SAVED);
+        if (isTillNotRegistered(err)) {
+          this.set({ tillNotRegistered: true });
+          throw new Error(TILL_NOT_REGISTERED_MESSAGE);
+        }
+        if (unauthorized && cashierToken && !withoutSwitch) {
+          // Audit 5: maybe only the cashier's switch expired; try once as the signed-in user.
+          cashierToken = undefined;
+          withoutSwitch = true;
+          continue;
+        }
         const serverTotal = priceChangedTotal(err);
         if (serverTotal !== null) throw new PriceChangedError(serverTotal, bill.net.toFixed(2));
         const credit = creditOverride(err);
@@ -583,25 +898,38 @@ export class TillEngine {
           await this.saveDraft(withoutApprovals(draft));
           throw new Error(APPROVAL_SPENT);
         }
-        if (err instanceof ApiError && err.statusCode === 401) this.set({ signedOut: true });
-        else if (isOfflineError(err)) this.set({ online: false });
-        else throw err;
+        const serverNeeded = onAccount || noBill || needsServer || pointsOrCards;
+        if (unauthorized) this.set({ signedOut: true });
+        else if (isOfflineError(err) || (err instanceof ApiError && err.statusCode === 408)) {
+          // Audit 5: sent, but no answer (or a server fault): it may be saved. Ask before going on.
+          this.set(isServerFault(err) ? { online: false, serverTrouble: true } : { online: false });
+          const check = await this.checkSaved(draft.clientId);
+          if (check?.saved) return this.finishedOnline(check.transaction, draft, null, ALREADY_SAVED);
+          // Unknown: a bill that needs the server stays on the screen, marked, until the server is asked.
+          if (!check && serverNeeded) await this.saveDraft({ ...draft, sendUncertain: true });
+        } else throw err;
         // The bill keeps its identity and numbers; it is not queued.
         if (onAccount) throw new Error(ON_ACCOUNT_DROPPED);
         if (noBill) throw new Error(NO_BILL_RETURN_DROPPED);
         if (needsServer) throw new Error(ORDER_OFFLINE);
         if (pointsOrCards) throw new Error(POINTS_DROPPED);
+        break;
       }
     }
     if (needsServer) throw new Error(ORDER_OFFLINE);
     if (pointsOrCards) throw new Error(POINTS_OFFLINE);
     if (onAccount) throw new Error(ON_ACCOUNT_OFFLINE);
     if (noBill) throw new Error(NO_BILL_RETURN_OFFLINE);
+    // Audit 5: an offline bill must be kept on this computer (C1: and not after too long offline).
+    if (this.store.volatile) throw new Error(NO_DISK);
+    const away = this.offlineLevel();
+    if (away.level === "stop") throw new Error(offlineStopMessage(away.stopHours));
 
     // Offline: kept on the till and sent when the connection returns.
     const tx = buildTransaction(draft, bill, methods, { ...opts, offline: true });
     const label = [draft.numbers.ret, draft.numbers.sale].filter(Boolean).join(" + ");
     await this.queue.enqueue({ clientId: draft.clientId, kind: "bill", label: `Bill ${label}`, payload: tx, cashierId: cashier?.id });
+    await this.returnedOnCopy(draft);
     // A return of a bill paid with points or gift cards: the server gives those back by itself (plan 13).
     const back = bill.back
       ? [
@@ -631,7 +959,7 @@ export class TillEngine {
     await this.newDraft();
     await this.updateCounts();
     if (this.state.online) void this.sync();
-    return { receipts, offline: true, change: pay.change.toFixed(2), paidCash };
+    return { receipts, offline: true, change: pay.change.toFixed(2), paidCash, clientId: draft.clientId };
   }
 
   // ---- Plan 13: points and gift cards (online only) ----
@@ -679,6 +1007,34 @@ export class TillEngine {
     }
   }
 
+  /**
+   * Audit 5: after a return against a bill, this till's saved copy of that bill
+   * counts what came back, so an offline return cannot take it back twice.
+   */
+  private async returnedOnCopy(draft: DraftBill): Promise<void> {
+    const ret = draft.ret;
+    if (!ret?.originalBillId || !ret.originalNumber) return;
+    const copy = await this.recentBill(ret.originalNumber);
+    if (!copy?.bill || copy.bill.id !== ret.originalBillId) return;
+    const back = new Map<string, string>();
+    for (const l of ret.lines) if (l.originalLineId) back.set(l.originalLineId, l.quantity);
+    await this.store.set(`${RECENT}${copy.number}`, { ...copy, bill: withReturned(copy.bill, back) } satisfies RecentBill);
+  }
+
+  /** Audit 5: a bill from the server, less the returns against it still waiting in this till's queue. */
+  private async withQueuedReturns(bill: BillDto): Promise<BillDto> {
+    const back = new Map<string, string>();
+    for (const i of await this.queue.items()) {
+      const ret = i.kind === "bill" ? (i.payload as PosTransactionInput).ret : undefined;
+      if (!ret || ret.returnOfId !== bill.id) continue;
+      for (const l of ret.lines) {
+        if (!l.returnOfLineId) continue;
+        back.set(l.returnOfLineId, new Decimal(back.get(l.returnOfLineId) ?? "0").add(new Decimal(l.quantity)).toString());
+      }
+    }
+    return back.size ? withReturned(bill, back) : bill;
+  }
+
   async recentBill(number: string): Promise<RecentBill | null> {
     return (await this.store.get<RecentBill>(`${RECENT}${number.trim()}`)) ?? null;
   }
@@ -709,7 +1065,7 @@ export class TillEngine {
       try {
         const { rows } = await this.api.findBills(n);
         const exact = rows.find((b) => b.number.toUpperCase() === n.toUpperCase()) ?? (rows.length === 1 ? rows[0] : undefined);
-        if (exact) return exact;
+        if (exact) return this.withQueuedReturns(exact);
         throw new Error(`Bill ${n} was not found`);
       } catch (err) {
         if (!isOfflineError(err) || !(err instanceof ApiError)) throw err;
@@ -721,4 +1077,19 @@ export class TillEngine {
     if (!local.bill) throw new Error(`Bill ${n} has not reached the server yet; try again once it is sent`);
     return local.bill;
   }
+}
+
+/** The bill with more counted as returned: quantities in each line's own unit, by line id. */
+function withReturned(bill: BillDto, back: Map<string, string>): BillDto {
+  return {
+    ...bill,
+    lines: bill.lines.map((l) => {
+      const q = back.get(l.id);
+      const sold = new Decimal(l.quantity);
+      if (!q || sold.isZero()) return l;
+      // The returned quantity is kept in basic units, like the server's.
+      const basic = new Decimal(q).mul(new Decimal(l.basicQuantity)).div(sold);
+      return { ...l, returnedQuantity: new Decimal(l.returnedQuantity).add(basic).toString() };
+    }),
+  };
 }

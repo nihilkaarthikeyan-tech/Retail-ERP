@@ -2060,6 +2060,8 @@ model Shift {
   closing       ShiftClosing?
 
   @@unique([tillId, clientId])
+  /// Audit 5: one open shift per till, kept by the database.
+  @@unique([tillId], where: raw("\"status\" = 'open'"), map: "Shift_one_open_per_till")
   @@index([tillId, status])
 }
 
@@ -2202,6 +2204,8 @@ model PosBill {
   cancelledById      String?       @db.Uuid
   cancelReason       String?
   reprints           Int           @default(0)
+  /// Audit 5: a hash of what was sold (lines, payments, customer); the same client id with other content is refused.
+  clientHash         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2259,6 +2263,8 @@ model PosBillLine {
   approvedById     String?  @db.Uuid
   costValue        Decimal  @default(0) @db.Decimal(16, 2)
   accountRole      String   @default("sales")
+  /// Audit 5 (pos-offline §5): offline lines on the check report keep what the server's price list, offer, rate and limits said.
+  serverFigures    Json?
 
   bill PosBill @relation(fields: [billId], references: [id], onDelete: Cascade)
   item Item    @relation(fields: [itemId], references: [id])
@@ -2354,6 +2360,10 @@ model PosSettings {
   deliveryItemId               String? @db.Uuid
   /// Plan 11 part 2: the service item alteration charges are billed as.
   alterationItemId             String? @db.Uuid
+  /// Audit 5 (C5): a cash out above this needs a manager PIN.
+  cashOutApprovalAbove         Decimal @default(2000) @db.Decimal(16, 2)
+  /// Audit 5 (C8): the cashier counts before seeing the expected cash.
+  blindCount                   Boolean @default(false)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2373,6 +2383,9 @@ model PosApproval {
   expiresAt DateTime
   usedAt    DateTime?
   usedFor   String?
+  /// Audit 5: the cash difference, cash out or bill discount (rupees or percent) the manager approved.
+  approvedAmount  Decimal? @db.Decimal(16, 2)
+  approvedPercent Decimal? @db.Decimal(5, 2)
 
   createdAt DateTime @default(now())
 
@@ -2406,11 +2419,35 @@ model PosSyncProblem {
   resolvedAt   DateTime?
   resolvedById String?   @db.Uuid
   resolution   String?
+  /// Audit 5 (C3): who sent the bill (its cashier when the office posts it into a shift).
+  sentById     String?   @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([tillId, clientId, kind])
+}
+
+/// Audit 5 (C4): every opening of a till's cash drawer (with a sale, or a No-sale with a manager PIN).
+model PosDrawerOpening {
+  /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
+  companyId    String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  tillId       String   @db.Uuid
+  shiftId      String?  @db.Uuid
+  clientId     String   @db.Uuid
+  /// sale or no_sale
+  kind         String
+  at           DateTime
+  billClientId String?  @db.Uuid
+  approvedById String?  @db.Uuid
+  byId         String   @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  @@unique([tillId, clientId])
+  @@index([shiftId])
+  @@index([companyId])
 }
 
 // ---------------------------------------------------------------------------

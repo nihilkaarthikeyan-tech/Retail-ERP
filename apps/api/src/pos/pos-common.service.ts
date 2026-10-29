@@ -3,7 +3,7 @@
 // tills and their registered computers, manager approvals and cashier
 // switching by PIN, the GST rate list, and company defaults.
 import { createHash, randomBytes } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { type ApprovalAction, businessDate, type CurrentUser, Decimal, hasPermission, PAYMENT_ACCOUNT_ROLES, type PermissionKey, SPECIAL_PAYMENT_METHODS, TILL_INVOICE_PREFIX_RE, tillInvoicePrefixCandidates } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import { canAccessStore } from '../auth/store-access.js';
@@ -23,6 +23,22 @@ export const TILL_TOKEN_HEADER = 'x-till-token';
 
 /** Approvals live for ten minutes and are used once (decision 40). */
 const APPROVAL_MINUTES = 10;
+
+/**
+ * Audit 5 (29 October 2026): a till computer that is not (or no longer) registered answers 403 with this
+ * code, so the till can tell it apart from a 401 (the person's session ended) and keep its queue.
+ */
+export const TILL_NOT_REGISTERED = 'TILL_NOT_REGISTERED';
+
+/** How an approval is checked (audit 5). */
+export interface ApprovalCheck {
+  /** Offline bills: the approval must have been alive when the bill was sold, not when it is sent. */
+  at?: Date;
+  /** Called instead of refusing when the approval had expired at `at` (offline: the bill is kept and flagged). */
+  onLate?: () => void;
+  /** Compares the figure the manager approved with what is done now; returns the problem in plain words, or null. */
+  figure?: (approved: { amount: Decimal | null; percent: Decimal | null }) => string | null;
+}
 
 export const DEFAULT_PAYMENT_METHODS = [
   { code: 'CASH', name: 'Cash', kind: 'cash', allowRefund: true, needsReference: false },
@@ -95,18 +111,27 @@ export class PosCommon {
 
   /** Till endpoints need the registered computer's token (pos-offline §9). */
   async assertDevice(db: Db, tillId: string, token: string | undefined): Promise<void> {
-    if (!token) throw new UnauthorizedException('This computer is not registered as a till');
-    const device = await db.tillDevice.findUnique({ where: { tokenHash: sha256(token) } });
-    if (!device || device.revokedAt || device.tillId !== tillId) throw new UnauthorizedException('This computer is not registered for this till');
+    const device = await this.deviceFor(db, token);
+    if (device.tillId !== tillId) throw new ForbiddenException({ message: 'This computer is not registered for this till', code: TILL_NOT_REGISTERED });
     await db.tillDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+  }
+
+  /** The registered till computer of a token; 403 TILL_NOT_REGISTERED when unknown or revoked (never 401, audit 5). */
+  async deviceFor(db: Db, token: string | undefined) {
+    if (!token) throw new ForbiddenException({ message: 'This computer is not registered as a till', code: TILL_NOT_REGISTERED });
+    const device = await db.tillDevice.findUnique({ where: { tokenHash: sha256(token) } });
+    if (!device || device.revokedAt) throw new ForbiddenException({ message: 'This computer is no longer registered as a till; register it again under Billing counter → Tills', code: TILL_NOT_REGISTERED });
+    return device;
   }
 
   // ---- Manager approvals and cashier switching (decisions 40, 68) ----
 
   /** Creates a single-use approval after the manager's PIN was checked by PinService. */
-  async createApproval(db: Db, tillId: string, managerId: string, action: ApprovalAction, details: string | null): Promise<string> {
+  async createApproval(db: Db, tillId: string, managerId: string, action: ApprovalAction, details: string | null, figure: { amount?: string | null; percent?: string | null } = {}): Promise<string> {
     const token = newToken();
-    await db.posApproval.create({ data: { tokenHash: sha256(token), tillId, managerId, action, details, expiresAt: new Date(Date.now() + APPROVAL_MINUTES * 60_000) } });
+    await db.posApproval.create({
+      data: { tokenHash: sha256(token), tillId, managerId, action, details, approvedAmount: figure.amount ?? null, approvedPercent: figure.percent ?? null, expiresAt: new Date(Date.now() + APPROVAL_MINUTES * 60_000) },
+    });
     return token;
   }
 
@@ -116,12 +141,18 @@ export class PosCommon {
    * and noted; the caller marks it used with markApprovalsUsed inside the transaction that
    * saves the bill, so an approval is never used up by a bill that is then refused.
    */
-  async useApproval(db: Db, token: string | undefined, tillId: string, actions: ApprovalAction[], usedFor: string, pending?: PendingApproval[]): Promise<string> {
+  async useApproval(db: Db, token: string | undefined, tillId: string, actions: ApprovalAction[], usedFor: string, pending?: PendingApproval[], check: ApprovalCheck = {}): Promise<string> {
     if (!token) throw new ForbiddenException('A manager must approve this');
     const a = await db.posApproval.findUnique({ where: { tokenHash: sha256(token) } });
     if (!a || a.tillId !== tillId || !actions.includes(a.action as ApprovalAction)) throw new ForbiddenException('The manager approval is not valid for this');
     if (a.usedAt || pending?.some((p) => p.id === a.id)) throw new ForbiddenException('The manager approval was already used');
-    if (a.expiresAt < new Date()) throw new ForbiddenException('The manager approval has expired; ask again');
+    if (a.expiresAt < (check.at ?? new Date())) {
+      if (!check.onLate) throw new ForbiddenException('The manager approval has expired; ask again');
+      check.onLate();
+    }
+    // Audit 5: an approval is for the figure the manager saw (a cash difference, a cash out, a bill discount).
+    const problem = check.figure?.({ amount: a.approvedAmount ? D(a.approvedAmount) : null, percent: a.approvedPercent ? D(a.approvedPercent) : null });
+    if (problem) throw new ForbiddenException(problem);
     if (pending) pending.push({ id: a.id, usedFor });
     else {
       // Audit 2 (28 October 2026): marked used in one step, so two requests at once cannot both use it.
@@ -145,15 +176,24 @@ export class PosCommon {
     return token;
   }
 
-  /** The cashier of a bill: the one who switched in with their PIN, else the signed-in user. */
-  async cashierFor(db: Db, tillId: string, token: string | undefined, user: CurrentUser): Promise<string> {
+  /**
+   * The cashier of a bill: the one who switched in with their PIN, else the signed-in user.
+   * Audit 5 (29 October 2026): a switch that ended answers 403 CASHIER_SWITCH_EXPIRED, never 401 (which
+   * the till reads as "the session ended"). A bill made offline was sold already: with `flags` it is kept
+   * under the signed-in user and flagged cashier_switch_expired.
+   */
+  async cashierFor(db: Db, tillId: string, token: string | undefined, user: CurrentUser, flags?: Set<string>): Promise<string> {
     if (!token) return user.id;
     const t = await db.posCashierToken.findUnique({ where: { tokenHash: sha256(token) } });
-    if (!t || t.tillId !== tillId || t.expiresAt < new Date()) throw new UnauthorizedException('The cashier switch has expired; switch again with the PIN');
     // Audit 1 (28 October 2026): a cashier switched off since cannot keep billing on the switch.
-    const cashier = await db.user.findUnique({ where: { id: t.userId }, select: { active: true } });
-    if (!cashier?.active) throw new UnauthorizedException('That cashier is switched off; switch again with another PIN');
-    return t.userId;
+    const cashier = t && t.tillId === tillId ? await db.user.findUnique({ where: { id: t.userId }, select: { active: true } }) : null;
+    const problem = !t || t.tillId !== tillId || t.expiresAt < new Date() ? 'The cashier switch has expired; switch again with the PIN' : !cashier?.active ? 'That cashier is switched off; switch again with another PIN' : null;
+    if (!problem) return t!.userId;
+    if (flags) {
+      flags.add('cashier_switch_expired');
+      return user.id;
+    }
+    throw new ForbiddenException({ message: problem, code: 'CASHIER_SWITCH_EXPIRED' });
   }
 
   // ---- GST rate list (decision 56; plan 06 answer 1) ----

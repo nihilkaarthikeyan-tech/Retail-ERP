@@ -3,11 +3,13 @@
 // answers 4 and 6): open with starting cash (works offline), cash in / out
 // during the shift, and close with a count of notes and coins. Closing needs
 // the connection and an empty send queue; a difference above the setting needs
-// a remark and a manager's PIN.
+// a remark and a manager's PIN. Audit 5: the opening float is suggested from
+// the last close (C7), a blind count hides the expected cash until the count
+// is entered (C8), and cash out above the set amount needs a manager (C5).
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
-import { Decimal, DENOMINATIONS, denominationTotal } from "shared";
+import { type ApprovalAction, Decimal, DENOMINATIONS, denominationTotal } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import type { TillEngine } from "@/lib/till/engine";
@@ -17,7 +19,9 @@ import { NumPad } from "./num-pad";
 import { ManagerApprovalDialog } from "./pin-dialogs";
 
 export function OpenShiftScreen({ engine, openedBy }: { engine: TillEngine; openedBy: string }) {
-  const [amount, setAmount] = useState("");
+  // C7: the cash counted at the last close is suggested; the cashier counts and changes it if needed.
+  const [suggested] = useState(() => engine.suggestedFloat());
+  const [amount, setAmount] = useState(() => suggested ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Launch check, 27 October 2026: an empty box became ₹0 without a question.
@@ -51,6 +55,7 @@ export function OpenShiftScreen({ engine, openedBy }: { engine: TillEngine; open
       <form className="card till-open" onSubmit={open}>
         <h1>Open the shift</h1>
         <p>Count the cash in the drawer before the first bill.</p>
+        {suggested !== null ? <p className="muted">Filled in from the cash counted at the last close ({rupees(suggested)}). Count the drawer and change it if it differs.</p> : null}
         <label className="till-pin-label" htmlFor="till-start-cash">
           Starting cash (₹)
         </label>
@@ -66,21 +71,51 @@ export function OpenShiftScreen({ engine, openedBy }: { engine: TillEngine; open
   );
 }
 
+/** C5: the approval action for a large cash out (the server lists it with the others). */
+const CASH_OUT: ApprovalAction = "cash_out";
+
+/** C5: a cash out of more than the till's limit, or false. */
+function cashOutOverLimit(direction: "in" | "out", amount: string, limit: string | null): boolean {
+  if (direction !== "out" || limit === null) return false;
+  try {
+    return new Decimal(amount || "0").gt(new Decimal(limit));
+  } catch {
+    return false;
+  }
+}
+
 export function CashDialog({ open, engine, onClose }: { open: boolean; engine: TillEngine; onClose: () => void }) {
   const [direction, setDirection] = useState<"in" | "out">("out");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // C5: the manager's approval is for this cash out only; a change of amount or direction asks again.
+  const [approval, setApproval] = useState<{ token: string; manager: string } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const limit = engine.cashOutApprovalAbove();
+  const overLimit = cashOutOverLimit(direction, amount, limit);
+  const state = engine.getState();
+  const online = state.online && !state.signedOut;
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
+  function changeAmount(value: string) {
+    setAmount(value);
+    setApproval(null);
+  }
+
+  async function save(e?: FormEvent) {
+    e?.preventDefault();
+    if (overLimit && !approval) {
+      if (!reason.trim()) return setError("Give a reason");
+      return setAsking(true);
+    }
     setBusy(true);
     setError(null);
     try {
-      await engine.cashMovement(direction, amount, reason);
+      await engine.cashMovement(direction, amount, reason, overLimit ? approval?.token : undefined);
       setAmount("");
       setReason("");
+      setApproval(null);
       onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -94,7 +129,17 @@ export function CashDialog({ open, engine, onClose }: { open: boolean; engine: T
       <form onSubmit={save} className="till-pay">
         <div className="till-row" role="radiogroup" aria-label="Direction">
           {(["out", "in"] as const).map((d) => (
-            <button key={d} type="button" role="radio" aria-checked={direction === d} className={`till-key${direction === d ? " is-selected" : ""}`} onClick={() => setDirection(d)}>
+            <button
+              key={d}
+              type="button"
+              role="radio"
+              aria-checked={direction === d}
+              className={`till-key${direction === d ? " is-selected" : ""}`}
+              onClick={() => {
+                setDirection(d);
+                setApproval(null);
+              }}
+            >
               {d === "out" ? "Cash out (petty payment)" : "Cash in (float top-up)"}
             </button>
           ))}
@@ -102,16 +147,31 @@ export function CashDialog({ open, engine, onClose }: { open: boolean; engine: T
         <label className="till-pin-label" htmlFor="till-cash-amount">
           Amount (₹)
         </label>
-        <input id="till-cash-amount" className="input till-input-big" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))} />
+        <input id="till-cash-amount" className="input till-input-big" inputMode="decimal" value={amount} onChange={(e) => changeAmount(e.target.value.replace(/[^\d.]/g, ""))} />
         <label className="till-pin-label" htmlFor="till-cash-reason">
           Reason
         </label>
         <input id="till-cash-reason" className="input till-input-big" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} />
+        {overLimit && limit !== null ? (
+          <Alert kind="info">
+            Cash out above {rupees(limit)} needs a manager&apos;s PIN{online ? "" : ", which needs the connection"}.{approval ? ` Approved by ${approval.manager}.` : ""}
+          </Alert>
+        ) : null}
         <Alert kind="error">{error}</Alert>
         <Button type="submit" variant="primary" className="till-big" busy={busy}>
-          Save
+          {overLimit && !approval ? "Ask a manager and save" : "Save"}
         </Button>
       </form>
+      <ManagerApprovalDialog
+        api={engine.api}
+        online={online}
+        request={asking ? { action: CASH_OUT, details: `cash out ${new Decimal(amount || "0").toFixed(2)}: ${reason.trim()}`, reason: `Cash out of ${rupees(amount || "0")} (${reason.trim()})`, amount: new Decimal(amount || "0").toFixed(2) } : null}
+        onClose={() => setAsking(false)}
+        onApproved={(token, manager) => {
+          setApproval({ token, manager: manager.name });
+          setAsking(false);
+        }}
+      />
     </Dialog>
   );
 }
@@ -119,7 +179,9 @@ export function CashDialog({ open, engine, onClose }: { open: boolean; engine: T
 type Counts = Record<string, string>;
 
 export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { open: boolean; engine: TillEngine; online: boolean; onClose: () => void; onClosed: (s: ServerShift) => void }) {
-  const [info, setInfo] = useState<{ shift: ServerShift; approvalAmount: string } | null>(null);
+  const [info, setInfo] = useState<{ shift: ServerShift; approvalAmount: string; blindCount?: boolean } | null>(null);
+  // C8: with a blind count, the expected cash shows only after the count is entered.
+  const [counted, setCounted] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Counts>({});
   const [other, setOther] = useState<Counts>({});
@@ -137,7 +199,9 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
         if (cancelled) return;
         setInfo(i);
         setLoadError(null);
-        setOther(Object.fromEntries((i.shift.expected ?? []).filter((e) => e.kind !== "cash").map((e) => [e.paymentMethodId, e.expected])));
+        setCounted(false);
+        // C8: a blind count starts the other methods empty too, so nothing expected is shown.
+        setOther(i.blindCount ? {} : Object.fromEntries((i.shift.expected ?? []).filter((e) => e.kind !== "cash").map((e) => [e.paymentMethodId, e.expected])));
       },
       (e: unknown) => {
         if (!cancelled) setLoadError(errorMessage(e));
@@ -171,10 +235,28 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
   });
   const biggest = rows.reduce((m, r) => Decimal.max(m, r.difference.abs()), new Decimal(0));
   const needsApproval = !!info && biggest.gt(new Decimal(info.approvalAmount));
+  const hideExpected = !!info?.blindCount && !counted;
+
+  // The manager approves one difference (the server compares the amount): a new count asks again.
+  function changeNotes(next: Counts) {
+    setNotes(next);
+    setApproval(null);
+  }
+
+  function changeOther(next: Counts) {
+    setOther(next);
+    setApproval(null);
+  }
 
   async function close() {
     if (!info) return;
     if (countProblem) return setError(countProblem);
+    if (hideExpected) {
+      // C8: the count is entered; now the expected cash and any difference are shown.
+      setCounted(true);
+      setError(null);
+      return;
+    }
     if (needsApproval && !remarks.trim()) return setError(`The difference is more than ${rupees(info.approvalAmount)}; write a remark`);
     if (needsApproval && !approval) return setAsking(true);
     setBusy(true);
@@ -187,6 +269,7 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
       setNotes({});
       setApproval(null);
       setRemarks("");
+      setCounted(false);
       onClosed(closed);
     } catch (err) {
       setError(errorMessage(err));
@@ -213,7 +296,7 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
                   inputMode="numeric"
                   aria-label={`Count of ₹${d}`}
                   value={notes[d] ?? ""}
-                  onChange={(e) => setNotes({ ...notes, [d]: e.target.value.replace(/\D/g, "") })}
+                  onChange={(e) => changeNotes({ ...notes, [d]: e.target.value.replace(/\D/g, "") })}
                 />
                 <span className="muted">{rupees(new Decimal(d).mul(notes[d] || "0"))}</span>
               </label>
@@ -222,20 +305,21 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
           <p className="till-dialog-lead">
             Cash counted: <strong>{rupees(cashCounted)}</strong>
           </p>
+          {hideExpected ? <p className="muted">Blind count: enter what you counted for each method; the expected amounts are shown after that.</p> : null}
           <table className="table">
             <thead>
               <tr>
                 <th>Method</th>
-                <th className="num">Expected</th>
+                {hideExpected ? null : <th className="num">Expected</th>}
                 <th className="num">Counted</th>
-                <th className="num">Difference</th>
+                {hideExpected ? null : <th className="num">Difference</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.paymentMethodId} className={r.difference.isZero() ? undefined : "row-warn"}>
+                <tr key={r.paymentMethodId} className={hideExpected || r.difference.isZero() ? undefined : "row-warn"}>
                   <td>{r.name}</td>
-                  <td className="num">{rupees(r.expected)}</td>
+                  {hideExpected ? null : <td className="num">{rupees(r.expected)}</td>}
                   <td className="num">
                     {r.kind === "cash" ? (
                       rupees(r.counted)
@@ -245,16 +329,16 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
                         inputMode="decimal"
                         aria-label={`${r.name} counted`}
                         value={other[r.paymentMethodId] ?? ""}
-                        onChange={(e) => setOther({ ...other, [r.paymentMethodId]: e.target.value.replace(/[^\d.-]/g, "") })}
+                        onChange={(e) => changeOther({ ...other, [r.paymentMethodId]: e.target.value.replace(/[^\d.-]/g, "") })}
                       />
                     )}
                   </td>
-                  <td className={`num${r.difference.isNegative() ? " num-negative" : ""}`}>{rupees(r.difference)}</td>
+                  {hideExpected ? null : <td className={`num${r.difference.isNegative() ? " num-negative" : ""}`}>{rupees(r.difference)}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
-          {needsApproval ? (
+          {needsApproval && !hideExpected ? (
             <>
               <Alert kind="info">
                 The difference is more than {rupees(info.approvalAmount)}: write a remark and ask a manager to approve.
@@ -268,12 +352,12 @@ export function CloseShiftDialog({ open, engine, online, onClose, onClosed }: { 
           ) : null}
           <Alert kind="error">{error}</Alert>
           <Button variant="primary" className="till-big" busy={busy} onClick={() => void close()}>
-            {needsApproval && !approval ? "Ask a manager and close" : "Close shift"}
+            {hideExpected ? "Count entered: show expected" : needsApproval && !approval ? "Ask a manager and close" : "Close shift"}
           </Button>
           <ManagerApprovalDialog
             api={engine.api}
             online={online}
-            request={asking ? { action: "cash_difference", details: `shift ${info.shift.businessDate} difference ${biggest.toFixed(2)}`, reason: `Cash difference of ${rupees(biggest)} at closing` } : null}
+            request={asking ? { action: "cash_difference", details: `shift ${info.shift.businessDate} difference ${biggest.toFixed(2)}`, reason: `Cash difference of ${rupees(biggest)} at closing`, amount: biggest.abs().toFixed(2) } : null}
             onClose={() => setAsking(false)}
             onApproved={(token, manager) => {
               setApproval({ token, manager: manager.name });

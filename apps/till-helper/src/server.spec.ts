@@ -7,7 +7,7 @@ import { Pairing } from './pairing.js';
 import { buildReceipt } from './receipt.js';
 import { createHelperServer, listenLocal } from './server.js';
 import { sampleSale } from './test-support/sample-receipt.js';
-import type { Transport } from './transports.js';
+import type { PrinterStatus, Transport } from './transports.js';
 
 const ERP = 'http://localhost:3000';
 const TOKEN = 'secret-token-0123456789-abcdefghijklmnop';
@@ -44,6 +44,7 @@ describe('Till Helper HTTP service', () => {
   let server: Server;
   let port: number;
   let send: ReturnType<typeof vi.fn<(bytes: Buffer) => Promise<void>>>;
+  let status: ReturnType<typeof vi.fn<() => Promise<PrinterStatus>>>;
   let config: HelperConfig;
   const ok = { origin: ERP, 'x-helper-token': TOKEN };
 
@@ -54,7 +55,8 @@ describe('Till Helper HTTP service', () => {
       ...overrides,
     });
     send = vi.fn<(bytes: Buffer) => Promise<void>>(async () => undefined);
-    const transport: Transport | null = withPrinter ? { send } : null;
+    status = vi.fn<() => Promise<PrinterStatus>>(async () => ({ known: false }));
+    const transport: Transport | null = withPrinter ? { send, status } : null;
     server = createHelperServer({ config, pairing: new Pairing(TOKEN, code), transport });
     port = await listenLocal(server, 0);
   }
@@ -148,7 +150,7 @@ describe('Till Helper HTTP service', () => {
         ok: true,
         version: '0.1.0',
         paperWidth: 80,
-        printer: { configured: true, kind: 'network', name: '192.168.1.50:9100' },
+        printer: { configured: true, kind: 'network', name: '192.168.1.50:9100', statusReadable: true, statusNote: expect.stringContaining('checked before each receipt') },
         drawer: { configured: true },
       });
     });
@@ -157,7 +159,7 @@ describe('Till Helper HTTP service', () => {
       server.close();
       await start({ printer: { kind: 'none' } }, false);
       const r = await call(port, 'GET', '/status', ok);
-      expect(r.body.printer).toEqual({ configured: false, kind: null, name: null });
+      expect(r.body.printer).toEqual({ configured: false, kind: null, name: null, statusReadable: false, statusNote: null });
       expect(r.body.drawer).toEqual({ configured: false });
     });
   });
@@ -221,6 +223,40 @@ describe('Till Helper HTTP service', () => {
       expect(order[1]!.startsWith('end')).toBe(true);
     });
 
+    it('asks the printer for paper and cover first, and prints when it does not answer', async () => {
+      const r = await call(port, 'POST', '/print', ok, { receipt: sampleSale() });
+      expect(r.status).toBe(200);
+      expect(status).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['no_paper', /out of paper/],
+      ['cover_open', /cover is open/],
+      ['offline', /offline/],
+    ] as const)('does not print and says why when the printer reports %s', async (problem, message) => {
+      status.mockResolvedValueOnce({ known: true, problem, paperLow: false });
+      const r = await call(port, 'POST', '/print', ok, { receipt: sampleSale() });
+      expect(r.status).toBe(503);
+      expect(r.body.code).toBe(problem);
+      expect(r.body.error).toMatch(message);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('prints when the paper is only nearly out', async () => {
+      status.mockResolvedValueOnce({ known: true, problem: null, paperLow: true });
+      expect((await call(port, 'POST', '/print', ok, { receipt: sampleSale() })).status).toBe(200);
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers printer_error when the printer cannot be reached for its status', async () => {
+      status.mockRejectedValueOnce(new Error('connection refused'));
+      const r = await call(port, 'POST', '/print', ok, { receipt: sampleSale() });
+      expect(r.status).toBe(503);
+      expect(r.body.code).toBe('printer_error');
+      expect(send).not.toHaveBeenCalled();
+    });
+
     it('refuses a body that is not JSON', async () => {
       const r = await call(port, 'POST', '/print', { ...ok, 'content-type': 'text/plain' }, { receipt: sampleSale() });
       expect(r.status).toBe(415);
@@ -232,6 +268,8 @@ describe('Till Helper HTTP service', () => {
       const r = await call(port, 'POST', '/drawer/open', ok);
       expect(r.status).toBe(200);
       expect([...send.mock.calls[0]![0]]).toEqual(drawerKickBytes(2));
+      // The drawer opens through the printer without the paper check.
+      expect(status).not.toHaveBeenCalled();
     });
 
     it('refuses when no drawer is set up', async () => {

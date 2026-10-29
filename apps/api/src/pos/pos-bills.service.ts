@@ -4,7 +4,7 @@
 // 39) through StockEngine in the same transaction (rules 5–7). A transaction
 // sent twice is saved once (decision 80). Bills made offline are accepted as
 // sold and flagged for checking.
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   addDays,
   bandUnitPrice,
@@ -17,6 +17,7 @@ import {
   creditNoteDeadline,
   changeDue,
   checkDiscount,
+  type ApprovalAction,
   type CurrentUser,
   dayMonthYearProblem,
   Decimal,
@@ -45,6 +46,7 @@ import {
   type PosBillQuery,
   type PosLineInput,
   type PosTransactionInput,
+  posTransactionSchema,
   freeToSell,
   needsBuyerDetails,
   QUANTITY_TOLERANCE,
@@ -66,7 +68,7 @@ import { assertStoreAccess } from '../auth/store-access.js';
 import { AuditService, type Db } from '../audit/audit.service.js';
 import type { Actor } from '../common/request-context.js';
 import { FinancialYearsService } from '../financial-years/financial-years.service.js';
-import type { Customer, GstRate, GstSettings, Item, Offer, PosDelivery, PosSettings, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
+import type { Coupon, Customer, GstRate, GstSettings, Item, Offer, PosDelivery, PosSettings, Prisma, StockLedgerEntry } from '../generated/prisma/client.js';
 import type { Seller } from '../gst/gst-core.service.js';
 import { type Movement, StockEngine } from '../inventory/stock-engine.service.js';
 import { ItemsService } from '../items/items.service.js';
@@ -81,7 +83,7 @@ import { lockRows } from '../common/row-lock.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OffersService } from './offers.service.js';
 import { hasLiveIrn, LIVE_IRN_MESSAGE } from '../common/live-irn.js';
-import { D, fromIso, iso, type PendingApproval, PosCommon, type TillWithRefs } from './pos-common.service.js';
+import { type ApprovalCheck, D, fromIso, iso, type PendingApproval, PosCommon, sha256, type TillWithRefs } from './pos-common.service.js';
 import { type OpenAdvance, PosCredit } from './pos-credit.service.js';
 
 export const billInclude = {
@@ -126,6 +128,10 @@ interface BuiltLine {
   keepRate?: boolean;
   /** Audit 4 (T4): the home-delivery charge, taxed at the goods' rate. */
   isDelivery?: boolean;
+  /** Audit 5 (pos-offline §5): what the server's price list, offer, rate and limits said, for "Offline bills to check". */
+  serverFigures?: Record<string, string>;
+  /** Audit 5: an offline line kept with the till's own figures (checked against the limits in checkCharged). */
+  chargedFrom?: PosLineInput;
 }
 
 /** Plan 08 G4, G5: the buyer written on the bill. */
@@ -167,6 +173,8 @@ type AlterationRow = Prisma.AlterationJobGetPayload<object>;
 interface BuildContext {
   till: TillWithRefs;
   date: string;
+  /** Audit 5: offline, a manager's approval must have been alive at the time of sale. */
+  soldAt: Date;
   input: PosTransactionInput;
   user: CurrentUser;
   flags: Set<string>;
@@ -277,38 +285,115 @@ export class PosBillsService {
   async post(input: PosTransactionInput, actor: Actor, user: CurrentUser, deviceToken: string | undefined) {
     this.common.requireRight(user, 'pos.sell');
     if (input.ret) this.common.requireRight(user, 'pos.return');
-    const till = await this.common.usableTill(this.prisma, input.tillId, user);
+    let till: TillWithRefs;
+    try {
+      till = await this.common.usableTill(this.prisma, input.tillId, user);
+    } catch (err) {
+      // Audit 5: an offline bill of a till switched off meanwhile is kept for the office too (pos-offline §5, "hard errors").
+      const known = input.offline && err instanceof BadRequestException ? await this.common.till(this.prisma, input.tillId).catch(() => null) : null;
+      if (known) {
+        await this.common.assertDevice(this.prisma, known.id, deviceToken);
+        await this.recordSyncProblem(known, input, err instanceof Error ? err.message : String(err), user.id);
+      }
+      throw err;
+    }
     await this.common.assertDevice(this.prisma, till.id, deviceToken);
 
     // Pos-offline §4: the same transaction sent again returns what was saved.
+    const hash = clientHash(input);
     const already = await this.prisma.posBill.findMany({ where: { tillId: till.id, clientId: input.clientId }, include: billInclude, orderBy: { kind: 'desc' } });
-    if (already.length) return this.transactionDto(already, user, true);
+    if (already.length) return this.repeated(already, hash, user);
 
     try {
       try {
-        return await this.save(input, till, actor, user);
+        return await this.save(input, till, actor, user, hash);
       } catch (first) {
         // Audit 3 (28 October 2026): two bills taking the same stock rows in opposite order (two exchanges
         // at once) can deadlock; the database cancels one, which is tried once more (safe: same client id).
         const code = (first as { code?: string; meta?: { code?: string } }).code;
         const deadlock = code === 'P2034' || String((first as { message?: string }).message ?? '').includes('deadlock detected');
         if (!deadlock) throw first;
-        return await this.save(input, till, actor, user);
+        return await this.save(input, till, actor, user, hash);
       }
     } catch (err) {
       // Two copies at the same moment: the unique rule keeps one; answer with it.
       const raced = await this.prisma.posBill.findMany({ where: { tillId: till.id, clientId: input.clientId }, include: billInclude, orderBy: { kind: 'desc' } });
-      if (raced.length) return this.transactionDto(raced, user, true);
+      if (raced.length) return this.repeated(raced, hash, user);
       // Audit 3 (28 October 2026): a bill number already used by another bill is a plain refusal (and a
       // sync problem for the office to resolve), not a server error the till would retry for ever.
       const e = err as { code?: string; meta?: unknown };
       const problem = e.code === 'P2002' && JSON.stringify(e.meta ?? '').includes('number') ? new BadRequestException(`Bill number ${input.sale?.number ?? input.ret?.number ?? ''} is already used by another bill; the till's numbering needs checking`) : err;
-      if (input.offline && problem instanceof BadRequestException) await this.recordSyncProblem(till, input, problem.message);
+      // Audit 5 (29 October 2026): every refusal of an offline bill (any 4xx, not only 400) is kept with
+      // the bill for the office, which can post it into a shift (C3).
+      if (input.offline && problem instanceof HttpException && problem.getStatus() >= 400 && problem.getStatus() < 500) await this.recordSyncProblem(till, input, problem.message, user.id);
       throw problem;
     }
   }
 
-  private async save(input: PosTransactionInput, till: TillWithRefs, actor: Actor, user: CurrentUser) {
+  /**
+   * A transaction sent again (pos-offline §4) is answered with what was saved. Audit 5: the same
+   * identity with other content (lines, payments, customer) is a different bill: refused with 409
+   * BILL_ALREADY_SAVED and the saved transaction, so the till can see what the server kept.
+   */
+  private async repeated(bills: BillRow[], hash: string, user: CurrentUser) {
+    const saved = await this.transactionDto(bills, user, true);
+    if (bills[0].clientHash && bills[0].clientHash !== hash) {
+      throw new ConflictException({ message: `A different bill with the same identity was saved already as ${saved.sale?.number ?? saved.return?.number}; this one was not saved`, code: 'BILL_ALREADY_SAVED', transaction: saved });
+    }
+    return saved;
+  }
+
+  /** Audit 5: after an uncertain failure the till asks whether the server has its bill. */
+  async byClient(clientId: string, user: CurrentUser, deviceToken: string | undefined) {
+    this.common.requireRight(user, 'pos.sell');
+    const device = await this.common.deviceFor(this.prisma, deviceToken);
+    const till = await this.common.usableTill(this.prisma, device.tillId, user);
+    await this.common.assertDevice(this.prisma, till.id, deviceToken);
+    const bills = await this.prisma.posBill.findMany({ where: { tillId: till.id, clientId }, include: billInclude, orderBy: { kind: 'desc' } });
+    if (bills.length) return { saved: true, transaction: await this.transactionDto(bills, user, true) };
+    const problem = await this.prisma.posSyncProblem.findUnique({ where: { tillId_clientId_kind: { tillId: till.id, clientId, kind: 'bill' } } });
+    return { saved: false, problem: problem ? { error: problem.error, resolvedAt: problem.resolvedAt, resolution: problem.resolution } : null };
+  }
+
+  /**
+   * Audit 5 (C3, owner 29 October 2026): the office posts a bill the server refused into the till's
+   * open shift. The bill is saved from what the till sent, as an offline bill (kept as sold, its
+   * differences flagged), with the flag posted_by_office; its cashier is the one who sent it.
+   */
+  async postSyncProblem(id: string, actor: Actor, user: CurrentUser) {
+    this.common.requireRight(user, 'pos.shift.manage');
+    const company = await this.common.currentCompany();
+    const problem = await this.prisma.posSyncProblem.findFirst({ where: { id, companyId: company.id } });
+    const visible = problem && (await this.prisma.till.findFirst({ where: { id: problem.tillId, ...(user.allStores ? {} : { storeId: { in: user.stores.map((s) => s.id) } }) }, select: { id: true } }));
+    if (!problem || !visible) throw new NotFoundException('Till problem not found');
+    if (problem.kind !== 'bill') throw new BadRequestException('Only a bill can be posted into a shift');
+    if (problem.resolvedAt) throw new BadRequestException('This problem is resolved already');
+    const till = await this.common.usableTill(this.prisma, problem.tillId, user);
+    const parsed = posTransactionSchema.safeParse(problem.payload);
+    if (!parsed.success) throw new BadRequestException('The bill the till sent cannot be read; mark the problem resolved and enter the sale by hand');
+    const shift = await this.prisma.shift.findFirst({ where: { tillId: till.id, status: 'open' } });
+    if (!shift) throw new BadRequestException(`Till ${till.code} has no open shift. Open a shift on the till first, then post the bill into it`);
+    const input: PosTransactionInput = { ...parsed.data, offline: true, shiftClientId: shift.clientId };
+    const already = await this.prisma.posBill.findMany({ where: { tillId: till.id, clientId: input.clientId }, include: billInclude, orderBy: { kind: 'desc' } });
+    let result: Awaited<ReturnType<PosBillsService['save']>>;
+    if (already.length) result = { ...(await this.transactionDto(already, user, true)), warnings: [] };
+    else {
+      try {
+        result = await this.save(input, till, actor, user, clientHash(input), { cashierId: problem.sentById });
+      } catch (err) {
+        if (err instanceof HttpException) await this.prisma.posSyncProblem.update({ where: { id }, data: { error: err.message } });
+        throw err;
+      }
+    }
+    const number = [result.return?.number, result.sale?.number].filter(Boolean).join(' and ');
+    await this.prisma.$transaction(async (tx) => {
+      const r = await tx.posSyncProblem.update({ where: { id }, data: { resolvedAt: new Date(), resolvedById: actor.userId, resolution: `Posted into the shift of ${iso(shift.businessDate)} as bill ${number}` } });
+      await this.audit.record(tx, actor, { action: 'update', entityType: 'pos_sync_problem', entityId: id, changes: { resolvedAt: { old: null, new: r.resolvedAt }, postedAs: number, shiftId: shift.id } });
+    });
+    return result;
+  }
+
+  private async save(input: PosTransactionInput, till: TillWithRefs, actor: Actor, user: CurrentUser, hash: string, office?: { cashierId: string | null }) {
     const company = await this.common.currentCompany();
     const settings = await this.common.settings(this.prisma, company.id);
     const soldAt = new Date(input.soldAt);
@@ -326,10 +411,16 @@ export class PosBillsService {
       if (!input.offline) throw new BadRequestException(`This till’s shift is from ${iso(shift.businessDate)}; close it and open a new one`);
       flags.add('shift_date');
     }
+    // Audit 5: an offline bill keeps its time of sale, but one from the future or from before its shift opened is listed.
+    if (input.offline && (soldAt.getTime() > Date.now() + 10 * 60_000 || soldAt.getTime() < shift.openedAt.getTime() - 60_000)) flags.add('sold_time_odd');
+    // Audit 5 (C3): a bill the office posted into a shift after the server first refused it.
+    if (office) flags.add('posted_by_office');
     // Audit 2 (28 October 2026): an offline bill of a day the books were locked since is kept (the sale
     // happened), but its accounts go to the next open day, so it is listed for the Accountant.
     if (company.lockDate && date <= iso(company.lockDate)!) flags.add('after_books_locked');
-    const cashierId = await this.common.cashierFor(this.prisma, till.id, input.cashierToken, user);
+    let cashierId = await this.common.cashierFor(this.prisma, till.id, input.cashierToken, user, input.offline ? flags : undefined);
+    // Posted by the office: the cashier is the one who sent the bill, not the office.
+    if (office?.cashierId && cashierId === user.id) cashierId = office.cashierId;
     const customer = await this.customerFor(company.id, input, actor, flags);
     // Plan 11 A6 (blueprint 05): a blocked customer is refused except for the credit controller; offline bills are kept and flagged.
     if (customer.status === 'blocked' && !hasPermission(user, 'customers.credit')) {
@@ -356,7 +447,7 @@ export class PosBillsService {
       flags.add('composition_interstate');
     }
     await this.checkModules(input, flags);
-    const coupon = input.couponCode && input.sale ? await this.offers.couponFor(this.prisma, company.id, input.couponCode, date, customer.id) : null;
+    const coupon = input.couponCode && input.sale ? await this.couponFor(company.id, input, date, customer.id, flags) : null;
     const offerCtx = { companyId: company.id, storeId: till.storeId, date, customerGroupId: customer.customerGroupId, couponOfferId: coupon?.offerId ?? null };
     const year = await this.years.forDate(this.prisma, company.id, date);
     if (!year) throw new BadRequestException(`No financial year covers ${date}`);
@@ -370,12 +461,12 @@ export class PosBillsService {
     const pending: PendingApproval[] = [];
     const order = await this.orderFor(company.id, input, till, customer);
     const alteration = await this.alterationFor(company.id, input, till);
-    const ctx: BuildContext = { till, date, input, user, flags, supply, buyer, seller, settings, customer, approvals, catalogue, newPrices, pending, order, alteration };
+    const ctx: BuildContext = { till, date, soldAt, input, user, flags, supply, buyer, seller, settings, customer, approvals, catalogue, newPrices, pending, order, alteration };
     await this.checkSalesStaff(company.id, till, input, flags);
 
     const ret = input.ret ? await this.buildReturn(ctx) : null;
     const sale = input.sale ? await this.buildSale(ctx, offerCtx, coupon?.id ?? null) : null;
-    for (const b of [ret, sale]) if (b) this.checkNumber(b.number, till, year.name, input.offline);
+    for (const b of [ret, sale]) if (b) await this.checkNumber(b.number, till, year.name, input.offline, flags);
     if (ret && sale && ret.number === sale.number) throw new BadRequestException('The return and the sale need different numbers');
 
     const retTotals = ret ? this.totals(ret.lines, ret.supply) : null;
@@ -386,8 +477,17 @@ export class PosBillsService {
     // Payments (blueprint 09 process 3); on account only as plan 07 §1a allows.
     const methods = new Map(till.paymentMethods.map((m) => [m.paymentMethodId, m.paymentMethod]));
     for (const p of input.payments) {
-      const m = methods.get(p.paymentMethodId);
-      if (!m || !m.active) throw new BadRequestException('That payment method is not used on this till');
+      let m = methods.get(p.paymentMethodId);
+      // Audit 5: a method taken off the till or switched off while it was offline: the money was taken, so the bill is kept and flagged.
+      if (input.offline && (!m || !m.active)) {
+        const row = m ?? (await this.prisma.paymentMethod.findFirst({ where: { id: p.paymentMethodId, companyId: company.id } }));
+        if (row) {
+          methods.set(row.id, row);
+          m = row;
+          flags.add('method_off');
+        }
+      }
+      if (!m || (!m.active && !input.offline)) throw new BadRequestException('That payment method is not used on this till');
       // Plan 13: points and gift cards are paid with their own fields (redeemPoints, giftCards), checked on the server.
       if (isSpecialPaymentMethod(m)) throw new BadRequestException(`${m.name} is paid with its own button at the till`);
       if (D(p.amount).lt(0) && !m.allowRefund) throw new BadRequestException(`${m.name} cannot be used for refunds`);
@@ -449,6 +549,7 @@ export class PosBillsService {
               shiftId: shift.id,
               number: b.number,
               clientId: input.clientId,
+              clientHash: hash,
               kind: b.kind,
               returnOfId: b.returnOfId,
               exchangeId,
@@ -519,7 +620,8 @@ export class PosBillsService {
           await this.postStock(tx, bill, b, till, actor, flags);
           if (b.kind === 'return' && b.returnOfId) {
           }
-          if (b.couponId) await this.offers.countCouponUse(tx, b.couponId, 1);
+          // Audit 5: offline, a coupon used up meanwhile is still counted (the customer had it) and flagged.
+          if (b.couponId && !(await this.offers.countCouponUse(tx, b.couponId, 1, input.offline))) flags.add('coupon_used_up');
           if (b.delivery) await this.saveDelivery(tx, bill, b.delivery, till, customer, actor);
           await this.audit.record(tx, actor, {
             action: 'create',
@@ -862,12 +964,69 @@ export class PosBillsService {
    * at most 16 characters (CGST rule 46(b), plan 08). A bill made offline before
    * the till got its short prefix keeps its old STORE-TILL-FY-000001 number.
    */
-  private checkNumber(number: string, till: TillWithRefs, fyName: string, offline: boolean) {
+  private async checkNumber(number: string, till: TillWithRefs, fyName: string, offline: boolean, flags: Set<string>) {
     const prefix = tillNumberSeries(till.seriesKind, fyName);
     const inSeries = (p: string) => number.startsWith(p) && /^\d{6}$/.test(number.slice(p.length));
     if (inSeries(prefix)) return;
     if (offline && inSeries(tillNumberSeries(`${till.store.code}-${till.code}`, fyName))) return;
+    // Audit 5: the office changed the till's invoice prefix while it was offline; its bills numbered with
+    // the earlier prefix are kept and flagged (never one another till uses now).
+    if (offline) {
+      for (const old of await this.earlierPrefixes(till)) {
+        if (inSeries(tillNumberSeries(old, fyName))) {
+          flags.add('number_prefix_old');
+          return;
+        }
+      }
+    }
     throw new BadRequestException(`Bill number ${number} is not in this till’s series (${prefix}000001)`);
+  }
+
+  /** The till's earlier invoice prefixes, from its history, that no other till uses now. */
+  private async earlierPrefixes(till: TillWithRefs): Promise<string[]> {
+    const logs = await this.prisma.auditLog.findMany({ where: { entityType: 'till', entityId: till.id }, select: { changes: true } });
+    const old = new Set<string>();
+    for (const l of logs) {
+      const c = (l.changes as { numberPrefix?: { old?: unknown } } | null)?.numberPrefix;
+      if (c && typeof c.old === 'string' && c.old !== till.seriesKind) old.add(c.old);
+    }
+    const taken = old.size ? await this.prisma.till.findMany({ where: { companyId: till.companyId, seriesKind: { in: [...old] }, id: { not: till.id } }, select: { seriesKind: true } }) : [];
+    return [...old].filter((p) => !taken.some((t) => t.seriesKind === p));
+  }
+
+  /**
+   * A coupon typed at the till (blueprint 04 §5). Audit 5: offline, a coupon used up, ended or not valid
+   * for the customer by the time the bill arrives was still given at the counter: kept and flagged.
+   */
+  private async couponFor(companyId: string, input: PosTransactionInput, date: string, customerId: string, flags: Set<string>): Promise<Coupon | null> {
+    try {
+      return await this.offers.couponFor(this.prisma, companyId, input.couponCode!, date, customerId);
+    } catch (err) {
+      if (!input.offline || !(err instanceof BadRequestException)) throw err;
+      flags.add('coupon_used_up');
+      return this.prisma.coupon.findUnique({ where: { companyId_code: { companyId, code: input.couponCode!.trim().toUpperCase() } } });
+    }
+  }
+
+  /**
+   * A manager's approval on a bill, checked now and used when the bill is saved. Audit 5: offline it
+   * must have been alive when the bill was sold, not when it is sent; one that ran out before the sale
+   * is kept and flagged approval_late.
+   */
+  private approval(ctx: Pick<BuildContext, 'till' | 'input' | 'flags' | 'soldAt' | 'pending'>, token: string | undefined, actions: ApprovalAction[], usedFor: string, figure?: ApprovalCheck['figure']): Promise<string> {
+    const check: ApprovalCheck = ctx.input.offline ? { at: ctx.soldAt, onLate: () => ctx.flags.add('approval_late'), figure } : { figure };
+    return this.common.useApproval(this.prisma, token, ctx.till.id, actions, usedFor, ctx.pending, check);
+  }
+
+  /** Audit 5: offline, an approval that cannot be used (or none) does not stop the bill; null and the caller flags it. */
+  private async offlineApproval(ctx: Pick<BuildContext, 'till' | 'input' | 'flags' | 'soldAt' | 'pending'>, token: string | undefined, actions: ApprovalAction[], usedFor: string, figure?: ApprovalCheck['figure']): Promise<string | null> {
+    if (!token) return null;
+    try {
+      return await this.approval(ctx, token, actions, usedFor, figure);
+    } catch (err) {
+      if (err instanceof ForbiddenException) return null;
+      throw err;
+    }
   }
 
   /**
@@ -957,16 +1116,36 @@ export class PosBillsService {
 
   // ---- Building lines ----
 
-  private async lineBasics(l: PosLineInput) {
-    const item = await this.items.assertItemUsable(this.prisma, l.itemId, 'sale');
+  /**
+   * The item and unit of a line. Audit 5: offline, an item switched off or ended since, or a unit
+   * removed from it, was still sold at the counter: the bill is kept and flagged item_off (a removed
+   * unit needs the factor the till had, sent with the line).
+   */
+  private async lineBasics(l: PosLineInput, flags?: Set<string>) {
+    const offline = !!flags;
+    let item: Item;
+    try {
+      item = await this.items.assertItemUsable(this.prisma, l.itemId, 'sale');
+    } catch (err) {
+      const found = offline && err instanceof BadRequestException ? await this.prisma.item.findUnique({ where: { id: l.itemId } }) : null;
+      if (!found || found.isParentStyle) throw err;
+      item = found;
+      flags!.add('item_off');
+    }
     const unitId = l.unitId ?? item.baseUnitId;
     const iu = await this.prisma.itemUnit.findUnique({ where: { itemId_unitId: { itemId: item.id, unitId } }, include: { unit: true } });
-    if (!iu) throw new BadRequestException(`${item.code}: the unit must be one of the item’s units`);
-    const problem = quantityProblem(l.quantity, iu.unit);
+    let unit = iu?.unit ?? null;
+    let factor = iu ? D(iu.factor) : null;
+    if (!iu && offline) {
+      unit = await this.prisma.unit.findUnique({ where: { id: unitId } });
+      factor = unitId === item.baseUnitId ? new Decimal(1) : l.factor ? D(l.factor) : null;
+      if (unit && factor) flags!.add('item_off');
+    }
+    if (!unit || !factor) throw new BadRequestException(`${item.code}: the unit must be one of the item’s units`);
+    const problem = quantityProblem(l.quantity, unit);
     if (problem) throw new BadRequestException(`${item.code}: ${problem}`);
-    const factor = D(iu.factor);
     const quantity = roundQuantity(l.quantity);
-    const mrp = iu.mrp ? D(iu.mrp) : item.mrp ? D(item.mrp).mul(factor) : null;
+    const mrp = iu?.mrp ? D(iu.mrp) : item.mrp ? D(item.mrp).mul(factor) : null;
     return { item, unitId, factor, quantity, basicQuantity: roundQuantity(quantity.mul(factor)), mrp };
   }
 
@@ -983,7 +1162,7 @@ export class PosBillsService {
     // 1. Price, approvals and GST of each line.
     const priced: PricedLine[] = [];
     for (const l of part.lines.filter((x) => !x.freeOfLineNo)) {
-      const b = await this.lineBasics(l);
+      const b = await this.lineBasics(l, input.offline ? flags : undefined);
       const code = b.item.code;
       // Plan 11 part 2: an ordered line is sold at the price agreed on the order: no list price, offers or approvals.
       const ordered = l.orderLineId ? ctx.order?.lines.find((x) => x.id === l.orderLineId) : undefined;
@@ -1017,7 +1196,7 @@ export class PosBillsService {
       const cashierMayChangePrice = till.allowPriceChange && ctx.catalogue.allowPriceChange;
       if (typedNewPrice) {
         if (!cashierMayChangePrice) {
-          approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`, ctx.pending);
+          approvedById = await this.approval(ctx, l.approvalToken, ['price_change'], `line ${l.lineNo}`);
           ctx.approvals.push(`price ${code}`);
         }
         ctx.newPrices.push({ itemId: b.item.id, code, unitId: b.unitId, price: listPrice });
@@ -1029,7 +1208,7 @@ export class PosBillsService {
           if (!cashierMayChangePrice) flags.add('price_changed');
         } else {
           if (!cashierMayChangePrice) {
-            approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change'], `line ${l.lineNo}`, ctx.pending);
+            approvedById = await this.approval(ctx, l.approvalToken, ['price_change'], `line ${l.lineNo}`);
             ctx.approvals.push(`price ${code}`);
           }
           price = D(l.price);
@@ -1050,12 +1229,17 @@ export class PosBillsService {
         cashierLimitPercent: till.cashierDiscountPercent.toString(),
         approved: !!approvedById,
       });
-      if (!verdict.ok) {
-        if (!verdict.needsApproval) throw new BadRequestException(`${code}: ${verdict.reason}`);
-        // Offline, only an approval the till obtained before the connection dropped is accepted.
-        if (input.offline && !l.approvalToken) throw new BadRequestException(`${code}: ${verdict.reason}`);
-        approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['discount', 'price_change'], `line ${l.lineNo}`, ctx.pending);
-        ctx.approvals.push(`discount ${code} ${manualPct.toFixed(2)}%`);
+      // Audit 5: an offline line with the till's figures is checked on what was charged (checkCharged, below).
+      if (!verdict.ok && !(input.offline && l.charged)) {
+        if (!input.offline) {
+          if (!verdict.needsApproval) throw new BadRequestException(`${code}: ${verdict.reason}`);
+          approvedById = await this.approval(ctx, l.approvalToken, ['discount', 'price_change'], `line ${l.lineNo}`);
+          ctx.approvals.push(`discount ${code} ${manualPct.toFixed(2)}%`);
+        } else {
+          // Offline the sale happened: only an approval the till obtained before the connection dropped counts; else flagged.
+          approvedById = verdict.needsApproval ? await this.offlineApproval(ctx, l.approvalToken, ['discount', 'price_change'], `line ${l.lineNo}`) : null;
+          if (!approvedById) flags.add('discount_over_limit');
+        }
       }
       priced.push({ l, b, listPrice, price, approvedById, gst, manualPct, covering });
     }
@@ -1076,20 +1260,27 @@ export class PosBillsService {
       const chosen = plan.lines.get(l.lineNo) ?? null;
       const offerDiscount = chosen?.discount ?? new Decimal(0);
       const { amount, discount } = saleLineAmount({ quantity: b.quantity, price, discountPercent: manualPct, discountAmount: offerDiscount });
+      // Audit 5: an offline line is checked on what the till charged (its total and offer), not on the server's figures.
+      const charged = input.offline && l.charged ? l.charged : null;
+      const soldFor = charged ? D(charged.lineTotal) : amount;
       // Mix-and-match prices are the owner's own promotion, like free lines: never refused as below cost.
-      const promoted = !!chosen && isCountedOffer(chosen.offer.kind) && offerDiscount.gt(0);
+      const promoted = charged ? D(charged.offerDiscount ?? '0').gt(0) : !!chosen && isCountedOffer(chosen.offer.kind) && offerDiscount.gt(0);
+      let costFloor: Decimal | null = null;
       // The price agreed on a customer order was settled when the order was taken.
       if (ctx.catalogue.blockBelowCost && b.basicQuantity.gt(0) && !promoted && !l.orderLineId) {
         // Plan 11 A2 (blueprint 04): net price per basic unit, before GST, not below the last purchase price or the current cost.
-        const net = roundMoney(amount.div(D(1).add(D(gst.rate).div(100))).div(b.basicQuantity));
+        const rate = charged ? D(charged.gstRate) : D(gst.rate);
+        const net = roundMoney(soldFor.div(D(1).add(rate.div(100))).div(b.basicQuantity));
         const lastBought = D(b.item.lastPurchasePrice ?? 0);
         const cost = b.item.isStockItem ? D(await this.currentCost(this.prisma, b.item.id, till.locationId)) : new Decimal(0);
         const floor = roundMoney(Decimal.max(lastBought, cost));
         if (net.lt(floor)) {
-          if (input.offline) flags.add('below_cost');
-          else if (!approvedById) {
+          if (input.offline) {
+            flags.add('below_cost');
+            costFloor = floor;
+          } else if (!approvedById) {
             if (!l.approvalToken) throw new BadRequestException(`${code}: this price is below cost; a manager must approve it`);
-            approvedById = await this.common.useApproval(this.prisma, l.approvalToken, till.id, ['price_change', 'discount'], `line ${l.lineNo}`, ctx.pending);
+            approvedById = await this.approval(ctx, l.approvalToken, ['price_change', 'discount'], `line ${l.lineNo}`);
           }
           if (!input.offline) ctx.approvals.push(`below cost ${code}`);
         }
@@ -1127,7 +1318,9 @@ export class PosBillsService {
         line.gstRate = ctx.supply.noTax ? new Decimal(0) : D(own.rate);
         this.applyCharged(line, l, flags);
         line.keepRate = true;
+        line.chargedFrom = l;
       }
+      if (costFloor) line.serverFigures = { ...line.serverFigures, costFloor: costFloor.toFixed(2) };
       lines.push(line);
       if (!input.offline && chosen && chosen.freeQuantity.gt(0)) {
         const free = chosen.freeQuantity;
@@ -1185,7 +1378,7 @@ export class PosBillsService {
     }
     if (input.offline) {
       for (const f of sentFree) {
-        const b = await this.lineBasics(f);
+        const b = await this.lineBasics(f, flags);
         const parent = lines.find((x) => x.lineNo === f.freeOfLineNo);
         // A free line of another item (buy X, get Y) keeps its own GST rate and price.
         const own = parent && parent.item.id !== b.item.id ? await this.freeItemInfo(b.item.id, till, date, input.customerId ?? undefined, user) : null;
@@ -1227,10 +1420,14 @@ export class PosBillsService {
       billDiscount = input.billDiscount.amount ? roundMoney(input.billDiscount.amount) : roundMoney(base.mul(D(input.billDiscount.percent!)).div(100));
       const pct = base.gt(0) ? billDiscount.div(base).mul(100) : new Decimal(0);
       if (pct.gt(D(till.cashierDiscountPercent))) {
-        await this.common.useApproval(this.prisma, input.billDiscount.approvalToken, till.id, ['bill_discount', 'discount'], 'bill discount', ctx.pending);
+        // Audit 5: the approval is for the discount the manager saw.
+        await this.approval(ctx, input.billDiscount.approvalToken, ['bill_discount', 'discount'], 'bill discount', billDiscountFigure(billDiscount, input.billDiscount.percent));
         ctx.approvals.push(`bill discount ${billDiscount.toFixed(2)}`);
       }
-    } else if (!input.offline && !ctx.order) {
+    } else if (input.offline) {
+      // Audit 5: offline the till's figures are kept; they are checked against the limits here and flagged.
+      await this.checkCharged(lines.filter((l) => l.chargedFrom), ctx);
+    } else if (!ctx.order) {
       // A bill that collects an order keeps the agreed prices: no bill offer (the till does the same).
       const billOffer = this.offers.bestBillOffer(offers, base);
       if (billOffer) billDiscount = billOffer.saving;
@@ -1450,15 +1647,76 @@ export class PosBillsService {
     const c = l.charged!;
     const recomputed = roundMoney(D(c.price).mul(line.quantity)).sub(D(c.discountAmount)).sub(D(c.offerDiscount ?? '0'));
     if (recomputed.sub(D(c.lineTotal)).abs().gt('0.01')) throw new BadRequestException(`Line ${l.lineNo}: the till’s figures do not add up`);
-    if (!D(c.listPrice).eq(line.listPrice) || !D(c.price).eq(line.price)) flags.add('price_changed');
-    if (!D(c.offerDiscount ?? '0').eq(line.offerDiscount)) flags.add('offer_changed');
-    if (!D(c.gstRate).eq(line.gstRate)) flags.add('gst_changed');
+    const priceDiffers = !D(c.listPrice).eq(line.listPrice) || !D(c.price).eq(line.price);
+    const offerDiffers = !D(c.offerDiscount ?? '0').eq(line.offerDiscount);
+    const rateDiffers = !D(c.gstRate).eq(line.gstRate);
+    if (priceDiffers) flags.add('price_changed');
+    if (offerDiffers) flags.add('offer_changed');
+    if (rateDiffers) flags.add('gst_changed');
+    // Audit 5 (pos-offline §5): the check report shows what was charged and what the server's list said.
+    if (priceDiffers || offerDiffers || rateDiffers) {
+      line.serverFigures = { ...line.serverFigures, listPrice: line.listPrice.toFixed(2), price: line.price.toFixed(2), offerDiscount: line.offerDiscount.toFixed(2), gstRate: line.gstRate.toString() };
+    }
     line.listPrice = D(c.listPrice);
     line.price = D(c.price);
     line.offerDiscount = D(c.offerDiscount ?? '0');
     line.discountAmount = D(c.discountAmount).add(line.offerDiscount);
     line.gstRate = D(c.gstRate);
     line.amount = D(c.lineTotal);
+  }
+
+  /**
+   * Audit 5 (pos-offline §5): an offline bill is kept as charged, but its discounts are checked on what
+   * was charged: each line's manual discount against the cashier's limit, its whole discount (manual and
+   * its share of the bill discount) against the item's maximum, the bill discount against the cashier's
+   * limit, and the price against the MRP. Anything outside them is flagged (discount_over_limit,
+   * above_mrp), never refused. An approval the till obtained before the connection dropped still counts.
+   */
+  private async checkCharged(lines: BuiltLine[], ctx: BuildContext) {
+    const { input, till, flags } = ctx;
+    const limit = D(till.cashierDiscountPercent);
+    // The till rounds each line to the paisa, so a percent worked back from rupees may be a little off.
+    const slack = new Decimal('0.05');
+    const bd = input.billDiscount;
+    const charged = lines.filter((l) => !l.isFree).reduce((s, l) => s.add(l.amount), new Decimal(0));
+    let billPct = new Decimal(0);
+    let billAmount: Decimal | null = null;
+    if (bd?.percent && D(bd.percent).gt(0)) billPct = D(bd.percent);
+    else if (bd?.amount && D(bd.amount).gt(0)) {
+      billAmount = roundMoney(bd.amount);
+      const before = charged.add(billAmount);
+      billPct = before.gt(0) ? billAmount.div(before).mul(100) : new Decimal(0);
+    }
+    if (billPct.gt(limit.add(slack))) {
+      const by = await this.offlineApproval(ctx, bd?.approvalToken, ['bill_discount', 'discount'], 'bill discount', billDiscountFigure(billAmount, bd?.percent));
+      if (by) ctx.approvals.push(`bill discount ${billAmount?.toFixed(2) ?? `${billPct.toFixed(2)}%`}`);
+      else flags.add('discount_over_limit');
+    }
+    for (const l of lines) {
+      if (l.isFree || !l.chargedFrom) continue;
+      const gross = roundMoney(l.price.mul(l.quantity));
+      if (gross.lte(0)) continue;
+      const totalPct = l.discountAmount.sub(l.offerDiscount).div(gross).mul(100);
+      const manualPct = Decimal.max(0, totalPct.sub(billPct));
+      const max = D(l.item.maxDiscountPercent);
+      const overMrp = !!l.mrp && l.mrp.gt(0) && l.price.gt(l.mrp);
+      // Offers are the owner's own promotions, as online.
+      const overMax = l.offerDiscount.isZero() && totalPct.gt(max.add(slack));
+      let overLimit = manualPct.gt(limit.add(slack)) && !l.approvedById;
+      if (overLimit) {
+        const by = await this.offlineApproval(ctx, l.chargedFrom.approvalToken, ['discount', 'price_change'], `line ${l.lineNo}`);
+        if (by) {
+          l.approvedById = by;
+          overLimit = false;
+          ctx.approvals.push(`discount ${l.item.code} ${manualPct.toFixed(2)}%`);
+        }
+      }
+      if (overMrp) flags.add('above_mrp');
+      if (overMax || overLimit) flags.add('discount_over_limit');
+      if (overMrp || overMax || overLimit) {
+        l.serverFigures = { ...l.serverFigures, discountPercent: totalPct.toFixed(2), maxDiscountPercent: max.toFixed(2), cashierLimitPercent: limit.toFixed(2), ...(l.mrp ? { mrp: l.mrp.toFixed(2) } : {}) };
+      }
+    }
   }
 
   private async groupOf(itemGroupId: string) {
@@ -1513,7 +1771,7 @@ export class PosBillsService {
   }
 
   /** Returns at the original prices, or without a bill with a manager's approval (decision 40). */
-  private async buildReturn(ctx: Pick<BuildContext, 'till' | 'date' | 'input' | 'user' | 'flags' | 'customer' | 'approvals' | 'pending' | 'supply' | 'buyer' | 'seller'>): Promise<BuiltBill> {
+  private async buildReturn(ctx: Pick<BuildContext, 'till' | 'date' | 'soldAt' | 'input' | 'user' | 'flags' | 'customer' | 'approvals' | 'pending' | 'supply' | 'buyer' | 'seller'>): Promise<BuiltBill> {
     const { till, date, input, user } = ctx;
     const part = input.ret!;
     const lines: BuiltLine[] = [];
@@ -1602,7 +1860,7 @@ export class PosBillsService {
       // Audit 4 T9 (rule 53(1A)(g)): a credit note must name the original invoice; without one the money and goods
       // come back on a return note and the GST is not reduced.
       supply = { ...ctx.supply, noTax: true };
-      approvedById = await this.common.useApproval(this.prisma, part.approvalToken, till.id, ['return_without_bill'], 'return without bill', ctx.pending);
+      approvedById = await this.approval(ctx, part.approvalToken, ['return_without_bill'], 'return without bill');
       ctx.approvals.push('return without bill');
       for (const l of part.lines) {
         const b = await this.lineBasics(l);
@@ -1927,11 +2185,11 @@ export class PosBillsService {
     return b?.number ?? null;
   }
 
-  private async recordSyncProblem(till: TillWithRefs, input: PosTransactionInput, error: string) {
+  private async recordSyncProblem(till: TillWithRefs, input: PosTransactionInput, error: string, sentById: string) {
     await this.prisma.posSyncProblem.upsert({
       where: { tillId_clientId_kind: { tillId: till.id, clientId: input.clientId, kind: 'bill' } },
-      create: { companyId: till.companyId, tillId: till.id, clientId: input.clientId, kind: 'bill', payload: input as unknown as Prisma.InputJsonValue, error },
-      update: { error, payload: input as unknown as Prisma.InputJsonValue },
+      create: { companyId: till.companyId, tillId: till.id, clientId: input.clientId, kind: 'bill', payload: input as unknown as Prisma.InputJsonValue, error, sentById },
+      update: { error, payload: input as unknown as Prisma.InputJsonValue, sentById },
     });
   }
 
@@ -2230,5 +2488,40 @@ function lineData(l: BuiltLine & { tax: InclusiveTax }) {
     returnOfLineId: l.returnOfLineId,
     approvedById: l.approvedById,
     salesStaffId: l.salesStaffId,
+    ...(l.serverFigures ? { serverFigures: l.serverFigures } : {}),
   };
+}
+
+/**
+ * Audit 5: a bill discount approval is for the discount the manager saw: the same percent when one
+ * was typed, else the same rupees.
+ */
+function billDiscountFigure(amount: Decimal | null, percent: string | undefined): ApprovalCheck['figure'] {
+  return (a) => {
+    if (percent && a.percent && a.percent.eq(D(percent))) return null;
+    if (amount && a.amount && a.amount.eq(amount)) return null;
+    const approved = a.percent ? `${a.percent.toFixed(2)}%` : a.amount ? `₹${a.amount.toFixed(2)}` : null;
+    const now = percent ? `${D(percent).toFixed(2)}%` : `₹${amount?.toFixed(2) ?? '0.00'}`;
+    return approved ? `The manager approved a bill discount of ${approved}; this bill gives ${now}. Ask the manager again` : 'The manager approval does not say the bill discount; ask the manager again';
+  };
+}
+
+/**
+ * Audit 5 (29 October 2026): what makes a till transaction the one it is: its numbers, lines,
+ * payments and customer, with numbers written one way. The same identity sent with another
+ * content is a different bill.
+ */
+export function clientHash(input: PosTransactionInput): string {
+  const n = (v: string | null | undefined) => (v === undefined || v === null || v === '' ? null : new Decimal(v).toString());
+  const line = (l: PosLineInput) => [l.lineNo, l.itemId, l.unitId ?? null, n(l.quantity), n(l.price), n(l.discountPercent), l.batchId ?? null, [...(l.serialNumbers ?? [])].map((s) => s.trim()).sort(), l.returnOfLineId ?? null, l.freeOfLineNo ?? null, l.orderLineId ?? null, n(l.charged?.lineTotal)];
+  const part = (p: { number: string; lines: PosLineInput[] } | undefined) => (p ? { number: p.number, lines: [...p.lines].sort((a, b) => a.lineNo - b.lineNo).map(line) } : null);
+  const content = {
+    sale: part(input.sale),
+    ret: input.ret ? { ...part(input.ret), returnOfId: input.ret.returnOfId ?? null } : null,
+    payments: input.payments.map((p) => JSON.stringify([p.paymentMethodId, n(p.amount), p.reference?.trim() || null])).sort(),
+    customer: input.customerId ?? input.newCustomer?.mobile ?? null,
+    points: input.redeemPoints ?? null,
+    giftCards: (input.giftCards ?? []).map((g) => `${g.number}:${n(g.amount)}`).sort(),
+  };
+  return sha256(JSON.stringify(content));
 }

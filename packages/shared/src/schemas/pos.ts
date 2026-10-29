@@ -25,8 +25,13 @@ const signedDecimal = z
 /** on_account: the customer pays later (module 7 plan §1a, decision 22). */
 export const PAYMENT_KINDS = ['cash', 'card', 'upi', 'other', 'on_account'] as const;
 export type PaymentKind = (typeof PAYMENT_KINDS)[number];
-export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit', 'order_refund'] as const;
+export const APPROVAL_ACTIONS = ['price_change', 'discount', 'return_without_bill', 'cancel_bill', 'open_drawer', 'cash_difference', 'bill_discount', 'credit_over_limit', 'order_refund', 'cash_out'] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
+/** Audit 5 (C1, owner 29 October 2026): the till warns after 24 hours offline and stops billing after 48. */
+export const OFFLINE_WARN_HOURS = 24;
+export const OFFLINE_STOP_HOURS = 48;
+/** Audit 5 (C4): a drawer opened with a sale, or by itself (No sale, with a manager's PIN). */
+export const DRAWER_OPENING_KINDS = ['sale', 'no_sale'] as const;
 export const OFFER_KINDS = ['percent', 'amount', 'special_price', 'free_goods', 'buy_get', 'mix_match'] as const;
 export const OFFER_TARGETS = ['items', 'groups', 'brands', 'bill'] as const;
 
@@ -121,6 +126,10 @@ export const posSettingsSchema = z
     deliveryItemId: uuid.nullable(),
     /** Plan 11 part 2: the service item an alteration charge is billed as. */
     alterationItemId: uuid.nullable(),
+    /** Audit 5 (C5): a cash out above this needs a manager's PIN. */
+    cashOutApprovalAbove: nonNegativeDecimalString,
+    /** Audit 5 (C8): the cashier counts the drawer before seeing the expected cash. */
+    blindCount: z.boolean(),
   })
   .partial();
 export type PosSettingsInput = z.infer<typeof posSettingsSchema>;
@@ -144,6 +153,13 @@ export const approvalSchema = z.object({
   action: z.enum(APPROVAL_ACTIONS),
   /** What is being approved, shown in the history (e.g. "ITM-000001 12%"). */
   details: optionalText(200),
+  /**
+   * Audit 5: the figure approved, which the server compares when the approval is used: a cash difference
+   * (cash_difference: the biggest difference counted − expected, without sign), a cash out (cash_out) or a
+   * bill discount in rupees (bill_discount); a bill discount typed in percent sends percent instead.
+   */
+  amount: nonNegativeDecimalString.optional(),
+  percent: percent.optional(),
 });
 export type ApprovalInput = z.infer<typeof approvalSchema>;
 
@@ -166,6 +182,8 @@ export const cashMovementSchema = z.object({
   amount: positiveDecimalString,
   reason: trimmed(200),
   at: instant.optional(),
+  /** Audit 5 (C5): a cash out above the POS setting needs a manager's approval (action cash_out, with the amount). */
+  approvalToken: z.string().optional(),
 });
 export type CashMovementInput = z.infer<typeof cashMovementSchema>;
 
@@ -215,6 +233,8 @@ export const posLineSchema = z.object({
   /** Plan 11 C1: who sold this line, when not the bill's salesperson. */
   salesStaffId: uuid.optional().nullable(),
   charged: chargedFields.optional(),
+  /** Audit 5: offline, basic units in one of the line's unit, as the till had it (used when the unit was removed from the item since). */
+  factor: positiveDecimalString.optional(),
   /** Plan 11 part 2: a line of the customer order being collected (sold at the agreed price). */
   orderLineId: uuid.optional().nullable(),
 });
@@ -312,6 +332,21 @@ export const posTransactionSchema = z
   .refine((t) => !t.delivery || t.sale, { message: 'Home delivery is for a sale', path: ['delivery'] })
   .refine((t) => !t.giftCards || new Set(t.giftCards.map((g) => g.number)).size === t.giftCards.length, { message: 'The same gift card is on the bill twice', path: ['giftCards'] });
 export type PosTransactionInput = z.infer<typeof posTransactionSchema>;
+
+/** Audit 5 (C4): every drawer opening at a till, sent again safely (same clientId). */
+export const drawerOpeningSchema = z
+  .object({
+    clientId: uuid,
+    tillId: uuid,
+    kind: z.enum(DRAWER_OPENING_KINDS),
+    at: instant,
+    /** The bill the drawer opened for (kind sale). */
+    billClientId: uuid.optional().nullable(),
+    /** No sale: a manager's approval of action open_drawer. */
+    approvalToken: z.string().optional(),
+  })
+  .refine((d) => d.kind !== 'no_sale' || !!d.approvalToken, { message: 'Opening the drawer without a sale needs a manager', path: ['approvalToken'] });
+export type DrawerOpeningInput = z.infer<typeof drawerOpeningSchema>;
 
 export const cancelBillSchema = z.object({ reason: trimmed(300), approvalToken: z.string() });
 export type CancelBillInput = z.infer<typeof cancelBillSchema>;

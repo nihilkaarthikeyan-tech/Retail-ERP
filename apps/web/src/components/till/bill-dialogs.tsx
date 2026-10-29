@@ -193,9 +193,16 @@ export function ParkedDialog({ open, engine, onRecall, onClose }: { open: boolea
   );
 }
 
+/** The parts of the helper's GET /status this dialog shows. */
+interface HelperStatusView {
+  version?: string;
+  printer?: { configured?: boolean; name?: string | null; statusNote?: string | null } | null;
+}
+
 export function HelperDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [details, setDetails] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -203,7 +210,20 @@ export function HelperDialog({ open, onClose }: { open: boolean; onClose: () => 
     if (!open) return;
     let cancelled = false;
     helperStatus().then((s) => {
-      if (!cancelled) setStatus(s ? "The Till Helper is paired and running." : helperToken() ? "The Till Helper is paired but not answering; receipts print through the browser." : "Not paired; receipts print through the browser.");
+      if (cancelled) return;
+      setStatus(s ? "The Till Helper is paired and running." : helperToken() ? "The Till Helper is paired but not answering; receipts print through the browser." : "Not paired; receipts print through the browser.");
+      const v = s as unknown as HelperStatusView | null;
+      const p = v?.printer;
+      setDetails(
+        v
+          ? [
+              v.version ? `Till Helper version ${v.version}` : "",
+              p ? (p.configured ? `Printer: ${p.name ?? "set up"}` : "No printer is set up in the Till Helper") : "",
+              // Owner decision C9: a network printer is asked about paper; a Windows-shared or serial one cannot say.
+              p?.statusNote ?? "",
+            ].filter(Boolean)
+          : [],
+      );
     });
     return () => {
       cancelled = true;
@@ -227,6 +247,13 @@ export function HelperDialog({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Dialog open={open} title="Receipt printer (Till Helper)" onClose={onClose}>
       <p>{status ?? "Checking…"}</p>
+      {details.length ? (
+        <ul className="muted" data-testid="helper-details">
+          {details.map((d) => (
+            <li key={d}>{d}</li>
+          ))}
+        </ul>
+      ) : null}
       <form onSubmit={pair}>
         <label className="till-pin-label" htmlFor="till-helper-code">
           Pairing code shown by the Till Helper

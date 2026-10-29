@@ -38,7 +38,7 @@ import {
   supplyLineTax,
   taxSituationOf,
 } from "shared";
-import type { RefundParts, SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, TillSnapshot } from "./types";
+import type { RefundParts, SnapCoupon, SnapCustomer, SnapGstRate, SnapItem, SnapOffer, SnapPaymentMethod, SnapPrice, TillSnapshot } from "./types";
 
 const D = (v: DecimalInput) => new Decimal(v);
 const ZERO = new Decimal(0);
@@ -160,7 +160,8 @@ export interface DraftBill {
   startedAt: string;
   customer: DraftCustomer | null;
   couponCode: string | null;
-  billDiscount: { percent?: string; amount?: string; approvalToken?: string; approvedBy?: string } | null;
+  /** `approvedFor` is the bill the manager approved (billDiscountStamp); any change of lines or discount needs a new approval (audit 5). */
+  billDiscount: { percent?: string; amount?: string; approvalToken?: string; approvedBy?: string; approvedFor?: string } | null;
   lines: DraftLine[];
   ret: {
     /** Null for a return without the original bill: it needs a manager and the connection (plan 11 A9). */
@@ -205,6 +206,12 @@ export interface DraftBill {
   points?: { points: number; value: string } | null;
   /** Plan 13: gift cards paid with (online only), each with the amount taken from it. */
   giftCards?: DraftGiftCard[] | null;
+  /**
+   * Audit 5: a bill that needs the server was sent and no answer came, so it
+   * may have been saved. The till asks the server (by clientId) before it can
+   * be changed or finished again.
+   */
+  sendUncertain?: boolean;
 }
 
 /** Plan 13: a gift card paying part of the bill, as checked on the server a moment ago. */
@@ -325,32 +332,105 @@ export interface PricingContext {
   snapshot: TillSnapshot;
   /** Indian business date of the sale (rule 15). */
   date: string;
+  /**
+   * Audit 5: coupon uses by this till's bills that the saved copy does not count
+   * yet (waiting to be sent, or sent after the last refresh), by coupon code.
+   */
+  couponUses?: Record<string, number>;
+}
+
+/**
+ * What a manager's bill-discount approval is for: the lines and the discount
+ * typed. A change of either makes the approval stale, so the token sent always
+ * matches the discount the manager saw (the server compares the amount).
+ */
+export function billDiscountStamp(d: Pick<DraftBill, "lines" | "billDiscount">): string {
+  const lines = d.lines.map((l) => [l.itemId, l.unitId, l.quantity, l.priceOverride ?? "", l.discountPercent || "0"].join(":")).join("|");
+  return `${d.billDiscount?.amount ?? ""}/${d.billDiscount?.percent ?? ""}/${lines}`;
+}
+
+/** The bill discount's approval token when it is still for this bill, else undefined. */
+export function billDiscountToken(d: Pick<DraftBill, "lines" | "billDiscount">): string | undefined {
+  const bd = d.billDiscount;
+  return bd?.approvalToken && bd.approvedFor === billDiscountStamp(d) ? bd.approvalToken : undefined;
+}
+
+// ---- Look-up maps (audit 5: a slow till with 30,000 items and 40,000 prices) ----
+
+interface SnapshotIndex {
+  items: SnapItem[];
+  prices: SnapPrice[];
+  itemCount: number;
+  priceCount: number;
+  byId: Map<string, SnapItem>;
+  /** Barcode → the first active item carrying it (as the scan loop found it). */
+  byBarcode: Map<string, { item: SnapItem; unitId: string }>;
+  /** Upper-case code → the first active item with it. */
+  byCode: Map<string, SnapItem>;
+  pricesByItem: Map<string, SnapPrice[]>;
+  /** Active items with their name and code in lower case, in snapshot order. */
+  search: { item: SnapItem; name: string; code: string }[];
+}
+
+const indexes = new WeakMap<TillSnapshot, SnapshotIndex>();
+
+/** The look-up maps of a snapshot, built once (again only if its items or prices were replaced). */
+function indexOf(snapshot: TillSnapshot): SnapshotIndex {
+  const cached = indexes.get(snapshot);
+  if (cached && cached.items === snapshot.items && cached.prices === snapshot.prices && cached.itemCount === snapshot.items.length && cached.priceCount === snapshot.prices.length) return cached;
+  const byId = new Map<string, SnapItem>();
+  const byBarcode = new Map<string, { item: SnapItem; unitId: string }>();
+  const byCode = new Map<string, SnapItem>();
+  const search: SnapshotIndex["search"] = [];
+  for (const item of snapshot.items) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+    if (!item.active) continue;
+    for (const b of item.barcodes) if (!byBarcode.has(b.code)) byBarcode.set(b.code, { item, unitId: b.unitId ?? item.baseUnitId });
+    const code = item.code.toUpperCase();
+    if (!byCode.has(code)) byCode.set(code, item);
+    search.push({ item, name: item.name.toLowerCase(), code: item.code.toLowerCase() });
+  }
+  const pricesByItem = new Map<string, SnapPrice[]>();
+  for (const p of snapshot.prices) {
+    const list = pricesByItem.get(p.itemId);
+    if (list) list.push(p);
+    else pricesByItem.set(p.itemId, [p]);
+  }
+  const index = { items: snapshot.items, prices: snapshot.prices, itemCount: snapshot.items.length, priceCount: snapshot.prices.length, byId, byBarcode, byCode, pricesByItem, search };
+  indexes.set(snapshot, index);
+  return index;
 }
 
 // ---- Look-ups in the snapshot ----
 
 export function findItem(snapshot: TillSnapshot, itemId: string): SnapItem | undefined {
-  return snapshot.items.find((i) => i.id === itemId);
+  return indexOf(snapshot).byId.get(itemId);
 }
 
 /** A scanned code: a barcode (item + its unit) first, then an exact item code. */
 export function scan(snapshot: TillSnapshot, code: string): { item: SnapItem; unitId: string; barcode: string | null } | null {
   const c = code.trim();
   if (!c) return null;
-  for (const item of snapshot.items) {
-    if (!item.active) continue;
-    const b = item.barcodes.find((x) => x.code === c);
-    if (b) return { item, unitId: b.unitId ?? item.baseUnitId, barcode: c };
-  }
-  const byCode = snapshot.items.find((i) => i.active && i.code.toUpperCase() === c.toUpperCase());
+  const index = indexOf(snapshot);
+  const hit = index.byBarcode.get(c);
+  if (hit) return { item: hit.item, unitId: hit.unitId, barcode: c };
+  const byCode = index.byCode.get(c.toUpperCase());
   return byCode ? { item: byCode, unitId: byCode.baseUnitId, barcode: null } : null;
 }
 
-/** Name or code search for the pick list. */
+/** Name or code search for the pick list. Digits only (a barcode or code being typed) look at codes only. */
 export function searchItems(snapshot: TillSnapshot, text: string, limit = 20): SnapItem[] {
   const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return [];
-  return snapshot.items.filter((i) => i.active && words.every((w) => i.name.toLowerCase().includes(w) || i.code.toLowerCase().includes(w))).slice(0, limit);
+  const digitsOnly = words.every((w) => /^\d+$/.test(w));
+  const out: SnapItem[] = [];
+  for (const s of indexOf(snapshot).search) {
+    if (words.every((w) => s.code.includes(w) || (!digitsOnly && s.name.includes(w)))) {
+      out.push(s.item);
+      if (out.length >= limit) break;
+    }
+  }
+  return out;
 }
 
 export function findCustomerByMobile(snapshot: TillSnapshot, mobile: string): SnapCustomer | undefined {
@@ -364,7 +444,7 @@ export function listPriceFor(snapshot: TillSnapshot, item: SnapItem, unitId: str
   const lists = [{ id: till.priceListId, pricesPerUnit: till.pricesPerUnit }, ...(till.fallbackPriceList ? [till.fallbackPriceList] : [])];
   // The till's own list first; the default selling list only when the item has no price there.
   for (const list of lists) {
-    const rows = snapshot.prices.filter((p) => p.itemId === item.id && p.priceListId === list.id);
+    const rows = (indexOf(snapshot).pricesByItem.get(item.id) ?? []).filter((p) => p.priceListId === list.id);
     const candidates = rows.map((r) => ({ id: r.id, price: r.price, unitId: r.unitId, startDate: r.startDate, endDate: r.endDate, customerId: r.customerId, supplierId: null, batchId: r.batchId, packSize: r.packSize }));
     const chosen = selectPrice(candidates, { date, unitId, quantity: D(quantity).toString(), customerId, batchId: null });
     if (!chosen) continue;
@@ -416,10 +496,11 @@ export function buyerProblem(b: DraftBuyer): string | null {
 }
 
 /** A coupon typed at the till, checked as the server does (blueprint 04 §5). */
-export function couponProblem(c: SnapCoupon | undefined, code: string, date: string, customerId: string | null): string | null {
+export function couponProblem(c: SnapCoupon | undefined, code: string, date: string, customerId: string | null, usedOnTill = 0): string | null {
   if (!c) return `Coupon ${code} not found`;
   if (c.startDate > date || (c.endDate && c.endDate < date)) return `Coupon ${c.code} is not valid today`;
-  if (c.maxUses != null && c.usedCount >= c.maxUses) return `Coupon ${c.code} has been used up`;
+  // Audit 5: uses by this till's bills not yet counted in the saved copy count too (offline).
+  if (c.maxUses != null && c.usedCount + usedOnTill >= c.maxUses) return `Coupon ${c.code} has been used up`;
   if (c.customerId && c.customerId !== customerId) return `Coupon ${c.code} belongs to another customer`;
   return null;
 }
@@ -600,7 +681,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
   if (draft.couponCode && draft.lines.length) {
     const code = draft.couponCode.trim().toUpperCase();
     const found = snapshot.coupons.find((c) => c.code === code);
-    const problem = couponProblem(found, code, date, customer?.id ?? till.walkInCustomerId);
+    const problem = couponProblem(found, code, date, customer?.id ?? till.walkInCustomerId, ctx.couponUses?.[code] ?? 0);
     if (problem) problems.push(problem);
     else coupon = found ?? null;
   }
@@ -760,7 +841,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     if (manual && bd) {
       billDiscount = bd.amount && D(bd.amount).gt(0) ? roundMoney(bd.amount) : roundMoney(base.mul(D(bd.percent!)).div(100));
       const pct = base.gt(0) ? billDiscount.div(base).mul(100) : ZERO;
-      if (pct.gt(cashierLimit) && !bd.approvalToken) approvals.push({ kind: "bill_discount", lineKey: null, reason: `A bill discount of ₹${billDiscount.toFixed(2)} is above the cashier's limit of ${cashierLimit.toFixed(2)}%` });
+      // Audit 5: an approval given for other lines or another discount is stale; the manager is asked again.
+      if (pct.gt(cashierLimit) && !billDiscountToken(draft)) approvals.push({ kind: "bill_discount", lineKey: null, reason: `A bill discount of ₹${billDiscount.toFixed(2)} is above the cashier's limit of ${cashierLimit.toFixed(2)}%` });
     } else if (!draft.order) {
       // A bill that collects an order keeps the agreed prices: no bill offer (as the server).
       const best = bestBillOffer(offers, base);
@@ -1190,7 +1272,7 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
   }
   const bd = draft.billDiscount;
   if (bd && ((bd.amount && D(bd.amount).gt(0)) || (bd.percent && D(bd.percent).gt(0)))) {
-    input.billDiscount = { ...(bd.amount && D(bd.amount).gt(0) ? { amount: D(bd.amount).toFixed(2) } : { percent: D(bd.percent!).toString() }), ...(bd.approvalToken ? { approvalToken: bd.approvalToken } : {}) };
+    input.billDiscount = { ...(bd.amount && D(bd.amount).gt(0) ? { amount: D(bd.amount).toFixed(2) } : { percent: D(bd.percent!).toString() }), ...(billDiscountToken(draft) ? { approvalToken: billDiscountToken(draft) } : {}) };
   }
   if (bill.sale) {
     if (!o.numbers.sale) throw new Error("The sale has no bill number");
@@ -1215,6 +1297,8 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
           ...(dl?.priceOverride ? { price: l.price.toFixed(2) } : {}),
           ...(l.manualPercent.gt(0) ? { discountPercent: l.manualPercent.toString() } : {}),
           ...(dl?.approvalToken ? { approvalToken: dl.approvalToken } : {}),
+          // Audit 5: offline, the unit's size goes with the line, so a unit removed from the item meanwhile is still understood.
+          ...(o.offline ? { factor: l.item.units.find((u) => u.unitId === l.unitId)?.factor ?? "1" } : {}),
           ...(o.offline
             ? {
                 charged: {

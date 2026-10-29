@@ -224,8 +224,8 @@ describe('6.4 selling beyond stock, 6.6 card and UPI, 6.7 never saved twice', ()
     const foreign = { ...sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }]) };
     foreign.sale.number = 'MAT2/2627/000001';
     expect((await T(owner.post('/pos/bills')).send(foreign).expect(400)).body.message).toMatch(/not in this till’s series/);
-    // Without the registered computer's token nothing is accepted.
-    await owner.post('/pos/bills').send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }])).expect(401);
+    // Without the registered computer's token nothing is accepted (audit 5: 403, so the till does not take it for a signed-out session).
+    expect((await owner.post('/pos/bills').send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '899' }])).expect(403)).body.code).toBe('TILL_NOT_REGISTERED');
   });
 
   // Found in the launch check of 27 October 2026: the reports counted the note handed over, not the cash kept.
@@ -277,16 +277,17 @@ describe('6.8 discount limits with a manager PIN (decisions 19, 40, 76)', () => 
     n--;
   });
 
-  it('offline, 12% is accepted only with the approval the till got before the connection dropped', async () => {
+  it('offline, 12% without an approval is kept as sold and flagged (audit 5); with the approval the till got before the connection dropped it is not', async () => {
     const pay = [{ paymentMethodId: pm.CASH, amount: '88' }];
     const line = { itemId: soap.id, quantity: '1', discountPercent: '12', charged: { listPrice: '100', price: '100', discountAmount: '12', gstRate: '18', lineTotal: '88' } };
     const offline = { offline: true, shiftClientId, soldAt: new Date(Date.now() - 60_000).toISOString() };
-    await T(cashier.post('/pos/bills')).send(sale([line], pay, offline)).expect(400);
-    n--;
+    const kept = (await T(cashier.post('/pos/bills')).send(sale([line], pay, offline)).expect(201)).body;
+    expect(kept.sale.checkFlags).toContain('discount_over_limit');
     const { token } = (await cashier.post('/pos/approvals').send({ tillId, managerId, pin: '7391', action: 'discount' }).expect(200)).body;
     const res = (await T(cashier.post('/pos/bills')).send(sale([{ ...line, approvalToken: token }], pay, offline)).expect(201)).body;
     expect(res.sale).toMatchObject({ total: '88.00', offline: true });
     expect(res.sale.lines[0]).toMatchObject({ approvedById: managerId });
+    expect(res.sale.checkFlags).not.toContain('discount_over_limit');
   });
 });
 

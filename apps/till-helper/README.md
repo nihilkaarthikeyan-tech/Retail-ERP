@@ -73,6 +73,12 @@ manages the network to give the printer a fixed address. Then:
 
 `"printer": { "kind": "network", "host": "192.168.1.50", "port": 9100 }`
 
+**Paper and cover check.** Before each receipt the helper asks a network printer whether it has paper, whether its
+cover is closed and whether it is online (the ESC/POS status question that common shop printers answer). If the
+printer reports a problem the receipt is not sent: the till tells the cashier, for example *Receipt printer: out of
+paper*, and prints that receipt through the browser instead. A printer that does not answer within a moment is
+printed to as normal. A USB printer shared in Windows and a serial printer cannot report this: check their paper by eye.
+
 ### Serial printer (COM port)
 
 `"printer": { "kind": "serial", "port": "COM3", "baudRate": 9600 }`
@@ -125,6 +131,7 @@ Use Windows **Task Scheduler**:
 | "The port is already in use" | The helper is already running (check Task Manager for `node.exe`), or change `port`. |
 | USB printer: "The network name cannot be found" | The share name in the settings does not match the printer's share name, or the printer is not shared. |
 | Network printer: "timed out" or "connection refused" | Wrong IP address, or the printer is off / not on the network. |
+| Till says "out of paper", "cover open" or "offline" | Put in a new paper roll, close the cover, or switch the printer on and clear its error light. The next receipt prints on the printer again. |
 | Receipt prints but the drawer does not open | Check the drawer cable is in the printer's DK socket; try `"pin": 5`. |
 | Till says the helper refused it | Pair again with the new code shown when the helper starts. Check `allowedOrigins` is exactly the ERP address in the browser. |
 
@@ -146,8 +153,8 @@ The service, for the till screen (all requests from an allowed `Origin`; all but
 | Request | Answer |
 | --- | --- |
 | `POST /pair` `{ "code": "123456" }` | `{ ok: true, token }` — the till keeps the token |
-| `GET /status` | `{ ok: true, version, paperWidth, printer: { configured, kind, name }, drawer: { configured } }` |
-| `POST /print` `{ "receipt": { … } }` | `{ ok: true }`; `400` bad receipt; `503` printer missing or not answering |
+| `GET /status` | `{ ok: true, version, paperWidth, printer: { configured, kind, name, statusReadable, statusNote }, drawer: { configured } }` |
+| `POST /print` `{ "receipt": { … } }` | `{ ok: true }`; `400` bad receipt; `503` printer missing or not answering (`printer_not_configured`, `printer_error`), or a network printer reports `no_paper`, `cover_open` or `offline` |
 | `POST /drawer/open` | `{ ok: true }`; `409` no drawer; `503` printer missing or not answering |
 
 Refusals: `401` no token, `403` wrong token, wrong `Origin`, or wrong host name. `OPTIONS` pre-checks are answered only

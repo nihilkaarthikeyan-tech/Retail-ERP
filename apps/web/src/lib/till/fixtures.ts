@@ -141,6 +141,8 @@ export function fakeApi(over: Partial<TillApi> = {}): TillApi {
     cashMovement: no,
     closeShift: no,
     postBill: no,
+    billByClient: no,
+    drawerOpening: no,
     findBills: no,
     reprint: no,
     people: no,

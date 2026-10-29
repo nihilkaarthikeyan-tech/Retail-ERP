@@ -316,7 +316,7 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 2. Money and accounts | **Done**: 18 findings, all closed (1 Critical, 6 High) | 28 Oct 2026 | `docs/audit/02-money-accounts.md` |
 | 3. Stock | **Done**: 17 findings, 3 Critical and 5 High fixed with tests | 28 Oct 2026 | `docs/audit/03-stock.md` |
 | 4. GST | **Done**: 15 findings and the owner's decisions T1–T15, all closed | 28 Oct 2026 | `docs/audit/04-gst.md` |
-| 5. Billing counter and offline | Not started | | |
+| 5. Billing counter and offline | **Done**: 21 findings and the owner's decisions C1–C9, all closed; hands-on till test for the owner | 29 Oct 2026 | `docs/audit/05-billing-counter.md`, `docs/audit/05-till-hands-on-checklist.md` |
 | 6. Dates | Not started | | |
 | 7. Data safety | Not started | | |
 | 8. Speed | Not started | | |
@@ -327,4 +327,4 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 5 (billing counter and offline). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).
+**Next step:** Session 6 (dates, numbers and the Indian calendar). Owner to run the hands-on till checklist (05). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).

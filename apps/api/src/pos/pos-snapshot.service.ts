@@ -7,7 +7,7 @@
 // are on (plan 12: the till hides switched-off buttons offline too). Never
 // passwords, PINs or cost prices.
 import { Injectable } from '@nestjs/common';
-import { addDays, businessDate, type CurrentUser, GIFT_CARD_VALIDITY_MONTHS, tillNumberSeries } from 'shared';
+import { addDays, businessDate, type CurrentUser, GIFT_CARD_VALIDITY_MONTHS, OFFLINE_STOP_HOURS, OFFLINE_WARN_HOURS, tillNumberSeries } from 'shared';
 import { CatalogueSettingsService } from '../catalogue/catalogue-settings.service.js';
 import { LoyaltyService } from '../loyalty/loyalty.service.js';
 import { currentModuleMap } from '../modules/module-map.js';
@@ -76,6 +76,9 @@ export class PosSnapshotService {
     const gstSettings = await this.common.gst.settingsFor(this.prisma, company.id);
     // Plan 13: the scheme's limits, so the till can show what may be spent (the balance itself needs the connection).
     const loyalty = modules.loyalty ? await this.loyalty.settingsRow(this.prisma, company.id) : null;
+    const lastClosed = await this.prisma.shift.findFirst({ where: { tillId: till.id, status: 'closed' }, orderBy: { closedAt: 'desc' }, include: { closing: { include: { lines: true } } } });
+    const cashMethods = new Set(till.paymentMethods.filter((m) => m.paymentMethod.kind === 'cash').map((m) => m.paymentMethodId));
+    const lastCloseCash = (lastClosed?.closing?.lines ?? []).filter((l) => cashMethods.has(l.paymentMethodId)).map((l) => ({ paymentMethodId: l.paymentMethodId, amount: l.counted.toFixed(2) }));
 
     return {
       serverTime,
@@ -91,8 +94,20 @@ export class PosSnapshotService {
         pricesPerUnit: mainList.pricesPerUnit,
         fallbackPriceList: fallbackList ? { id: fallbackList.id, pricesPerUnit: fallbackList.pricesPerUnit } : null,
         cashierDiscountPercent: till.cashierDiscountPercent.toString(),
-        allowPriceChange: till.allowPriceChange,
+        // Audit 5: the cashier changes prices freely only where both the till and the company allow it (as the server checks).
+        allowPriceChange: till.allowPriceChange && catalogue.allowPriceChangeOnBill,
         autoPrint: till.autoPrint,
+        // Audit 5 (C6): receipts printed for each bill (0 = none unless asked).
+        receiptCopies: settings.printReceiptCopies,
+        // Audit 5 (C7): the counted cash of the till's last closed shift, per cash method, to suggest the next float.
+        lastCloseCash,
+        // Audit 5 (C5): a cash out above this needs a manager's PIN.
+        cashOutApprovalAbove: settings.cashOutApprovalAbove.toFixed(2),
+        // Audit 5 (C8): count the drawer before the expected cash is shown.
+        blindCount: settings.blindCount,
+        // Audit 5 (C1): warn after this many hours offline, stop billing after that many.
+        offlineWarnHours: OFFLINE_WARN_HOURS,
+        offlineStopHours: OFFLINE_STOP_HOURS,
         receiptFooter: till.receiptFooter,
         store: { id: store.id, code: store.code, name: store.name, address: [store.addressLine1, store.addressLine2, store.city, store.pincode].filter(Boolean).join(', '), phone: store.phone, stateCode: store.stateCode ?? company.stateCode },
         company: { legalName: company.legalName, stateCode: company.stateCode, gstin: seller.gstin },

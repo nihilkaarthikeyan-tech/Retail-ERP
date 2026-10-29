@@ -7,7 +7,7 @@
 // Plan 13: points and gift cards pay part of a sale (online only).
 "use client";
 
-import { useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { Decimal } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { rupees } from "@/lib/till/format";
@@ -60,6 +60,24 @@ function sum(rows: DraftPayment[]): Decimal {
 
 export const ON_ACCOUNT_WALK_IN = "On account is only for a named customer. Close this and choose the customer with F6 Customer.";
 
+/** Change this large is almost always a slip (or a barcode scanned into the amount box). */
+export const CHANGE_CHECK_FROM = new Decimal(10000);
+/** Keys closer together than this are a barcode scanner, not a person. */
+export const SCAN_GAP_MS = 50;
+/** How many fast keys in a row count as a scan. */
+const SCAN_KEYS = 4;
+/** When a key came (read in the key handler only). */
+const keyTime = () => Date.now();
+export const SCANNED_INTO_AMOUNT = "That looked like a barcode scanned into the amount, so it was taken out. Type the amount received.";
+
+/** An amount as typed: digits and one point, at most 9 digits before the point and 2 after. */
+export function cleanAmount(text: string): string {
+  const s = text.replace(/[^\d.]/g, "");
+  const dot = s.indexOf(".");
+  const whole = (dot < 0 ? s : s.slice(0, dot)).slice(0, 9);
+  return dot < 0 ? whole : `${whole}.${s.slice(dot + 1).replace(/\./g, "").slice(0, 2)}`;
+}
+
 export function PayDialog({ open, net, draft, methods, busy, error, online = true, namedCustomer = false, refundOnAccount = false, creditSales = true, onChange, onFinish, onClose, special }: PayDialogProps) {
   const refund = net.isNegative();
   const due = net.abs();
@@ -70,6 +88,27 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
   const onAccountUsed = usesOnAccount(rows, methods);
   const onAccountProblem = !onAccountUsed ? null : !namedCustomer ? ON_ACCOUNT_WALK_IN : !online ? "On account needs the connection. Take another payment method, or wait until the till is online." : null;
   const cash = usable.find((m) => m.kind === "cash" && m.isDefault) ?? usable.find((m) => m.kind === "cash");
+  const bigChange = !refund && check.change.gte(CHANGE_CHECK_FROM) ? `Check the amount: change of ${rupees(check.change)}` : null;
+  /** Fast keys in an amount box (a scanner): which row, its amount before them, when the last came, how many. */
+  const burst = useRef<{ row: number; before: string; last: number; count: number } | null>(null);
+
+  function amountKey(e: KeyboardEvent<HTMLInputElement>, row: number, value: string) {
+    const now = keyTime();
+    const b = burst.current;
+    const fast = !!b && b.row === row && now - b.last < SCAN_GAP_MS;
+    if (e.key === "Enter") {
+      // The Enter a scanner sends after the code: do not finish the bill on it, and take the code out again.
+      if (fast && b.count >= SCAN_KEYS) {
+        e.preventDefault();
+        setRow(row, { amount: b.before });
+        setNotice(SCANNED_INTO_AMOUNT);
+      }
+      burst.current = null;
+      return;
+    }
+    if (e.key.length !== 1) return;
+    burst.current = fast ? { ...b, last: now, count: b.count + 1 } : { row, before: value, last: now, count: 1 };
+  }
 
   function remainingFor(index: number): Decimal {
     const others = sum(rows.filter((_, i) => i !== index));
@@ -103,7 +142,7 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
     else addMethod(cash, amount);
   }
 
-  const ready = !check.problem && !onAccountProblem && check.short.isZero() && (rows.length > 0 || net.isZero());
+  const ready = !check.problem && !onAccountProblem && !bigChange && check.short.isZero() && (rows.length > 0 || net.isZero());
   return (
     <Dialog
       open={open}
@@ -177,7 +216,8 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
                         inputMode="decimal"
                         aria-label={`${m?.name ?? "Payment"} amount`}
                         value={r.amount}
-                        onChange={(e) => setRow(i, { amount: e.target.value.replace(/[^\d.]/g, "") })}
+                        onKeyDown={(e) => amountKey(e, i, r.amount)}
+                        onChange={(e) => setRow(i, { amount: cleanAmount(e.target.value) })}
                       />
                     </td>
                     <td>
@@ -229,7 +269,7 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
             </div>
           )}
         </div>
-        <Alert kind="error">{check.problem ?? onAccountProblem ?? error}</Alert>
+        <Alert kind="error">{check.problem ?? onAccountProblem ?? bigChange ?? error}</Alert>
         <Button type="submit" variant="primary" className="till-big" busy={busy} disabled={!ready}>
           Finish and print (Enter)
         </Button>

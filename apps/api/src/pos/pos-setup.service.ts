@@ -344,8 +344,17 @@ function tillDto(t: {
   };
 }
 
-function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean; deliveryItemId: string | null; alterationItemId: string | null }) {
-  return { cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2), printReceiptCopies: s.printReceiptCopies, liveAllowed: s.liveAllowed, deliveryItemId: s.deliveryItemId, alterationItemId: s.alterationItemId };
+function settingsDto(s: { cashDifferenceApprovalAmount: { toFixed(n: number): string }; printReceiptCopies: number; liveAllowed: boolean; deliveryItemId: string | null; alterationItemId: string | null; cashOutApprovalAbove: { toFixed(n: number): string }; blindCount: boolean }) {
+  return {
+    cashDifferenceApprovalAmount: s.cashDifferenceApprovalAmount.toFixed(2),
+    printReceiptCopies: s.printReceiptCopies,
+    liveAllowed: s.liveAllowed,
+    deliveryItemId: s.deliveryItemId,
+    alterationItemId: s.alterationItemId,
+    // Audit 5 (C5, C8).
+    cashOutApprovalAbove: s.cashOutApprovalAbove.toFixed(2),
+    blindCount: s.blindCount,
+  };
 }
 
 function chargesDto(s: Store) {

@@ -944,3 +944,21 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### A4.8 Other checks
 - **Then** a business invoice with an item without HSN is refused; a cess rate cannot be saved; a bill with a registered IRN cannot be cancelled; HSN digits under 6 are refused above ₹5 crore turnover.
+
+## Audit 5: Billing counter and offline (29 October 2026; automated in `module16-audit5.e2e-spec.ts` and the till tests)
+
+### A5.1 An offline day
+- **Given** a till offline all day while the office uses up a coupon, switches off an item, lowers a discount limit and removes a payment method
+- **Then** every bill made offline is kept as sold when it arrives and listed on "Offline bills to check" with what was charged and what the price list said; none is refused.
+
+### A5.2 Closing with unsent bills (C3)
+- **Then** a shift with a bill that "could not be sent" cannot close; the office posts it into the shift ("Post into shift"), and the close then expects its cash.
+
+### A5.3 Approvals tied to the amount
+- **Then** a manager's approval of a ₹150 cash shortage does not cover a ₹2,150 shortage; a bill discount or cash out approval covers only the amount approved.
+
+### A5.4 A lost answer
+- **Then** a bill whose answer was lost after the server saved it is shown as saved; sending the same bill identity with other contents is refused.
+
+### A5.5 Drawer and cash out (C4, C5)
+- **Then** No-sale opens the drawer only with a manager PIN and is recorded on the shift; a cash out above ₹2,000 needs a manager.

@@ -198,8 +198,28 @@ export class PosReportsService {
 
   /** Bills made offline whose prices, offers, GST or stock differ from what the server would have done (pos-offline §5). */
   async offlineCheck(q: PosReportQuery, user: CurrentUser) {
-    const bills = await this.prisma.posBill.findMany({ where: { ...(await this.where(q, user)), NOT: { checkFlags: { isEmpty: true } } }, include: { till: { select: { code: true } } }, orderBy: { soldAt: 'desc' }, take: 1000 });
-    return bills.map((b) => ({ id: b.id, number: b.number, till: b.till.code, soldAt: b.soldAt, offline: b.offline, total: b.total.toFixed(2), flags: b.checkFlags }));
+    const bills = await this.prisma.posBill.findMany({
+      where: { ...(await this.where(q, user)), NOT: { checkFlags: { isEmpty: true } } },
+      include: { till: { select: { code: true } }, lines: { orderBy: { lineNo: 'asc' }, include: { item: { select: { code: true, name: true } } } } },
+      orderBy: { soldAt: 'desc' },
+      take: 1000,
+    });
+    return bills.map((b) => ({
+      id: b.id,
+      number: b.number,
+      till: b.till.code,
+      soldAt: b.soldAt,
+      offline: b.offline,
+      total: b.total.toFixed(2),
+      flags: b.checkFlags,
+      // Audit 5 (pos-offline §5): per flagged line, what was charged and what the server's price list, offer, rate and limits said.
+      lines: b.lines.filter((l) => l.serverFigures !== null).map((l) => ({
+        lineNo: l.lineNo,
+        item: { code: l.item.code, name: l.item.name },
+        charged: { listPrice: l.listPrice.toFixed(2), price: l.price.toFixed(2), offerDiscount: l.offerDiscount.toFixed(2), gstRate: l.gstRate.toString(), lineTotal: l.lineTotal.toFixed(2) },
+        server: l.serverFigures as Record<string, string>,
+      })),
+    }));
   }
 
   async syncProblems(user: CurrentUser, includeResolved = false) {
