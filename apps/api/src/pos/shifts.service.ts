@@ -358,6 +358,11 @@ export class ShiftsService {
       );
     }
     const after = await this.prisma.$transaction(async (tx) => {
+      // Audit 7: checked again under a lock, so a close or a bill arriving at the same moment wins.
+      await tx.$queryRaw`SELECT id FROM "Shift" WHERE id = ${shiftId}::uuid FOR UPDATE`;
+      const now = await tx.shift.findUniqueOrThrow({ where: { id: shiftId }, select: { status: true } });
+      if (now.status !== 'open') throw new BadRequestException(`The shift is already ${now.status}`);
+      if (await tx.posBill.count({ where: { shiftId } })) throw new ForbiddenException('A shift with bills cannot be cancelled; close it instead');
       await tx.shift.update({ where: { id: shiftId }, data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: reason } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'shift', entityId: shiftId, changes: { status: { old: 'open', new: 'cancelled' } }, reason });
       return this.getRow(tx, shiftId);

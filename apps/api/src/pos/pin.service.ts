@@ -92,8 +92,12 @@ export class PinService {
     await this.checkPin(manager.id, input.pin);
     // Audit 5: the cash difference, cash out or bill discount approved is kept and compared when the approval is used.
     const figure = { amount: input.amount ?? null, percent: input.percent ?? null };
-    const token = await this.common.createApproval(this.prisma, till.id, manager.id, input.action, input.details ?? null, figure);
-    await this.audit.record(this.prisma, { userId: manager.id, ipAddress: actor.ipAddress }, { action: 'update', entityType: 'pos_approval', entityId: till.id, changes: { action: input.action, details: input.details ?? null, till: till.code, requestedBy: user.id, ...(figure.amount ? { amount: figure.amount } : {}), ...(figure.percent ? { percent: figure.percent } : {}) } });
+    // Audit 7: the approval and its history entry are saved together.
+    const token = await this.prisma.$transaction(async (tx) => {
+      const t = await this.common.createApproval(tx, till.id, manager.id, input.action, input.details ?? null, figure);
+      await this.audit.record(tx, { userId: manager.id, ipAddress: actor.ipAddress }, { action: 'update', entityType: 'pos_approval', entityId: till.id, changes: { action: input.action, details: input.details ?? null, till: till.code, requestedBy: user.id, ...(figure.amount ? { amount: figure.amount } : {}), ...(figure.percent ? { percent: figure.percent } : {}) } });
+      return t;
+    });
     return { token, manager: { id: manager.id, name: [manager.firstName, manager.lastName].filter(Boolean).join(' ') } };
   }
 

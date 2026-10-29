@@ -117,7 +117,19 @@ export class PartyMastersService {
     return group;
   }
 
+  /** Audit 7: a group's price list and terms must be this shop's own (the database links ignore the shop). */
+  private async checkGroupRefs(input: { priceListId?: string | null; paymentTermsId?: string | null }, use: 'selling' | 'buying') {
+    if (input.priceListId) {
+      const list = await this.prisma.priceList.findUnique({ where: { id: input.priceListId } });
+      if (!list?.active || !(use === 'selling' ? list.forSelling : list.forBuying)) throw new BadRequestException(`Price list must be an active ${use} list`);
+    }
+    if (input.paymentTermsId && !(await this.prisma.paymentTerms.findFirst({ where: { id: input.paymentTermsId, active: true } }))) {
+      throw new BadRequestException('Payment terms not found or switched off');
+    }
+  }
+
   async createCustomerGroup(input: CreateCustomerGroupInput, actor: Actor) {
+    await this.checkGroupRefs(input, 'selling');
     if (await this.prisma.customerGroup.findFirst({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
     const parent = input.parentId ? await this.prisma.customerGroup.findUnique({ where: { id: input.parentId } }) : null;
     if (input.parentId && !parent) throw new NotFoundException('Parent group not found');
@@ -150,6 +162,7 @@ export class PartyMastersService {
   async updateCustomerGroup(id: string, input: UpdateCustomerGroupInput, actor: Actor) {
     const before = await this.prisma.customerGroup.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Customer group not found');
+    await this.checkGroupRefs(input, 'selling');
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.customerGroup.update({
         where: { id },
@@ -181,6 +194,7 @@ export class PartyMastersService {
   }
 
   async createSupplierGroup(input: CreateSupplierGroupInput, actor: Actor) {
+    await this.checkGroupRefs(input, 'buying');
     if (await this.prisma.supplierGroup.findFirst({ where: { code: input.code } })) throw new ConflictException(`Group ${input.code} already exists`);
     const parent = input.parentId ? await this.prisma.supplierGroup.findUnique({ where: { id: input.parentId } }) : null;
     if (input.parentId && !parent) throw new NotFoundException('Parent group not found');
@@ -210,6 +224,7 @@ export class PartyMastersService {
   async updateSupplierGroup(id: string, input: UpdateSupplierGroupInput, actor: Actor) {
     const before = await this.prisma.supplierGroup.findUnique({ where: { id } });
     if (!before) throw new NotFoundException('Supplier group not found');
+    await this.checkGroupRefs(input, 'buying');
     return this.prisma.$transaction(async (tx) => {
       const after = await tx.supplierGroup.update({ where: { id }, data: { ...input, updatedById: actor.userId } });
       await this.audit.recordUpdate(tx, actor, 'supplier_group', id, before, after);

@@ -96,6 +96,10 @@ export class AlterationsService {
     if (input.storeId !== before.storeId) throw new BadRequestException('A job stays with its store');
     const data = await this.checkInput(company.id, input, before);
     const after = await this.prisma.$transaction(async (tx) => {
+      // Audit 7: checked again under a lock, so a hand-back or cancel at the same moment wins.
+      await tx.$queryRaw`SELECT id FROM "AlterationJob" WHERE id = ${id}::uuid FOR UPDATE`;
+      const now = await tx.alterationJob.findUniqueOrThrow({ where: { id }, select: { status: true } });
+      if (now.status === 'delivered' || now.status === 'cancelled') throw new BadRequestException(`Alteration ${before.number} is ${now.status}`);
       await tx.alterationJobLine.deleteMany({ where: { jobId: id } });
       await tx.alterationJob.update({ where: { id }, data: { ...data.fields, updatedById: actor.userId, lines: { create: data.lines } } });
       const j = await this.row(tx, id);

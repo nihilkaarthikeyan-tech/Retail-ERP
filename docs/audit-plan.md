@@ -301,7 +301,8 @@ To add before many shops (owner to choose; each needs a short plan first):
 - [ ] Sessions 1 to 7 done with no Critical or High open
 - [x] The owner's decisions L1 to L12 recorded (`docs/decisions.md`, 28 October 2026)
 - [ ] Security upgrades deployed (done 27 October 2026); live server checks pass (Session 12)
-- [ ] Backup restore tested
+- [x] Backup restore tested (audit 7, 29 October 2026: onto a new server; repeat on the live server in Session 12)
+- [ ] A copy of each night's backup kept off the server (owner to decide; Session 12)
 - [ ] Terms and privacy policy published
 - [ ] Two pilot shops ran two weeks with books, stock and GST agreeing
 - [ ] Support contact and help guides ready
@@ -318,7 +319,7 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 4. GST | **Done**: 15 findings and the owner's decisions T1–T15, all closed | 28 Oct 2026 | `docs/audit/04-gst.md` |
 | 5. Billing counter and offline | **Done**: 21 findings and the owner's decisions C1–C9, all closed; hands-on till test for the owner | 29 Oct 2026 | `docs/audit/05-billing-counter.md`, `docs/audit/05-till-hands-on-checklist.md` |
 | 6. Dates | **Done**: 14 findings, all closed; midnight date suite | 29 Oct 2026 | `docs/audit/06-dates.md` |
-| 7. Data safety | Not started | | |
+| 7. Data safety | **Done**: 19 findings (2 Critical, 3 High), all closed; backup restored onto a new server; off-server backup copy left to Session 12 (owner: decide later) | 29 Oct 2026 | `docs/audit/07-data-safety.md` |
 | 8. Speed | Not started | | |
 | 9. Screens and ease of use | Partly done by the launch check | 27 Oct 2026 | `docs/launch-check.md` |
 | 10. Libraries and build | Partly done (upgrades) | 27 Oct 2026 | `docs/launch-check.md` #90, #91 |
@@ -327,4 +328,4 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 7 (data safety, migrations and history). Owner to run the hands-on till checklist (05). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).
+**Next step:** Session 8 (speed and growth). Owner: the hands-on till checklist (05). Carried to Session 12: where the nightly backup copy goes (owner: decide later) and migrations under a separate database login (07). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).

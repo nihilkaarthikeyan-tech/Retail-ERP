@@ -64,5 +64,10 @@ The API applies new database migrations by itself when it starts. Take a backup 
 ## Restoring a backup
 
 ```sh
-docker exec -i retail-erp-prod-postgres-1 sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' < /var/backups/retail-erp/<file>.dump
+bash /opt/retail-erp/app/deploy/restore.sh /var/backups/retail-erp/<file>.dump
 ```
+
+The script backs up the database as it is now, restores into a separate database in one transaction
+(a failed restore changes nothing), then swaps it in and keeps the old one as `<name>_before_<date>`.
+On a new server it also makes the two database roles; run `deploy/limit-db-role.sh` afterwards as it says.
+Each night's backup is kept only if it reads back; `/var/backups/retail-erp/last-good-backup` shows when the last good one was made.

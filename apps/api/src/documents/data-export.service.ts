@@ -58,7 +58,12 @@ export class DataExportService {
           const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
           // Every value as text, so numeric amounts keep every digit.
           const select = cols.map((c) => `${q(c)}::text AS ${q(c)}`).join(', ');
-          const order = cols.includes('id') ? ' ORDER BY "id"' : '';
+          // Audit 7: pages need a fixed order, else rows can repeat or go missing; tables without an id
+          // (stock totals, permission links) are ordered by their primary key.
+          const key = (
+            await tx.$queryRaw<{ c: string }[]>`SELECT a.attname AS c FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) WHERE i.indrelid = format('public.%I', ${tablename}::text)::regclass AND i.indisprimary ORDER BY array_position(i.indkey::int2[], a.attnum)`
+          ).map((r) => r.c);
+          const order = ` ORDER BY ${(key.length ? key : cols).map(q).join(', ')}`;
           const sheet: Cell[][] = [cols];
           for (let offset = 0; ; offset += PAGE) {
             const rows = await tx.$queryRawUnsafe<Record<string, string | null>[]>(`SELECT ${select} FROM ${q(tablename)}${order} LIMIT ${PAGE} OFFSET ${offset}`);

@@ -11,14 +11,35 @@ import type { Actor } from '../common/request-context.js';
 import { CompanyService } from '../company/company.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
-/** Every table of transactions, in groups for the step log; all are emptied together. */
-const TRANSACTION_TABLES: { step: string; tables: string[] }[] = [
+/** Every table of transactions, in groups for the step log; all are emptied together, in this order. */
+export const TRANSACTION_TABLES: { step: string; tables: string[] }[] = [
+  // Audit 7: these point at the bills and documents below, so they go first.
+  { step: 'Customers: gift cards, points, orders, alterations and deliveries', tables: ['GiftCardEntry', 'GiftCard', 'LoyaltyEntry', 'PosDelivery', 'StockReservation', 'AlterationJobLine', 'AlterationJob', 'CustomerOrderLine', 'CustomerOrder'] },
+  { step: 'GST: e-invoice and e-way bill drafts, uploaded returns', tables: ['EInvoice', 'EWayBill', 'GstReturnUpload'] },
   { step: 'Accounts: ledger, journals, payments, opening bills, closings', tables: ['LedgerLine', 'LedgerEntry', 'Settlement', 'JournalLine', 'Journal', 'PaymentAllocation', 'PaymentDeduction', 'Payment', 'OpeningBill', 'YearEndClosing'] },
   { step: 'Till: bills, payments, shifts and closings', tables: ['PosPayment', 'PosBillLine', 'PosBill', 'ShiftClosingLine', 'ShiftClosing', 'CashMovement', 'ShiftCash', 'Shift', 'PosSyncProblem', 'PosDrawerOpening', 'PosApproval', 'PosCashierToken'] },
   { step: 'Stock: movements, totals, documents, batches and serial numbers', tables: ['StockLedgerEntry', 'StockPosition', 'BatchPosition', 'SerialNumber', 'StockDocumentLine', 'StockDocument', 'Batch'] },
-  { step: 'Purchasing: orders, receipts, bills, charges and suggestions', tables: ['LandedChargeShare', 'LandedChargeItem', 'LandedCharge', 'ReorderSuggestion', 'SupplierBillLine', 'SupplierBill', 'GoodsReceiptLine', 'GoodsReceipt', 'PurchaseOrderLine', 'PurchaseOrder'] },
+  { step: 'Purchasing: orders, receipts, bills, charges, consignment statements and suggestions', tables: ['ConsignmentStatementLine', 'ConsignmentStatement', 'LandedChargeShare', 'LandedChargeItem', 'LandedCharge', 'ReorderSuggestion', 'SupplierBillLine', 'SupplierBill', 'GoodsReceiptLine', 'GoodsReceipt', 'PurchaseOrderLine', 'PurchaseOrder'] },
   { step: 'Document number counters, imports and summary emails', tables: ['NumberSeriesCounter', 'ImportRow', 'ImportJob', 'SummaryEmailRun'] },
 ];
+
+/**
+ * Audit 7: every other table of a shop is kept by clearing (master lists, settings, users, the history).
+ * A test checks that each table with a shop column is in exactly one of the two lists, so a new table
+ * cannot be forgotten.
+ */
+export const KEPT_TABLES = [
+  'Account', 'AccountDefault', 'AccountingSettings', 'Address', 'AuditLog', 'BankAccount', 'Barcode', 'Brand', 'CatalogueSettings', 'CompanyModule',
+  'ContactPerson', 'Coupon', 'Customer', 'CustomerGroup', 'FinancialYear', 'GstFiledPeriod', 'GstRate', 'GstRegistration', 'GstSettings', 'GstinCheck',
+  'HsnCode', 'InventorySettings', 'Item', 'ItemGroup', 'ItemUnit', 'ItemVariantAttribute', 'ItemVariantValue', 'LabelTemplate', 'LoyaltySettings', 'LoyaltyTier',
+  'Markdown', 'NumberSeries', 'Offer', 'PartySettings', 'PaymentMethod', 'PaymentTerms', 'PaymentTermsPart', 'PosSettings', 'Price', 'PriceList',
+  'PrintSettings', 'PurchaseSettings', 'ReorderLevel', 'Role', 'RolePermission', 'SalesStaff', 'Season', 'SecuritySettings', 'Session', 'SetupProgress',
+  'StandardTerms', 'StockLocation', 'Store', 'SummaryEmailSettings', 'Supplier', 'SupplierGroup', 'TallyLedgerMap', 'Till', 'TillDevice', 'TillPaymentMethod',
+  'TrialClearing', 'Unit', 'UnitConversion', 'User', 'UserPin', 'UserRole', 'UserStore', 'UserToken', 'VariantAttribute', 'VariantAttributeValue',
+];
+
+/** E-way bills in these states exist on the government portal. */
+const EWAY_ON_PORTAL = ['generated', 'expired', 'completed'];
 
 @Injectable()
 export class GoLiveService {
@@ -78,6 +99,16 @@ export class GoLiveService {
       async (tx) => {
         const fresh = await tx.company.findUniqueOrThrow({ where: { id: company.id } });
         if (fresh.goLiveDate) throw new ForbiddenException('The shop has gone live; trial data can no longer be cleared');
+        // Audit 7: what was reported to the government cannot be wiped from the books.
+        const [irns, ewayBills, filed] = await Promise.all([
+          tx.eInvoice.count({ where: { status: 'registered' } }),
+          tx.eWayBill.count({ where: { status: { in: EWAY_ON_PORTAL } } }),
+          tx.gstFiledPeriod.count(),
+        ]);
+        if (irns + ewayBills + filed > 0) {
+          const what = [irns && `${irns} registered e-invoice(s)`, ewayBills && `${ewayBills} e-way bill(s)`, filed && `${filed} month(s) marked as filed`].filter(Boolean).join(', ');
+          throw new ForbiddenException(`This shop has already reported to the GST portal (${what}), so trial data can no longer be cleared. Record the go-live date instead; fix any mistakes with a cancellation or a return.`);
+        }
         for (const s of TRANSACTION_TABLES) {
           let rows = 0;
           for (const t of s.tables) rows += Number((await tx.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM "${t}"`))[0].n);
@@ -91,7 +122,7 @@ export class GoLiveService {
         const prices = await tx.price.deleteMany({ where: { batchId: { not: null } } });
         await tx.coupon.updateMany({ data: { usedCount: 0 } });
         await tx.item.updateMany({ data: { lastPurchasePrice: null } });
-        await tx.company.update({ where: { id: company.id }, data: { lockDate: null } });
+        await tx.company.update({ where: { id: company.id }, data: { lockDate: null, updatedById: actor.userId } });
         steps.push({ step: 'Prices for single batches, coupon use counts, last purchase prices and the books-locked date reset', rows: prices.count, outcome: 'reset' });
         const c = await tx.trialClearing.create({ data: { companyId: company.id, reason: input.reason, steps, requestedById: actor.userId, finishedAt: new Date() } });
         await this.audit.record(tx, actor, { action: 'update', entityType: 'trial_data', entityId: c.id, changes: { cleared: steps }, reason: input.reason });
@@ -110,7 +141,7 @@ export class GoLiveService {
     if (company.goLiveDate) throw new BadRequestException(`The go-live date is already recorded as ${company.goLiveDate.toISOString().slice(0, 10)} and cannot be changed`);
     if (input.confirmCompanyName.trim().toLowerCase() !== company.legalName.trim().toLowerCase()) throw new BadRequestException(`Type the company name exactly as "${company.legalName}" to confirm`);
     await this.prisma.$transaction(async (tx) => {
-      await tx.company.update({ where: { id: company.id }, data: { goLiveDate: new Date(`${input.goLiveDate}T00:00:00Z`), goLiveById: actor.userId } });
+      await tx.company.update({ where: { id: company.id }, data: { goLiveDate: new Date(`${input.goLiveDate}T00:00:00Z`), goLiveById: actor.userId, updatedById: actor.userId } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'company', entityId: company.id, changes: { goLiveDate: input.goLiveDate } });
     });
     return this.status(user);

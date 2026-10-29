@@ -962,3 +962,15 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### A5.5 Drawer and cash out (C4, C5)
 - **Then** No-sale opens the drawer only with a manager PIN and is recorded on the shift; a cash out above ₹2,000 needs a manager.
+
+## Audit 7: Data safety (29 October 2026; automated in `module18-audit7.e2e-spec.ts`)
+
+### A7.1 Clearing trial data clears all of it
+- **Given** a trial with a gift card sold and loyalty points earned
+- **Then** clearing removes the card, its entries, the points and the ledger together; the card can no longer be checked at the till; customers stay; the books are in order. Every table with a shop column is on the "cleared" or the "kept" list.
+
+### A7.2 No clearing after reporting to the GST portal
+- **Then** with a registered e-invoice, a generated e-way bill or a month marked as filed, clearing is refused and nothing is deleted.
+
+### A7.3 The database backs up the rules
+- **Then** deleting a finalised document, changing a gift card entry, a negative gift card balance or a GST rate over 100% are refused by the database itself.

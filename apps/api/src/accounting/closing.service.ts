@@ -32,7 +32,7 @@ export class ClosingService {
       }
     }
     await this.prisma.$transaction(async (tx) => {
-      await tx.company.update({ where: { id: company.id }, data: { lockDate: lockDate ? fromIso(lockDate) : null } });
+      await tx.company.update({ where: { id: company.id }, data: { lockDate: lockDate ? fromIso(lockDate) : null, updatedById: actor.userId } });
       await this.audit.record(tx, actor, { action: 'update', entityType: 'company', entityId: company.id, changes: { booksLockedTo: { old: iso(company.lockDate), new: lockDate } }, reason });
     });
     return { lockDate };

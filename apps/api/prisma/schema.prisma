@@ -634,6 +634,8 @@ model Item {
   goodsReceiptLines  GoodsReceiptLine[]
   supplierBillLines  SupplierBillLine[]
   posBillLines       PosBillLine[]
+  stockLedgerEntries StockLedgerEntry[]
+  stockPositions     StockPosition[]
 
   @@unique([parentItemId, variantKey])
   @@unique([companyId, code])
@@ -767,8 +769,9 @@ model Price {
   priceList PriceList @relation(fields: [priceListId], references: [id])
   item      Item      @relation(fields: [itemId], references: [id])
   unit      Unit      @relation(fields: [unitId], references: [id])
-  customer  Customer? @relation(fields: [customerId], references: [id])
-  supplier  Supplier? @relation(fields: [supplierId], references: [id])
+  // Audit 7: a customer or supplier with special prices cannot be deleted (else the price would apply to everyone).
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplier  Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
   @@index([priceListId, itemId])
   @@index([itemId])
@@ -1160,10 +1163,12 @@ model StockLocation {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
-  company  Company         @relation(fields: [companyId], references: [id])
-  store    Store?          @relation(fields: [storeId], references: [id])
-  parent   StockLocation?  @relation("locationTree", fields: [parentId], references: [id])
-  children StockLocation[] @relation("locationTree")
+  company            Company            @relation(fields: [companyId], references: [id])
+  store              Store?             @relation(fields: [storeId], references: [id])
+  parent             StockLocation?     @relation("locationTree", fields: [parentId], references: [id])
+  children           StockLocation[]    @relation("locationTree")
+  stockLedgerEntries StockLedgerEntry[]
+  stockPositions     StockPosition[]
 
   @@unique([companyId, code])
   @@index([storeId])
@@ -1291,6 +1296,10 @@ model StockLedgerEntry {
   createdAt      DateTime       @default(now())
   createdById    String?        @db.Uuid
 
+  // Audit 7: the stock ledger always points at a real item and place.
+  item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
   @@index([itemId, locationId, postingAt, id])
   @@index([documentId])
   @@index([costSourceId])
@@ -1308,6 +1317,9 @@ model StockPosition {
   value         Decimal   @default(0) @db.Decimal(16, 2)
   lastPostingAt DateTime?
   updatedAt     DateTime  @updatedAt
+
+  item     Item          @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@id([itemId, locationId])
   @@index([locationId])
@@ -2373,19 +2385,19 @@ model PosSettings {
 /// A manager PIN approval (decision 40): single use, short-lived, kept for the history.
 model PosApproval {
   /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
-  companyId String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
-  id        String    @id @default(uuid()) @db.Uuid
-  tokenHash String    @unique
-  tillId    String    @db.Uuid
-  managerId String    @db.Uuid
-  action    String
-  details   String?
-  expiresAt DateTime
-  usedAt    DateTime?
-  usedFor   String?
+  companyId       String    @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id              String    @id @default(uuid()) @db.Uuid
+  tokenHash       String    @unique
+  tillId          String    @db.Uuid
+  managerId       String    @db.Uuid
+  action          String
+  details         String?
+  expiresAt       DateTime
+  usedAt          DateTime?
+  usedFor         String?
   /// Audit 5: the cash difference, cash out or bill discount (rupees or percent) the manager approved.
-  approvedAmount  Decimal? @db.Decimal(16, 2)
-  approvedPercent Decimal? @db.Decimal(5, 2)
+  approvedAmount  Decimal?  @db.Decimal(16, 2)
+  approvedPercent Decimal?  @db.Decimal(5, 2)
 
   createdAt DateTime @default(now())
 
@@ -2771,6 +2783,8 @@ model OpeningBill {
   updatedAt   DateTime @updatedAt
   updatedById String?  @db.Uuid
 
+  // Audit 7: the same opening bill cannot be entered twice.
+  @@unique([companyId, partyType, partyId, billNumber])
   @@index([partyType, partyId])
 }
 
@@ -3004,18 +3018,18 @@ model Season {
 
 /// C5: one markdown run; the dated prices it added point back to it.
 model Markdown {
-  id          String    @id @default(uuid()) @db.Uuid
-  companyId   String    @db.Uuid
-  priceListId String    @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @db.Uuid
+  priceListId   String    @db.Uuid
   /// percent (value = % off) or price (value = new price).
-  rule        String
-  value       Decimal   @db.Decimal(16, 4)
-  startDate   DateTime  @db.Date
-  endDate     DateTime? @db.Date
+  rule          String
+  value         Decimal   @db.Decimal(16, 4)
+  startDate     DateTime  @db.Date
+  endDate       DateTime? @db.Date
   /// How the items were chosen (season, groups, brands, items), for the history.
-  chosenBy    Json
-  itemCount   Int
-  remark      String?
+  chosenBy      Json
+  itemCount     Int
+  remark        String?
   /// Decision L3 (owner, 28 October 2026): withdrawn before it started, or ended early; the business date it was stopped.
   stoppedOn     DateTime? @db.Date
   stoppedById   String?   @db.Uuid
@@ -3485,21 +3499,21 @@ model GiftCard {
 /// Every load, spend, refund and expiry of a gift card.
 model GiftCardEntry {
   /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
-  companyId    String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
-  id           String   @id @default(uuid()) @db.Uuid
-  cardId       String   @db.Uuid
+  companyId       String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id              String   @id @default(uuid()) @db.Uuid
+  cardId          String   @db.Uuid
   /// load, spend, refund or expire.
-  kind         String
+  kind            String
   /// Plus for load and refund, minus for spend and expire.
-  amount       Decimal  @db.Decimal(16, 2)
-  balanceAfter Decimal  @db.Decimal(16, 2)
-  billId       String?  @db.Uuid
-  storeId      String?  @db.Uuid
-  entryDate    DateTime @db.Date
-  remark       String?
+  amount          Decimal  @db.Decimal(16, 2)
+  balanceAfter    Decimal  @db.Decimal(16, 2)
+  billId          String?  @db.Uuid
+  storeId         String?  @db.Uuid
+  entryDate       DateTime @db.Date
+  remark          String?
   /// Audit 2 (28 October 2026): how a load at the till was paid, and at which till, for the till payments report.
-  paymentMethodId String? @db.Uuid
-  tillId          String? @db.Uuid
+  paymentMethodId String?  @db.Uuid
+  tillId          String?  @db.Uuid
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -3609,14 +3623,14 @@ model GstinCheck {
 /// Bills that arrive later for a filed month are reported in the next open month.
 model GstFiledPeriod {
   /// Plan 14: the shop this row belongs to (filled in by the database from the request's shop).
-  companyId        String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
-  id               String   @id @default(uuid()) @db.Uuid
-  gstRegistrationId String  @db.Uuid
+  companyId         String   @default(dbgenerated("(NULLIF(current_setting('app.company_id'::text, true), ''::text))::uuid")) @db.Uuid
+  id                String   @id @default(uuid()) @db.Uuid
+  gstRegistrationId String   @db.Uuid
   /// YYYY-MM: a month (IFF or monthly GSTR-1) or the last month of a quarter (quarterly GSTR-1).
-  period           String
+  period            String
   /// gstr1 or iff.
-  returnType       String
-  filedOn          DateTime @db.Date
+  returnType        String
+  filedOn           DateTime @db.Date
 
   createdAt   DateTime @default(now())
   createdById String?  @db.Uuid
@@ -3624,4 +3638,3 @@ model GstFiledPeriod {
   @@unique([gstRegistrationId, period, returnType])
   @@index([companyId])
 }
-
