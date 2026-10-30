@@ -177,8 +177,8 @@ describe('12.7 Getting-started checklist', () => {
     expect(list).toMatchObject({ hidden: false, doneCount: 0, total: 8 });
     expect(list.steps.map((s: { key: string; href: string; done: boolean }) => [s.key, s.href, s.done])).toEqual([
       ['tills', '/pos/tills', false],
-      ['items', '/imports', false],
-      ['opening_stock', '/stock/counts/new', false],
+      ['items', '/items', false],
+      ['opening_stock', '/stock/counts/new?type=opening', false],
       ['staff', '/users/new', false],
       ['letterhead', '/printing', false],
       ['gst_rates', '/pos/gst-rates', false],

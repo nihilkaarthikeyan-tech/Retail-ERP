@@ -66,9 +66,9 @@ export const SETUP_TILL_PAYMENT_METHODS = ['CASH', 'CARD', 'UPI'] as const;
 // ---- Getting-started checklist (plan 12 §4) ----
 
 export const GETTING_STARTED_STEPS = [
-  { key: 'tills', label: 'Add tills and payment methods', hint: 'A till for each billing counter, and the ways customers pay you (cash, card, UPI).', href: '/pos/tills' },
-  { key: 'items', label: 'Import or add your items', hint: 'Bring your item list in from Excel, or add items one by one.', href: '/imports' },
-  { key: 'opening_stock', label: 'Load your opening stock', hint: 'Count what is on the shelves today, or import the quantities from Excel.', href: '/stock/counts/new' },
+  { key: 'tills', label: 'Add tills and payment methods', hint: 'A till for each billing counter, the ways customers pay you (cash, card, UPI), and on each counter computer: open its till and press "Use this computer as till".', href: '/pos/tills' },
+  { key: 'items', label: 'Import or add your items', hint: 'Bring your item list in from Excel, or add items one by one.', href: '/items' },
+  { key: 'opening_stock', label: 'Load your opening stock', hint: 'Count what is on the shelves today, or import the quantities from Excel.', href: '/stock/counts/new?type=opening' },
   { key: 'staff', label: 'Add your staff and their rights', hint: 'A login for each person, with only the rights they need.', href: '/users/new' },
   { key: 'letterhead', label: 'Set your letterhead and logo', hint: 'Your logo and address at the top of printed documents.', href: '/printing' },
   { key: 'gst_rates', label: 'Set GST rates for your HSN codes', hint: 'The GST rate for each HSN code you sell. A rate applies to bills as soon as it is saved.', href: '/pos/gst-rates' },

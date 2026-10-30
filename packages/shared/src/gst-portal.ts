@@ -737,7 +737,7 @@ export function parseEWayResults(fileText: string): EWayResult[] {
 // ---- Input validation (API authoritative, web forms reuse) ----
 
 const uuid = z.string().uuid();
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a date in YYYY-MM-DD form');
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a date');
 
 export const eInvoiceQuerySchema = z.object({
   status: z.enum([...EINVOICE_STATUSES, 'near_limit']).optional(),

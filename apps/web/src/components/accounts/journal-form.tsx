@@ -15,6 +15,7 @@ import { rupees } from "@/lib/purchasing";
 import type { PartyRef } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { AccountOptions, AccountSelect, useChart, useOpenItems, usePartyNames } from "./accounts-shared";
+import { useUnsavedChanges } from "@/lib/unsaved";
 
 export interface JournalLineForm {
   key: string;
@@ -84,6 +85,9 @@ export function JournalForm({ journal, presetKind, onSaved, onClose, accounts: g
   const chart = useChart();
   const { stores } = useOrderStores();
   const kinds: JournalKind[] = rights.cashJournalsOnly ? ["cash"] : [...JOURNAL_FORM_KINDS];
+  // Audit 9: asks before leaving with unsaved typing, and keeps the sign-in alive meanwhile.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChanges(dirty);
   const [chosenKind, setKind] = useState<JournalKind | null>(journal?.kind ?? presetKind ?? null);
   // The rights are known only once the user has loaded; a kind the user may not use falls back to the first allowed.
   const kind: JournalKind = chosenKind && kinds.includes(chosenKind) ? chosenKind : kinds[0];
@@ -183,10 +187,12 @@ export function JournalForm({ journal, presetKind, onSaved, onClose, accounts: g
           saved = await api.post<JournalDto>(`/journals/${saved.id}/post`);
         } catch (err) {
           // Saved as a draft but not posted: show the draft with the reason.
-          onSaved(saved);
+          setDirty(false);
+      onSaved(saved);
           throw err;
         }
       }
+      setDirty(false);
       onSaved(saved);
     } catch (err) {
       setErrors(apiFieldErrors(err));
@@ -199,7 +205,7 @@ export function JournalForm({ journal, presetKind, onSaved, onClose, accounts: g
   const lineError = (i: number, field: string) => errors[`lines.${i}.${field}`] ?? (field === "debit" ? errors[`lines.${i}`] : undefined);
 
   return (
-    <form
+    <form onInput={() => setDirty(true)}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         void submit(false);

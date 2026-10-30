@@ -14,6 +14,9 @@ import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { CancelDocumentDialog, StockStatusBadge } from "./stock-doc-parts";
 import { StockItemAdder } from "./stock-item-adder";
 import { BatchSelect, newLineKey } from "./stock-line-grid";
+import { useUnsavedChanges } from "@/lib/unsaved";
+import { confirmPosting } from "@/lib/confirm";
+import { MoreRows, ROWS_AT_A_TIME } from "@/components/ui/table";
 
 /** One counted line as typed on screen. */
 interface CountLine {
@@ -154,15 +157,21 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
   const editable = canDraft && (!doc || doc.status === "draft");
 
   const [storeId, setStoreId] = useState(doc?.storeId ?? defaultStoreId(user, stores));
-  const [locationId, setLocationId] = useState(doc?.toLocationId ?? "");
-  const [countType, setCountType] = useState<string>(doc?.countType ?? "normal");
+  // Audit 9: a new count starts on the store's shop floor, and as an opening stock load when the
+  // "Getting started" step opened it (?type=opening).
+  const [locationId, setLocationId] = useState(() => doc?.toLocationId ?? locations.find((l) => l.store?.id === storeId && l.code.endsWith("-FLOOR"))?.id ?? "");
+  const [countType, setCountType] = useState<string>(() => doc?.countType ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("type") === "opening" ? "opening" : "normal"));
   const [blind, setBlind] = useState(doc?.blind ?? false);
   const [postingDate, setPostingDate] = useState(doc?.postingDate ?? "");
   const [postingTime, setPostingTime] = useState(doc ? indianTime(doc.postingAt) : "");
   const [dateTouched, setDateTouched] = useState(false);
   const [remarks, setRemarks] = useState(doc?.remarks ?? "");
   const [lines, setLinesState] = useState<CountLine[]>(() => (doc ? doc.lines.map((l) => fromDto(l, [])) : []));
+  // Audit 9: a count of thousands of items shows 500 lines at a time (drawing them all froze the screen).
+  const [shownLines, setShownLines] = useState(ROWS_AT_A_TIME);
   const [dirty, setDirty] = useState(false);
+  // Audit 9: asks before leaving with unsaved lines, and keeps the sign-in alive meanwhile.
+  useUnsavedChanges(dirty);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -198,11 +207,18 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
         api.get<StockBalanceResult>(`/stock/balance${query({ storeId, locationId })}`),
         api.get<BatchStockRow[]>("/stock/batches"),
       ]);
-      const batchesHere = batches.filter((b) => b.location.id === locationId);
+      // Audit 9: grouped by item once (each of thousands of stock rows searched every batch).
+      const batchesByItem = new Map<string, BatchStockRow[]>();
+      for (const b of batches) {
+        if (b.location.id !== locationId) continue;
+        const list = batchesByItem.get(b.item.id);
+        if (list) list.push(b);
+        else batchesByItem.set(b.item.id, [b]);
+      }
       const have = new Set(lines.map((l) => `${l.itemId}|${l.batchId}`));
       const added: CountLine[] = [];
       for (const row of balance.rows) {
-        const itemBatches = batchesHere.filter((b) => b.item.id === row.item.id);
+        const itemBatches = batchesByItem.get(row.item.id) ?? [];
         const base = fromBalance(row);
         if (itemBatches.length > 0) {
           for (const b of itemBatches) {
@@ -467,7 +483,7 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
               </tr>
             </thead>
             <tbody>
-              {lines.map((l, i) => {
+              {lines.slice(0, shownLines).map((l, i) => {
                 const diff = difference(l);
                 const problem = problems[l.key];
                 return (
@@ -529,6 +545,7 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
               })}
             </tbody>
           </table>
+          <MoreRows shown={Math.min(shownLines, lines.length)} total={lines.length} onMore={() => setShownLines((n) => n + ROWS_AT_A_TIME)} />
         </div>
       )}
       <p className="muted">Cost per unit is per basic unit. Lines with no difference are left out when the count is finalised.</p>
@@ -542,7 +559,7 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
           </Button>
         ) : null}
         {doc && doc.status === "draft" && canFinalise ? (
-          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={finalise}>
+          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={() => confirmPosting("Finalise this count", "The stock is set to the counted quantities now, and the differences go into the accounts.") && finalise()}>
             Finalise
           </Button>
         ) : null}

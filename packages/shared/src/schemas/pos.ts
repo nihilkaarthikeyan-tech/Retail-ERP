@@ -11,7 +11,7 @@ import { giftCardNumberSchema } from './loyalty.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const uuid = z.string().uuid();
 const instant = z.string().datetime({ offset: true });
 /** "MM-DD" (plan 11 C10); whether it is a real day is checked by the API. */

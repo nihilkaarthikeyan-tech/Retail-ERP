@@ -72,7 +72,7 @@ describe("status", () => {
 
   it("tells a computer that is not a till how to set it up", () => {
     render(<NotATill />);
-    expect(screen.getByText(/This computer is not set up as a till\. A manager can set it up on Billing counter → Tills\./)).toBeTruthy();
+    expect(screen.getByText(/This computer is not set up as a till yet/)).toBeTruthy();
   });
 });
 

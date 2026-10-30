@@ -7,13 +7,14 @@ import { useEffect } from "react";
 import { AuthLayout } from "@/components/auth-layout";
 import { LoginForm } from "@/components/login-form";
 import { useAuth } from "@/lib/auth-context";
+import { safeNext } from "@/lib/unsaved";
 
 export default function LoginPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, unreachable } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && user) router.replace(user.mustChangePassword ? "/change-password" : "/dashboard");
+    if (!loading && user) router.replace(user.mustChangePassword ? "/change-password" : safeNext(new URLSearchParams(window.location.search).get("next"), "/dashboard"));
   }, [loading, user, router]);
 
   return (
@@ -27,7 +28,12 @@ export default function LoginPage() {
         </>
       }
     >
-      {!loading && !user ? <LoginForm /> : <p className="muted">Loading…</p>}
+      {!loading && !user ? <LoginForm /> : (
+        // Audit 9: say so when the server cannot be reached (it showed "Loading…" with no end).
+        <p className="muted" role="status">
+          {unreachable ? "Cannot reach the server just now. Trying again…" : "Loading…"}
+        </p>
+      )}
     </AuthLayout>
   );
 }

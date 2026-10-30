@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const period = z.string().regex(/^\d{4}-((0[1-9]|1[0-2])|Q[1-4])$/, 'A period is a month like 2026-09 or a quarter like 2026-Q2');
 
 /** Per GSTIN (decision 64) and for a period, or between two dates. */

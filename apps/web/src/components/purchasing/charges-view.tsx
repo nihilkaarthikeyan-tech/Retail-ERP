@@ -10,6 +10,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { CHARGE_TYPE_LABELS, type GoodsReceiptHeader, type LandedChargeDto, purchaseRights, rupees, statusTone } from "@/lib/purchasing";
 import { useLoad } from "@/lib/use-load";
 import { ReasonDialog } from "./receipts-parts";
+import { confirmPosting } from "@/lib/confirm";
 
 export const CHARGE_STATUS_LABELS: Record<LandedChargeDto["status"], string> = {
   draft: "Draft",
@@ -142,7 +143,7 @@ export function ChargesView({ charge: c, onChanged }: ChargesViewProps) {
       <Alert kind="error">{error}</Alert>
       <div className="actions">
         {c.status === "draft" && rights.charges ? (
-          <Button variant="primary" busy={busy} onClick={finalise}>
+          <Button variant="primary" busy={busy} onClick={() => confirmPosting("Finalise these extra charges", "The charges are added to the cost of the goods received, and to the accounts, now.") && finalise()}>
             Finalise
           </Button>
         ) : null}

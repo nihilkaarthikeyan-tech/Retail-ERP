@@ -49,6 +49,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   // On a phone the menu is a drawer opened with the ☰ button.
   const [menuOpen, setMenuOpen] = useState(false);
+  // Audit 9: Escape closes the phone menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   // Ctrl+K (Cmd+K on a Mac) opens quick search from anywhere.
   useEffect(() => {
@@ -102,6 +111,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <ToastProvider>
     <div className="shell">
+      <a className="skip-link" href="#content">
+        Skip to the page
+      </a>
       <header className="shell-head">
         {ready ? (
           <button type="button" className="shell-menu-button" onClick={() => setMenuOpen(true)} aria-label="Open the menu" aria-expanded={menuOpen}>
@@ -185,7 +197,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : null}
       </aside>
       <div className="shell-main">
-        <main className="shell-content">
+        <main className="shell-content" id="content" tabIndex={-1}>
           {unreachable ? (
             <p className="confirm-bar" role="status">
               Cannot reach the server just now. Trying again… Nothing you saved is lost.

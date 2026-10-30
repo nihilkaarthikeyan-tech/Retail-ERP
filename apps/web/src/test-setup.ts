@@ -5,3 +5,7 @@
 import { configure } from "@testing-library/react";
 
 configure({ asyncUtilTimeout: 3000 });
+
+// Audit 9: Finalise and Post ask first (window.confirm). The test browser has no dialog; the screen
+// tests answer "yes" unless a test says otherwise.
+if (typeof window !== "undefined") window.confirm = () => true;

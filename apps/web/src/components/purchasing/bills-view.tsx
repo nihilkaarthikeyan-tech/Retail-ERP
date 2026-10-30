@@ -14,6 +14,7 @@ import { LedgerEntryButton } from "@/components/accounts/ledger-entry";
 import { PrintButton } from "@/components/documents/print-button";
 import { BillCancelDialog, BillDebitNoteDialog, BillHoldDialog, heldText, PriceDifferenceDialog } from "./bills-dialogs";
 import { useUnitCodes } from "./bills-line-grid";
+import { confirmPosting } from "@/lib/confirm";
 
 /** "Tamil Nadu (33)" for a GST state code. */
 const stateLabel = (code: string) => `${INDIAN_STATES[code] ?? code} (${code})`;
@@ -306,7 +307,7 @@ export function BillView({ bill, onChanged, onEdit, onDebitNote }: BillViewProps
       <div className="actions">
         {draft && canBill && !isNote ? (
           <>
-            <Button variant="primary" busy={busy === "finalise"} onClick={() => finalise(false)}>
+            <Button variant="primary" busy={busy === "finalise"} onClick={() => confirmPosting("Finalise this supplier bill", "What is owed to the supplier, and the GST, go into the accounts now.") && finalise(false)}>
               Finalise
             </Button>
             {onEdit ? <Button onClick={onEdit}>Change draft</Button> : null}

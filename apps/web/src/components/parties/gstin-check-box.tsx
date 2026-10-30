@@ -7,7 +7,7 @@ import { useState } from "react";
 import { isValidGstin } from "shared";
 import { Button } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, todayIso } from "@/lib/format";
 import type { SavedGstinCheck } from "@/lib/types";
 
 export type { SavedGstinCheck };
@@ -85,7 +85,7 @@ export function GstinCheckBox({ gstin, saved, onUseDetails, disabled }: { gstin:
           GST network: <strong>{SAVED_WORDS[saved.status] ?? saved.status}</strong>
           {saved.status === "cancelled" && saved.cancelledOn ? ` since ${formatDate(saved.cancelledOn)}` : ""}
           {saved.legalName ? `, ${saved.legalName}` : ""}
-          {saved.checkedAt ? ` (checked ${formatDate(saved.checkedAt.slice(0, 10))})` : ""}
+          {saved.checkedAt ? ` (checked ${formatDate(todayIso(new Date(saved.checkedAt)))})` : ""}
         </p>
       ) : null}
       {complete && !disabled ? (

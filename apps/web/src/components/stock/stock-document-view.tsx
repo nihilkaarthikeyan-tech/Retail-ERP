@@ -1,7 +1,6 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
-import { rupees } from "@/lib/purchasing";
 import Link from "next/link";
 import { useState } from "react";
 import { Decimal } from "shared";
@@ -14,6 +13,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { canDraftKind, canFinaliseKind, indianTime, KIND_LABELS, locationLabel, reasonLabel, showQuantity } from "@/lib/stock";
 import type { StockDocLineDto, StockDocumentDto, StockLocationDto, StoreRef } from "@/lib/types";
 import { BackDatedBadge, CancelDocumentDialog, StockStatusBadge } from "./stock-doc-parts";
+import { rupees, unitRupees } from "@/lib/purchasing";
 
 interface StockDocumentViewProps {
   doc: StockDocumentDto;
@@ -119,7 +119,7 @@ export function StockDocumentView({ doc, locations, stores, onChanged }: StockDo
       : []),
     ...(withCost
       ? [
-          { key: "cost", header: "Cost per basic unit", align: "right", render: (l: StockDocLineDto) => l.unitCost ?? "—" },
+          { key: "cost", header: "Cost per basic unit", align: "right", render: (l: StockDocLineDto) => unitRupees(l.unitCost) },
           { key: "value", header: "Value change", align: "right", render: (l: StockDocLineDto) => (doc.status === "draft" ? "—" : rupees(l.valueChange)) },
         ] satisfies Column<StockDocLineDto>[]
       : []),
@@ -211,9 +211,9 @@ export function StockDocumentView({ doc, locations, stores, onChanged }: StockDo
           {doc.totalValueIn !== undefined && doc.status !== "draft" ? (
             <>
               <dt>Value in</dt>
-              <dd>₹{doc.totalValueIn}</dd>
+              <dd>{rupees(doc.totalValueIn)}</dd>
               <dt>Value out</dt>
-              <dd>₹{doc.totalValueOut}</dd>
+              <dd>{rupees(doc.totalValueOut)}</dd>
             </>
           ) : null}
         </dl>

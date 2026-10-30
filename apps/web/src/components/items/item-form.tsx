@@ -13,6 +13,7 @@ import { useModules } from "@/lib/modules";
 import type { SeasonDto } from "@/lib/styles-seasons";
 import type { AttributeDto, BrandDto, CatalogueSettingsDto, ItemDto, ItemGroupNode, UnitDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { useUnsavedChanges } from "@/lib/unsaved";
 
 interface ItemFormValues {
   code: string;
@@ -123,6 +124,9 @@ interface ItemFormProps {
 }
 
 export function ItemForm({ item, groups, brands, units, attributes, settings, seasons = [], readOnly = false, onSaved }: ItemFormProps) {
+  // Audit 9: asks before leaving with unsaved typing, and keeps the sign-in alive meanwhile.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChanges(dirty);
   const [form, setForm] = useState<ItemFormValues>(() => fromItem(item, settings));
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState<string | null>(null);
@@ -191,6 +195,7 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
     setBusy(true);
     try {
       const saved = item ? await api.patch<ItemDto>(`/items/${item.id}`, parsed.data) : await api.post<ItemDto>("/items", parsed.data);
+      setDirty(false);
       onSaved(saved);
     } catch (err) {
       setErrors(apiFieldErrors(err));
@@ -208,7 +213,7 @@ export function ItemForm({ item, groups, brands, units, attributes, settings, se
   const isVariant = item?.parent != null;
 
   return (
-    <form onSubmit={onSubmit} noValidate>
+    <form onInput={() => setDirty(true)} onSubmit={onSubmit} noValidate>
       <Alert kind="error">{error}</Alert>
       <fieldset disabled={readOnly}>
         <legend>Details</legend>

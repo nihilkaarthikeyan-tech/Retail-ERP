@@ -173,7 +173,7 @@ export class StockEngine {
         applied = apply(state, intent, fallback);
       } catch (err) {
         if (err instanceof Error && err.message === 'MISSING_COST') {
-          throw new BadRequestException(`No cost is known for ${opts.describe?.(m.itemId, m.locationId) ?? 'this item'}; record a stock-in with a cost first`);
+          throw new BadRequestException(`No cost is known for ${opts.describe?.(m.itemId, m.locationId) ?? 'this item'}: it has never come into stock with a cost. Load its opening stock (Stock → Stock counts, "Opening stock") or receive it from a supplier first`);
         }
         throw new BadRequestException(err instanceof Error ? err.message : String(err));
       }
@@ -372,7 +372,7 @@ export class StockEngine {
         applied = apply(state, intent, fallback);
       } catch (err) {
         if (err instanceof Error && err.message === 'MISSING_COST') {
-          throw new BadRequestException(`No cost is known for ${opts.describe?.(itemId, locationId) ?? 'this item'}; record a stock-in with a cost first`);
+          throw new BadRequestException(`No cost is known for ${opts.describe?.(itemId, locationId) ?? 'this item'}: it has never come into stock with a cost. Load its opening stock (Stock → Stock counts, "Opening stock") or receive it from a supplier first`);
         }
         throw new BadRequestException(err instanceof Error ? err.message : String(err));
       }

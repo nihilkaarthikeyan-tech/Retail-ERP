@@ -36,6 +36,8 @@ export function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []): Load
   useEffect(() => {
     let cancelled = false;
     const my = ++version.current;
+    // Audit 9: a new filter shows as loading (the old figures stayed on screen with no sign).
+    setState((s) => (s.loading ? s : { ...s, loading: true }));
     loader().then(
       (data) => {
         if (!cancelled && my === version.current) setState({ data, error: null, loading: false });

@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 
 /** Tally ledger names: no control characters, at most 100 characters (blank = use our account name). */
 export const tallyLedgerName = z

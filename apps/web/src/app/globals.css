@@ -21,7 +21,8 @@
   --fg: #0a0a0a;
   --muted: #5c6067;
   --line: #e7e7e7;
-  --line-strong: #d4d4d4;
+  /* Audit 9: borders of boxes and buttons at 3:1 against white (#d4d4d4 was 1.5:1). */
+  --line-strong: #949494;
   --primary: #1f4ea3;
   --primary-fg: #ffffff;
   --primary-soft: #eaf0fa;
@@ -59,7 +60,7 @@
     --fg: #ececec;
     --muted: #a1a1a6;
     --line: #2f2f32;
-    --line-strong: #46464a;
+    --line-strong: #6b6b70;
     --primary: #93b4ea;
     --primary-fg: #161617;
     --primary-soft: #1f2a3d;
@@ -96,7 +97,7 @@
   --fg: #ececec;
   --muted: #a1a1a6;
   --line: #2f2f32;
-  --line-strong: #46464a;
+  --line-strong: #6b6b70;
   --primary: #93b4ea;
   --primary-fg: #161617;
   --primary-soft: #1f2a3d;
@@ -308,6 +309,22 @@ p {
   display: block;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* Audit 9: "Skip to the page", the first thing Tab reaches, shown only when it has the focus. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: var(--primary-fg);
+}
+
+.skip-link:focus {
+  top: 8px;
 }
 
 .shell-side {
@@ -522,10 +539,16 @@ p {
     border-right: 1px solid var(--line);
     box-shadow: var(--shadow);
     transform: translateX(-105%);
-    transition: transform 0.2s ease-out;
+    transition:
+      transform 0.2s ease-out,
+      visibility 0s linear 0.2s;
+    /* Audit 9: a closed drawer cannot be reached with Tab or read out. */
+    visibility: hidden;
   }
   .shell-side.is-open {
     transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease-out;
   }
   .shell-backdrop {
     display: block;
@@ -1649,6 +1672,17 @@ legend {
 
 /* ---- Tables ---- */
 
+/* Audit 9: old rows dimmed while new figures load; "Show more" under a long table. */
+.table-updating {
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.table-more {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
 .table-wrap {
   overflow-x: auto;
   max-width: 100%;
@@ -1982,7 +2016,9 @@ legend {
 .picker-result:hover,
 .picker-result:focus-visible {
   background: var(--surface-2);
-  outline: none;
+  /* Audit 9: a ring you can see with the keyboard (the grey alone was 1.1:1). */
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 
 .tree {
@@ -2059,6 +2095,11 @@ legend {
   flex-direction: column;
   min-height: 100vh;
   background: var(--bg);
+}
+
+/* Audit 9: a wrapper only so the screen can be made inert while locked; it takes no part in the layout. */
+.till-body {
+  display: contents;
 }
 
 .till-top {
@@ -4555,6 +4596,9 @@ button.shell-nav-heading:disabled {
 
 .shell-nav-count {
   margin-left: auto;
+  /* Audit 9: a gap after a long heading ("Customers and suppliers 6" ran together). */
+  padding-left: 8px;
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--muted);
 }

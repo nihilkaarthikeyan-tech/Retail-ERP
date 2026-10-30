@@ -7,7 +7,7 @@ import { decimalString, nonNegativeDecimalString, positiveDecimalString } from '
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
 const uuid = z.string().uuid();
 const percent = nonNegativeDecimalString.refine((v) => Number(v) <= 100, 'Must be 100 or less');

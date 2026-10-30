@@ -1,5 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
-import type { ReactNode } from "react";
+"use client";
+
+import { type ReactNode, useState } from "react";
 
 export interface Column<T> {
   key: string;
@@ -20,10 +22,29 @@ interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined;
 }
 
+/** Audit 9: rows drawn at first; a shop with 50,000 items froze the browser drawing them all. */
+export const ROWS_AT_A_TIME = 500;
+
+/** "Showing 500 of 48,213 — Show 500 more", under a long table. */
+export function MoreRows({ shown, total, onMore }: { shown: number; total: number; onMore: () => void }) {
+  if (shown >= total) return null;
+  return (
+    <p className="table-more muted" role="status">
+      Showing {shown.toLocaleString("en-IN")} of {total.toLocaleString("en-IN")}.{" "}
+      <button type="button" className="btn btn-small" onClick={onMore}>
+        Show {Math.min(ROWS_AT_A_TIME, total - shown).toLocaleString("en-IN")} more
+      </button>
+    </p>
+  );
+}
+
 /** A plain data table that scrolls sideways on narrow screens instead of the page. */
 export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing to show.", caption, rowClassName }: DataTableProps<T>) {
+  const [limit, setLimit] = useState(ROWS_AT_A_TIME);
   return (
-    <div className="table-wrap">
+    <>
+    {/* Audit 9: while new figures load, the old ones are dimmed and marked as updating. */}
+    <div className={loading && rows ? "table-wrap table-updating" : "table-wrap"} aria-busy={loading || undefined}>
       <table className="table">
         {caption ? <caption>{caption}</caption> : null}
         <thead>
@@ -56,7 +77,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing 
               </td>
             </tr>
           ) : (
-            rows.map((row) => (
+            rows.slice(0, limit).map((row) => (
               <tr key={rowKey(row)} className={rowClassName?.(row)}>
                 {columns.map((c) => (
                   <td key={c.key} className={c.align === "right" ? "num" : undefined}>
@@ -69,6 +90,8 @@ export function DataTable<T>({ columns, rows, rowKey, loading, empty = "Nothing 
         </tbody>
       </table>
     </div>
+    {rows ? <MoreRows shown={Math.min(limit, rows.length)} total={rows.length} onMore={() => setLimit((l) => l + ROWS_AT_A_TIME)} /> : null}
+    </>
   );
 }
 

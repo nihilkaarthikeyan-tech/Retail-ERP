@@ -16,6 +16,8 @@ import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { CancelDocumentDialog, StockStatusBadge } from "./stock-doc-parts";
 import { StockItemAdder } from "./stock-item-adder";
 import { type EditableKind, emptyLine, type LineDraft, lineFromDto, lineProblem, lineToInput, StockLineGrid } from "./stock-line-grid";
+import { useUnsavedChanges } from "@/lib/unsaved";
+import { confirmPosting } from "@/lib/confirm";
 
 interface StockDocumentEditorProps {
   kind: EditableKind;
@@ -72,6 +74,8 @@ function EditorForm({ kind, doc, locations, receivingStores, onSaved, initialLin
   const [dateTouched, setDateTouched] = useState(false);
   const [lines, setLinesState] = useState<LineDraft[]>(initialLines);
   const [dirty, setDirty] = useState(false);
+  // Audit 9: asks before leaving with unsaved lines, and keeps the sign-in alive meanwhile.
+  useUnsavedChanges(dirty);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -283,7 +287,7 @@ function EditorForm({ kind, doc, locations, receivingStores, onSaved, initialLin
           </Button>
         ) : null}
         {doc && doc.status === "draft" && canFinalise ? (
-          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={finalise}>
+          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={() => confirmPosting("Finalise this stock document", "The stock moves now, and its value goes into the accounts.") && finalise()}>
             Finalise
           </Button>
         ) : null}

@@ -9,6 +9,7 @@ import { api, errorMessage, query } from "@/lib/api";
 import { todayIso } from "@/lib/format";
 import type { ItemDto, PriceDto, PriceListDto, PriceLookupResult } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
+import { unitRupees } from "@/lib/purchasing";
 
 interface ItemPricesProps {
   item: ItemDto;
@@ -104,8 +105,8 @@ export function ItemPrices({ item, canManage }: ItemPricesProps) {
         {checkResult ? (
           checkResult.found ? (
             <Alert kind="success">
-              Rate <span className="mono">{checkResult.rate}</span> per {unitCode(checkUnitId)} — from {listName(checkResult.priceListId)}
-              {checkResult.source === "default_list" ? " (fallback to the default selling list)" : ""}, stored as <span className="mono">{checkResult.price}</span> per{" "}
+              Rate <span className="mono">{unitRupees(checkResult.rate)}</span> per {unitCode(checkUnitId)} — from {listName(checkResult.priceListId)}
+              {checkResult.source === "default_list" ? " (no price on that list, so the shop's usual selling list)" : ""}, stored as <span className="mono">{unitRupees(checkResult.price)}</span> per{" "}
               {unitCode(checkResult.priceUnitId)}.
             </Alert>
           ) : (

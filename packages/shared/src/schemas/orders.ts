@@ -8,7 +8,7 @@ import { positiveDecimalString, nonNegativeDecimalString } from './catalogue.js'
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const uuid = z.string().uuid();
 const money = positiveDecimalString.refine((v) => !/\.\d{3,}$/.test(v), 'At most two digits after the point (paise)');
 const mobile = z

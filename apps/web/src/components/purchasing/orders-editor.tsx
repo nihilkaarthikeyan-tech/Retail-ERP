@@ -19,6 +19,8 @@ import { OrdersItemAdder } from "./orders-item-adder";
 import { SizeColourGrid } from "./size-colour-grid";
 import { emptyOrderLine, OrderLineGrid, type OrderLineDraft, orderLineFromDto, orderLineProblem, orderLineToInput, previewOrderTotals } from "./orders-lines";
 import { OrderStatusBadge, OrdersReasonDialog, useOrderStores } from "./orders-shared";
+import { useUnsavedChanges } from "@/lib/unsaved";
+import { confirmPosting } from "@/lib/confirm";
 
 /** Finalised orders still expecting goods or a bill. */
 const OPEN: PurchaseOrderStatus[] = ["to_receive_and_bill", "to_receive", "to_bill"];
@@ -132,6 +134,8 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
   const [lines, setLinesState] = useState<OrderLineDraft[]>(initialLines);
   const [linesDirty, setLinesDirty] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Audit 9: asks before leaving with unsaved lines, and keeps the sign-in alive meanwhile.
+  useUnsavedChanges(dirty);
   const [changeReason, setChangeReason] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
@@ -389,7 +393,7 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
           </Button>
         ) : null}
         {can.finalise ? (
-          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={finalise}>
+          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={() => confirmPosting("Finalise this purchase order", "It can then be received and billed, and its lines can no longer be changed.") && finalise()}>
             Finalise
           </Button>
         ) : null}

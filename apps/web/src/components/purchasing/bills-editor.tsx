@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PartyPicker } from "@/components/parties/party-picker";
 import { StockItemAdder } from "@/components/stock/stock-item-adder";
 import { SizeColourGrid } from "./size-colour-grid";
@@ -16,6 +16,7 @@ import type { ItemDto, ItemPage, PartyRef, PaymentTermsDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { BillLineGrid } from "./bills-line-grid";
 import { type BillLineDraft, billLineProblem, billLineToInput, KIND_EXPLANATIONS, lineForItem, linesFromBill, linesFromDraftReceipt, linesFromReceipt, type NewBillKind, previewBill } from "./bills-lines";
+import { useUnsavedChanges } from "@/lib/unsaved";
 
 interface BillEditorProps {
   kind: NewBillKind;
@@ -59,6 +60,9 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
   const locations = useStockLocations();
   const terms = useLoad(() => api.get<PaymentTermsDto[]>("/payment-terms"));
   const stores = storesFromLocations(locations.data ?? []);
+  // Audit 9: asks before leaving with unsaved changes, and keeps the sign-in alive meanwhile.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChanges(dirty);
   const [header, setHeader] = useState<HeaderState>(() => ({
     supplier: bill ? bill.supplier : null,
     supplierBillNo: bill?.supplierBillNo ?? "",
@@ -70,6 +74,14 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
     reverseCharge: bill ? (bill.reverseCharge ? "yes" : "no") : "",
   }));
   const [lines, setLines] = useState<BillLineDraft[]>(initialLines);
+  const opened = useRef(true);
+  useEffect(() => {
+    if (opened.current) {
+      opened.current = false;
+      return;
+    }
+    setDirty(true);
+  }, [header, lines]);
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +137,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
     setBusy(true);
     try {
       const saved = bill ? await api.patch<SupplierBillDto>(`/purchase/bills/${bill.id}`, body) : await api.post<SupplierBillDto>("/purchase/bills", { kind, ...body });
+      setDirty(false);
       onSaved(saved);
     } catch (err) {
       setError(errorMessage(err));

@@ -11,6 +11,7 @@ import { type ReactNode, useState } from "react";
 import { hasPermission, type PermissionKey } from "shared";
 import { useOrderStores } from "@/components/purchasing/orders-shared";
 import { Alert, Button, SelectInput, TextInput } from "@/components/ui";
+import { MoreRows, ROWS_AT_A_TIME } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate } from "@/lib/format";
@@ -205,7 +206,10 @@ const cellClass = <T,>(c: ReportColumn<T>) => [c.align === "right" ? "num" : "",
 
 export function ReportTable<T>({ columns, rows, rowKey, empty, totals = true, totalLabel = "Total", caption }: { columns: ReportColumn<T>[]; rows: T[]; rowKey: (row: T, i: number) => string; empty: string; totals?: boolean; totalLabel?: string; caption?: string }) {
   const showTotals = totals && rows.length > 0 && columns.some((c) => c.total);
+  // Audit 9: the first 500 rows are drawn; the totals and the download cover every row.
+  const [limit, setLimit] = useState(ROWS_AT_A_TIME);
   return (
+    <>
     <div className="table-wrap">
       <table className="table report-table">
         {caption ? <caption>{caption}</caption> : null}
@@ -226,7 +230,7 @@ export function ReportTable<T>({ columns, rows, rowKey, empty, totals = true, to
               </td>
             </tr>
           ) : (
-            rows.map((r, i) => (
+            rows.slice(0, limit).map((r, i) => (
               <tr key={rowKey(r, i)}>
                 {columns.map((c) => (
                   <td key={c.key} className={cellClass(c)}>
@@ -250,6 +254,8 @@ export function ReportTable<T>({ columns, rows, rowKey, empty, totals = true, to
         ) : null}
       </table>
     </div>
+    <MoreRows shown={Math.min(limit, rows.length)} total={rows.length} onMore={() => setLimit((l) => l + ROWS_AT_A_TIME)} />
+    </>
   );
 }
 

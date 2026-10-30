@@ -45,7 +45,8 @@ describe("api client", () => {
     expect(err).toBeInstanceOf(ApiError);
     const apiErr = err as ApiError;
     expect(apiErr.statusCode).toBe(400);
-    expect(apiErr.message).toBe("Validation failed");
+    // Audit 9: the message names the problems instead of "Validation failed".
+    expect(apiErr.message).toBe("Please check: Too small; Code must be 2–10 letters or digits");
     expect(apiErr.errors).toHaveLength(2);
     expect(apiErr.fieldErrors).toEqual({
       "company.legalName": "Too small",

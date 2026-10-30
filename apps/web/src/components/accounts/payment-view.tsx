@@ -15,6 +15,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { rupees } from "@/lib/purchasing";
 import { DocStatusBadge, partyText, useChart, useOpenItems, usePartyNames } from "./accounts-shared";
 import { LedgerEntryButton } from "./ledger-entry";
+import { confirmPosting } from "@/lib/confirm";
 
 /** Links the unused part of a posted payment to the party's unpaid bills (POST /settlements). */
 function UseAdvance({ payment, onDone }: { payment: PaymentDto; onDone: () => void }) {
@@ -275,7 +276,7 @@ export function PaymentView({ payment, onChanged, onReload, onEdit }: { payment:
         <div className="actions">
           {p.status === "draft" ? (
             <>
-              <Button variant="primary" busy={busy} onClick={post}>
+              <Button variant="primary" busy={busy} onClick={() => confirmPosting("Post this payment", "The money and what it settles go into the accounts now.") && post()}>
                 Post
               </Button>
               {onEdit ? <Button onClick={onEdit}>Change draft</Button> : null}

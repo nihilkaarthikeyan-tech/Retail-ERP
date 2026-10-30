@@ -9,6 +9,7 @@ import { Alert, Button, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { safeNext } from "@/lib/unsaved";
 
 export function LoginForm() {
   const router = useRouter();
@@ -31,7 +32,8 @@ export function LoginForm() {
     try {
       const user = await api.post<CurrentUser>("/auth/login", parsed.data, { redirectOnUnauthorized: false });
       await refresh();
-      router.replace(user.mustChangePassword ? "/change-password" : "/dashboard");
+      // Audit 9: back to the page the person was on when the sign-in ended.
+      router.replace(user.mustChangePassword ? "/change-password" : safeNext(new URLSearchParams(window.location.search).get("next"), "/dashboard"));
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);

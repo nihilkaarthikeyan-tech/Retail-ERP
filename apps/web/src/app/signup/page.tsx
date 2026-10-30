@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 
 /** Plan 14: a new shop signs up, then sets up its shop. */
 export default function SignupPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, unreachable } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -27,7 +27,12 @@ export default function SignupPage() {
         </>
       }
     >
-      {!loading && !user ? <SignupForm /> : <p className="muted">Loading…</p>}
+      {!loading && !user ? <SignupForm /> : (
+        // Audit 9: say so when the server cannot be reached (it showed "Loading…" with no end).
+        <p className="muted" role="status">
+          {unreachable ? "Cannot reach the server just now. Trying again…" : "Loading…"}
+        </p>
+      )}
     </AuthLayout>
   );
 }

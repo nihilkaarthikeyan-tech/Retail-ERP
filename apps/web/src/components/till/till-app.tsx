@@ -89,9 +89,17 @@ export function NotATill() {
     <div className="till-center">
       <div className="card till-open">
         <h1>Billing counter</h1>
-        <p>This computer is not set up as a till. A manager can set it up on Billing counter → Tills.</p>
+        <p>This computer is not set up as a till yet. A manager does it once, on this computer:</p>
+        {/* Audit 9: the steps, so a new shop owner is not left guessing. */}
+        <ol>
+          <li>Open Billing counter → Tills.</li>
+          <li>Choose the till (a new shop has Till 1).</li>
+          <li>Press “Use this computer as till …” at the bottom of its page.</li>
+        </ol>
         <p>
-          <Link href="/pos/tills">Go to Billing counter → Tills</Link>
+          <Link className="btn btn-primary" href="/pos/tills">
+            Open Billing counter → Tills
+          </Link>
         </p>
       </div>
     </div>
@@ -228,7 +236,7 @@ function TillRunning({ device, given }: { device: TillDeviceInfo; given?: TillEn
   } else if (!state.shift) {
     body = <OpenShiftScreen engine={engine} openedBy={cashier?.name ?? ""} />;
   } else {
-    body = <BillingScreen engine={engine} state={state} snapshot={snapshot} cashierName={cashier?.name ?? ""} />;
+    body = <BillingScreen engine={engine} state={state} snapshot={snapshot} cashierName={cashier?.name ?? ""} locked={locked} />;
   }
 
   return (
@@ -265,7 +273,10 @@ function TillRunning({ device, given }: { device: TillDeviceInfo; given?: TillEn
           The session has ended. Billing goes on; <Link href="/login">sign in again</Link> to send the waiting bills.
         </div>
       ) : null}
-      {body}
+      {/* Audit 9: nothing behind the lock screen can be reached with the keyboard. */}
+      <div className="till-body" inert={locked}>
+        {body}
+      </div>
       {locked ? (
         <LockScreen
           api={engine.api}

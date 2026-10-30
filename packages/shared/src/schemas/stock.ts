@@ -6,7 +6,7 @@ import { itemCode, nonNegativeDecimalString, positiveDecimalString } from './cat
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
 
 export const LOCATION_KINDS = ['folder', 'shelf', 'transit', 'rejected'] as const;

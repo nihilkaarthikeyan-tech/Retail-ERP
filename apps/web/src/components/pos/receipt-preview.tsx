@@ -5,7 +5,7 @@
 import { useRef } from "react";
 import { Button } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { rupees } from "@/lib/purchasing";
+import { rupees, unitRupees } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
 import type { ReceiptDto } from "./pos-shared";
 
@@ -63,23 +63,23 @@ export function ReceiptPreview({ receipt }: { receipt: ReceiptDto }) {
             </div>
             <div style={row}>
               <span>
-                {showQuantity(l.quantity)} × {l.price}
+                {showQuantity(l.quantity)} × {unitRupees(l.price)}
                 {l.hsn ? ` HSN ${l.hsn}` : ""}
               </span>
-              <span>{l.amount}</span>
+              <span>{rupees(l.amount)}</span>
             </div>
-            {l.discount !== "0.00" ? <div style={row}><span>  discount</span><span>−{l.discount}</span></div> : null}
+            {l.discount !== "0.00" ? <div style={row}><span>  discount</span><span>−{rupees(l.discount)}</span></div> : null}
             {l.serials.length ? <div>  S/N {l.serials.join(", ")}</div> : null}
           </div>
         ))}
         <div style={rule} />
         <div style={row}>
           <span>Discount</span>
-          <span>{receipt.totals.discount}</span>
+          <span>{rupees(receipt.totals.discount)}</span>
         </div>
         <div style={row}>
           <span>Rounding</span>
-          <span>{receipt.totals.rounding}</span>
+          <span>{rupees(receipt.totals.rounding)}</span>
         </div>
         <div style={{ ...row, fontWeight: 700, fontSize: 14 }}>
           <span>TOTAL</span>
@@ -96,10 +96,10 @@ export function ReceiptPreview({ receipt }: { receipt: ReceiptDto }) {
         {receipt.gstTable.map((g) => (
           <div key={g.rate} style={row}>
             <span>{showQuantity(g.rate)}</span>
-            <span>{g.taxable}</span>
-            <span>{g.cgst}</span>
-            <span>{g.sgst}</span>
-            <span>{g.igst}</span>
+            <span>{rupees(g.taxable)}</span>
+            <span>{rupees(g.cgst)}</span>
+            <span>{rupees(g.sgst)}</span>
+            <span>{rupees(g.igst)}</span>
           </div>
         ))}
         <div style={rule} />
@@ -109,7 +109,7 @@ export function ReceiptPreview({ receipt }: { receipt: ReceiptDto }) {
               {p.method}
               {p.reference ? ` (${p.reference})` : ""}
             </span>
-            <span>{p.amount}</span>
+            <span>{rupees(p.amount)}</span>
           </div>
         ))}
         {receipt.change !== "0.00" ? (

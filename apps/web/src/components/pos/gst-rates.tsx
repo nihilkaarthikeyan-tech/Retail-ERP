@@ -11,7 +11,7 @@ import { gstRateSchema } from "shared";
 import { Alert, Button, DataTable, Dialog, SelectInput, TextInput, type Column } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { formatDate } from "@/lib/format";
+import { formatDate, todayIso } from "@/lib/format";
 import { rupees } from "@/lib/purchasing";
 import { showQuantity } from "@/lib/stock";
 import { useLoad } from "@/lib/use-load";
@@ -55,7 +55,8 @@ export function GstRatesView() {
   function open(r: GstRateDto | "new") {
     setErrors({});
     setError(null);
-    setForm(r === "new" ? empty : { hsnCode: r.hsnCode, rate: showQuantity(r.rate), cessRate: showQuantity(r.cessRate), effectiveFrom: r.effectiveFrom, note: r.note ?? "", kind: r.kind ?? "taxable", priceFrom: r.priceFrom ?? "", priceUpTo: r.priceUpTo ?? "" });
+    // Audit 9: a new rate starts today unless changed (the date box was empty, and a new shop did not know what to put).
+    setForm(r === "new" ? { ...empty, effectiveFrom: todayIso() } : { hsnCode: r.hsnCode, rate: showQuantity(r.rate), cessRate: showQuantity(r.cessRate), effectiveFrom: r.effectiveFrom, note: r.note ?? "", kind: r.kind ?? "taxable", priceFrom: r.priceFrom ?? "", priceUpTo: r.priceUpTo ?? "" });
     setEditing(r);
   }
 
@@ -134,7 +135,7 @@ export function GstRatesView() {
         <TextInput id="gst-search" label="HSN code" placeholder="Starts with…" inputMode="numeric" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <Alert kind="error">{rates.error}</Alert>
-      <DataTable columns={columns} rows={rates.data ? rows : null} rowKey={(r) => r.id} loading={rates.loading} empty="No GST rates yet." />
+      <DataTable columns={columns} rows={rates.data ? rows : null} rowKey={(r) => r.id} loading={rates.loading} empty="No GST rates yet. Add the rate for each HSN code you sell (Add a rate); the till cannot sell an item whose HSN code has no rate." />
 
       <Dialog open={editing !== null} title={editing === "new" ? "Add a GST rate" : `Edit rate for HSN ${form.hsnCode}`} onClose={() => setEditing(null)}>
         <form onSubmit={submit} noValidate>

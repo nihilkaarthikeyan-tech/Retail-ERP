@@ -83,6 +83,7 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
   const due = net.abs();
   const usable = methods.filter((m) => m.active && (!refund || m.allowRefund) && (m.kind !== "on_account" || (refund ? refundOnAccount && namedCustomer : creditSales)));
   const rows = draft.payments;
+  const firstChoice = (usable.find((m) => m.isDefault && m.kind !== "on_account") ?? usable.find((m) => m.kind === "cash") ?? usable[0])?.id;
   const check = checkPayments(net, rows, methods);
   const [notice, setNotice] = useState<string | null>(null);
   const onAccountUsed = usesOnAccount(rows, methods);
@@ -158,6 +159,15 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
           e.preventDefault();
           if (ready && !busy) onFinish();
         }}
+        // Audit 9: once enough is paid, Enter finishes the bill wherever the cursor is (on a quick-cash
+        // button it only pressed that button again).
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" || !ready || busy) return;
+          if ((e.target as HTMLElement).tagName === "BUTTON" && (e.target as HTMLButtonElement).type !== "submit") {
+            e.preventDefault();
+            onFinish();
+          }
+        }}
       >
         <div className="till-pay-due">
           <span>{refund ? "To refund" : "To pay"}</span>
@@ -183,7 +193,8 @@ export function PayDialog({ open, net, draft, methods, busy, error, online = tru
           {usable.map((m) => {
             const offline = m.kind === "on_account" && !online;
             return (
-              <button key={m.id} type="button" className="till-key till-method" disabled={offline} title={offline ? "Needs the connection" : undefined} onClick={() => addMethod(m)}>
+              // The till's usual way of paying has the cursor when the dialog opens: Enter takes it.
+              <button key={m.id} type="button" data-autofocus={m.id === firstChoice && !offline ? "" : undefined} className="till-key till-method" disabled={offline} title={offline ? "Needs the connection" : undefined} onClick={() => addMethod(m)}>
                 {m.name}
                 {offline ? " (needs the connection)" : ""}
               </button>

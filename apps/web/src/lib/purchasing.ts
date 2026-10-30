@@ -352,6 +352,22 @@ export function rupees(value: string | null | undefined): string {
   return `${negative ? "−" : ""}₹${rest ? `${rest},${last3}` : last3}.${frac}`;
 }
 
+/**
+ * Audit 9: a price or cost per unit, "₹1,250.50" or "₹12.3456" — rupees with grouping, keeping the
+ * third and fourth decimal only when they are not zero (a cost per piece can have them).
+ */
+export function unitRupees(value: string | null | undefined): string {
+  if (value == null || value === "") return "—";
+  let d: Decimal;
+  try {
+    d = new Decimal(value);
+  } catch {
+    return value;
+  }
+  const extra = d.toFixed(4).slice(-2) === "00" ? "" : d.abs().toFixed(4).slice(-2).replace(/0$/, "");
+  return `${rupees(d.toFixed(2, Decimal.ROUND_DOWN))}${extra}`;
+}
+
 /** Rights in plain names, matching the API checks. */
 export function purchaseRights(user: CurrentUser | null) {
   return {

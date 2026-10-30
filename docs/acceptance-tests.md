@@ -989,3 +989,17 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 ### A8.4 Two years of a busy shop
 - **Given** 504,719 bills over two years and 53,200 items
 - **Then** daily screens, reports for a day or a month and the till are under 2 seconds; no report takes the server down.
+
+## Audit 9: Screens and ease of use (30 October 2026; automated in `audit9.test.tsx`, the rest checked in the browser)
+
+### A9.1 A sale by keyboard alone
+- **Then** scan, + for quantity, F4, Enter (the till's usual payment), Enter (finish), Enter (next bill): the cursor is back in the scan box.
+
+### A9.2 Dialogs
+- **Then** a dialog opens with the cursor in its first box and returns it where it was when closed; a locked till takes no keys.
+
+### A9.3 Nothing lost
+- **Then** leaving an editor with unsaved changes asks first; a sign-in that ends sends the person back to their page after logging in.
+
+### A9.4 Finalise and post
+- **Then** each asks once, in plain words, before stock or the accounts change.

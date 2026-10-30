@@ -48,7 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const previous = setUnauthorizedHandler(() => {
       setUser(null);
-      if (!isPublicPath(window.location.pathname)) router.replace("/login");
+      // Audit 9: back to this page after logging in again.
+      if (!isPublicPath(window.location.pathname)) router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     });
     return () => {
       setUnauthorizedHandler(previous);

@@ -11,7 +11,7 @@ import { Alert, Button, DataTable, RadioInput, TextareaInput, type Column } from
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { CHECK_RESULT_LABELS, type GoodsReceiptDto, type GoodsReceiptLineDto, purchaseRights, rupees } from "@/lib/purchasing";
+import { CHECK_RESULT_LABELS, type GoodsReceiptDto, type GoodsReceiptLineDto, purchaseRights, rupees, unitRupees } from "@/lib/purchasing";
 import { indianTime, showQuantity } from "@/lib/stock";
 import type { StockLocationDto } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
@@ -200,7 +200,7 @@ export function ReceiptView({ receipt: r, locations, onChanged }: ReceiptViewPro
     ...(costs
       ? ([
           { key: "extra", header: "Extra charges", align: "right", render: (l) => rupees(l.extraCharges) },
-          { key: "cost", header: "Cost per basic unit", align: "right", render: (l) => (finalised ? (l.unitCost ?? "—") : "—") },
+          { key: "cost", header: "Cost per basic unit", align: "right", render: (l) => (finalised ? unitRupees(l.unitCost) : "—") },
         ] satisfies Column<GoodsReceiptLineDto>[])
       : []),
   ];

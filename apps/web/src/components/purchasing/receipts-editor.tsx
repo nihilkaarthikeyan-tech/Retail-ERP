@@ -21,6 +21,8 @@ import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { ReceiptsOrderPicker } from "./receipts-order-picker";
 import { lineFromOrder, lineFromReceiptDto, lineWithoutOrder, ReceiptLineGrid, type ReceiptLineDraft, receiptLineProblem, receiptLineToInput } from "./receipts-lines";
 import { ReasonDialog, ReceiptStatusBadge } from "./receipts-parts";
+import { useUnsavedChanges } from "@/lib/unsaved";
+import { confirmPosting } from "@/lib/confirm";
 
 /** Shelf locations (not folders, transit or Rejected) of one store. */
 export function shelvesOf(locations: StockLocationDto[], storeId: string): StockLocationDto[] {
@@ -125,6 +127,8 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
   const [addingOrder, setAddingOrder] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(start.note);
   const [dirty, setDirty] = useState(false);
+  // Audit 9: asks before leaving with unsaved lines, and keeps the sign-in alive meanwhile.
+  useUnsavedChanges(dirty);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [problems, setProblems] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -357,7 +361,7 @@ function ReceiptForm({ receipt, locations, onSaved, start }: ReceiptEditorProps 
           </Button>
         ) : null}
         {receipt && receipt.status === "draft" && rights.receive ? (
-          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={finalise}>
+          <Button variant="primary" busy={busy === "finalise"} disabled={busy !== null} onClick={() => confirmPosting("Finalise this goods receipt", "The goods go into stock and what is owed to the supplier goes into the accounts now.") && finalise()}>
             Finalise
           </Button>
         ) : null}

@@ -8,7 +8,7 @@ import { UNIT_KINDS } from '../units.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 
 /** Money and quantities travel as decimal strings, never floats (rule 1). */
 export const decimalString = z

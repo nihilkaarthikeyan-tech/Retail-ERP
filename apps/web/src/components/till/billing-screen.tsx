@@ -80,9 +80,11 @@ interface BillingScreenProps {
   state: EngineState;
   snapshot: StoredSnapshot;
   cashierName: string;
+  /** Audit 9: while the till is locked its keys do nothing. */
+  locked?: boolean;
 }
 
-export function BillingScreen({ engine, state, snapshot, cashierName }: BillingScreenProps) {
+export function BillingScreen({ engine, state, snapshot, cashierName, locked = false }: BillingScreenProps) {
   const till = snapshot.till;
   const [draft, setDraft] = useState<DraftBill | null>(null);
   const [restored, setRestored] = useState(false);
@@ -528,6 +530,8 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
   useEffect(() => {
     scanRef.current = onScan;
     keyRef.current = (e: KeyboardEvent) => {
+      // Audit 9: a locked till takes no keys (F4 opened Pay above the lock screen).
+      if (locked) return;
       // Audit 5: a barcode scanned while "Bill finished" shows closes it and goes into the scan box.
       const now = Date.now();
       const printable = e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey;
@@ -566,7 +570,10 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         return;
       }
       if (dialog || approval || creditApproval || belowCost || noSale) return;
-      const inField = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      // Audit 9: the empty scan box counts as "not typing", so + − Del ↑ ↓ work on the bill lines straight
+      // after a scan (the cursor is always back in the scan box, so they never worked).
+      const emptyScanBox = e.target === searchRef.current && search === "";
+      const inField = (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) && !emptyScanBox;
       switch (e.key) {
         case "F2":
           e.preventDefault();
@@ -606,6 +613,24 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
         case "Delete":
           if (!inField && selected) removeLine(selected);
           break;
+        case "ArrowUp":
+        case "ArrowDown": {
+          // ↓ from the scan box goes into the list of matching items; otherwise ↑ ↓ choose the bill line.
+          if (e.key === "ArrowDown" && e.target === searchRef.current && search !== "") {
+            const first = document.querySelector<HTMLButtonElement>(".till-results button");
+            if (first) {
+              e.preventDefault();
+              first.focus();
+            }
+            break;
+          }
+          if (inField || !draft?.lines.length) break;
+          e.preventDefault();
+          const keys = draft.lines.map((l) => l.key);
+          const at = selected ? keys.indexOf(selected) : keys.length;
+          setSelected(keys[Math.max(0, Math.min(keys.length - 1, at + (e.key === "ArrowUp" ? -1 : 1)))]);
+          break;
+        }
         case "+":
           if (!inField) {
             e.preventDefault();
@@ -621,6 +646,11 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
       }
     };
   });
+  // Audit 9: when a dialog closes, the cursor goes back to the scan box, so the next scan is not lost.
+  const anyDialog = !!(dialog || approval || creditApproval || belowCost || noSale);
+  useEffect(() => {
+    if (!anyDialog && !done && !locked) searchRef.current?.focus();
+  }, [anyDialog, done, locked]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => keyRef.current(e);
     window.addEventListener("keydown", h);
@@ -701,7 +731,11 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
               Add
             </Button>
           </form>
-          {scanError ? <p className="field-error">{scanError}</p> : null}
+          {scanError ? (
+            <p className="field-error" role="alert">
+              {scanError}
+            </p>
+          ) : null}
           {results.length ? (
             <ul className="till-results" aria-label="Matching items">
               {results.map((i) => {

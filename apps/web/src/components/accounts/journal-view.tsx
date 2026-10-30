@@ -13,6 +13,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { rupees } from "@/lib/purchasing";
 import { DocStatusBadge, partyText, useChart, usePartyNames } from "./accounts-shared";
 import { LedgerEntryButton } from "./ledger-entry";
+import { confirmPosting } from "@/lib/confirm";
 
 /** A journal: its lines and the actions the user may take (change a draft, post, cancel). */
 export function JournalView({ journal, onChanged, onEdit }: { journal: JournalDto; onChanged: (j: JournalDto) => void; onEdit?: () => void }) {
@@ -126,7 +127,7 @@ export function JournalView({ journal, onChanged, onEdit }: { journal: JournalDt
         <div className="actions">
           {j.status === "draft" ? (
             <>
-              <Button variant="primary" busy={busy} onClick={post}>
+              <Button variant="primary" busy={busy} onClick={() => confirmPosting("Post this journal", "Its lines go into the accounts now.") && post()}>
                 Post
               </Button>
               {onEdit ? <Button onClick={onEdit}>Change draft</Button> : null}

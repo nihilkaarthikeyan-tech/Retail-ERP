@@ -632,7 +632,7 @@ function noBillReturnLine(rl: DraftNoBillReturnLine, lineNo: number, snapshot: T
     }
   }
   const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date, price.div(D(unit?.factor ?? "1")));
-  if (!rate) problem = problem ?? (item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code})` : `${item.code} has no HSN code, so its GST rate is not known`);
+  if (!rate) problem = problem ?? (item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code}). A manager adds it under Billing counter → GST rates` : `${item.code} has no HSN code, so its GST rate is not known. A manager adds it on the item (Items → ${item.code}), with its rate under Billing counter → GST rates`);
   const gstRate = supply.noTax ? ZERO : D(rate?.rate ?? "0");
   const amount = quantity.gt(0) ? roundMoney(price.mul(quantity)).neg() : ZERO;
   const mrp = unit?.mrp ? D(unit.mrp) : item.mrp ? D(item.mrp).mul(D(unit?.factor ?? "1")) : null;
@@ -725,7 +725,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       const price = agreed ?? (dl.priceOverride !== null && dl.priceOverride !== "" ? roundMoney(dl.priceOverride) : listPrice);
       const priceChanged = !price.eq(listPrice);
       const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date);
-      if (!rate && !problem) problem = item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code})` : `${item.code} has no HSN code, so its GST rate is not known`;
+      if (!rate && !problem) problem = item.hsnCode ? `No GST rate is set for HSN ${item.hsnCode} (${item.code}). A manager adds it under Billing counter → GST rates` : `${item.code} has no HSN code, so its GST rate is not known. A manager adds it on the item (Items → ${item.code}), with its rate under Billing counter → GST rates`;
       const gstRate = D(rate?.rate ?? "0");
       // Offers apply to the list price; a typed price switches them off for the line (blueprint 04).
       const covering = !priceChanged && !agreed && quantity.gt(0) ? offers.filter((o) => o.appliesTo !== "bill" && offerCovers(o, item)) : [];

@@ -122,7 +122,9 @@ function errorFromBody(status: number, body: unknown): ApiError {
           return [];
         })
       : [];
-    return new ApiError(status, message, errors, typeof b.code === "string" ? b.code : undefined, body);
+    // Audit 9: "Validation failed" alone does not say what to fix; name the first few problems.
+    const shown = message === "Validation failed" && errors.length ? `Please check: ${[...new Set(errors.map((e) => e.message))].slice(0, 3).join("; ")}` : message;
+    return new ApiError(status, shown, errors, typeof b.code === "string" ? b.code : undefined, body);
   }
   return new ApiError(status, plainMessage(status, null), [], undefined, body);
 }

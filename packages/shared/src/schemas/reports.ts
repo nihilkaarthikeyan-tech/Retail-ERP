@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const uuid = z.string().uuid();
 
 /** A yes/no in a query string: only "true" (or "1") is yes; "false", "0" or nothing is no. */

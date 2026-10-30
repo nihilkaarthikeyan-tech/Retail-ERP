@@ -16,6 +16,7 @@ import type { PartyRef } from "@/lib/types";
 import { useLoad } from "@/lib/use-load";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { AccountSelect, useChart, useOpenItems, usePartyNames } from "./accounts-shared";
+import { useUnsavedChanges } from "@/lib/unsaved";
 
 interface DeductionForm {
   key: string;
@@ -121,6 +122,9 @@ export function PaymentForm({ payment, onSaved, onClose }: PaymentFormProps) {
   const banks = useLoad(() => api.get<BankAccountDto[]>("/bank-accounts"));
   const { stores } = useOrderStores();
   const kinds: PaymentKind[] = rights.makePayments ? ["receipt", "payment", "transfer"] : ["transfer"];
+  // Audit 9: asks before leaving with unsaved typing, and keeps the sign-in alive meanwhile.
+  const [dirty, setDirty] = useState(false);
+  useUnsavedChanges(dirty);
   const [chosenKind, setKind] = useState<PaymentKind | null>(payment?.kind ?? null);
   // The rights are known only once the user has loaded; a kind the user may not use falls back to the first allowed.
   const kind: PaymentKind = chosenKind && kinds.includes(chosenKind) ? chosenKind : kinds[0];
@@ -221,10 +225,12 @@ export function PaymentForm({ payment, onSaved, onClose }: PaymentFormProps) {
         try {
           saved = await api.post<PaymentDto>(`/payments/${saved.id}/post`);
         } catch (err) {
-          onSaved(saved);
+          setDirty(false);
+      onSaved(saved);
           throw err;
         }
       }
+      setDirty(false);
       onSaved(saved);
     } catch (err) {
       setErrors(apiFieldErrors(err));
@@ -242,7 +248,7 @@ export function PaymentForm({ payment, onSaved, onClose }: PaymentFormProps) {
         : "Bank or card commission taken out of the payout. The receiving account gets the amount less these.";
 
   return (
-    <form
+    <form onInput={() => setDirty(true)}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         void submit(false);

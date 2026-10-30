@@ -8,7 +8,7 @@ import { nonNegativeDecimalString, positiveDecimalString } from './catalogue.js'
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const uuid = z.string().uuid();
 const percent = positiveDecimalString.refine((v) => Number(v) <= 100, 'Must be 100 or less');
 const money = positiveDecimalString.refine((v) => !v.includes('.') || v.split('.')[1].length <= 2, 'At most 2 decimal places (paise)');

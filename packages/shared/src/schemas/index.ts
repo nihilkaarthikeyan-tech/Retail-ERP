@@ -11,7 +11,7 @@ import { isPermissionKey } from '../permissions.js';
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
 
-export const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+export const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 export const stateCode = z.string().refine(isStateCode, 'Unknown GST state code');
 export const email = z.string().trim().toLowerCase().email().max(254);
 export const mobile = z

@@ -9,6 +9,7 @@ import { api, errorMessage } from "@/lib/api";
 import { formatDate, todayIso } from "@/lib/format";
 import type { PriceDto } from "@/lib/types";
 import { apiFieldErrors, type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
+import { unitRupees } from "@/lib/purchasing";
 
 interface PriceTableProps {
   rows: PriceDto[] | null | undefined;
@@ -95,7 +96,7 @@ export function PriceTable({ rows, loading, showItem = false, showList = false, 
       : []),
     ...(showList ? [{ key: "list", header: "Price list", render: (p: PriceDto) => p.priceList.name } satisfies Column<PriceDto>] : []),
     { key: "unit", header: "Unit", render: (p) => p.unit.code },
-    { key: "price", header: "Price", align: "right", render: (p) => <span className="mono">{p.price}</span> },
+    { key: "price", header: "Price", align: "right", render: (p) => <span className="mono">{unitRupees(p.price)}</span> },
     { key: "pack", header: "Pack size", align: "right", render: (p) => (p.packSize ? <span className="mono">{p.packSize}</span> : "—") },
     { key: "start", header: "From", render: (p) => formatDate(p.startDate) },
     {
@@ -145,7 +146,7 @@ export function PriceTable({ rows, loading, showItem = false, showList = false, 
             <Alert kind="error">{error}</Alert>
             <p>
               <span className="mono">{changing.item.code}</span> {changing.item.name} in {changing.priceList.name}, per {changing.unit.code}: currently{" "}
-              <span className="mono">{changing.price}</span>.
+              <span className="mono">{unitRupees(changing.price)}</span>.
             </p>
             <TextInput id="change-price" label="New price" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} error={errors.price} required inputMode="decimal" className="mono" />
             <div className="actions">

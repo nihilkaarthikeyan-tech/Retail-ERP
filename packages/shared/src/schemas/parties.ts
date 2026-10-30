@@ -13,7 +13,7 @@ import { itemCode, nonNegativeDecimalString } from './catalogue.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
-const isoDate = z.string().refine(isIsoDate, 'Must be a date in YYYY-MM-DD form');
+const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const email = z.string().trim().toLowerCase().email().max(254);
 const mobile = z.string().trim().regex(INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE);
 // Customers' and suppliers' GSTINs get the full check, check character included (see schemas/index.ts).

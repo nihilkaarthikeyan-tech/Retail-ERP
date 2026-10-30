@@ -23,14 +23,25 @@ function show(value: unknown, names?: Names): string {
     if (names?.has(value)) return names.get(value)!;
     if (UUID.test(value)) return "(a record)";
     // Audit 6: stored dates and times shown the Indian way (a date at midnight UTC is a calendar date).
-    if (/^d{4}-d{2}-d{2}T00:00:00(.000)?Z$/.test(value)) return formatDate(value);
-    if (/^d{4}-d{2}-d{2}Td{2}:d{2}/.test(value)) return formatDateTime(value);
-    if (/^d{4}-d{2}-d{2}$/.test(value)) return formatDate(value);
+    // Audit 9: the patterns had lost their backslashes (\d), so no date ever matched.
+    if (/^\d{4}-\d{2}-\d{2}T00:00:00(\.000)?Z$/.test(value)) return formatDate(value);
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) return formatDateTime(value);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDate(value);
+    // A stored status or kind such as "to_receive_and_bill" reads as words.
+    if (/^[a-z]+(_[a-z0-9]+)+$/.test(value)) return value.replace(/_/g, " ");
     return value;
   }
   if (typeof value === "number") return String(value);
   if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.length ? value.map((v) => show(v, names)).join(", ") : "none";
-  return JSON.stringify(value);
+  // Audit 9: lists and groups of details in words, not as code.
+  if (Array.isArray(value)) return value.length === 1 ? "1 line" : `${value.length} lines`;
+  if (typeof value === "object") {
+    const parts = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))
+      .map(([k, v]) => `${k} ${show(v, names)}`);
+    return parts.length ? parts.join(", ") : "details";
+  }
+  return String(value);
 }
 
 /** Renders the `changes` JSON: "field: old → new" rows, or "field: value" for plain facts. */
