@@ -2,6 +2,8 @@
 # The Retail ERP on the company server: database, API and web app.
 # Settings and passwords come from deploy/.env on the server (never committed).
 # Ports listen on 127.0.0.1 only; Nginx on the server is the only way in.
+# Audit 12: each container has a memory limit, so a fault in one cannot starve the other sites on the
+# server; a container that reaches it is restarted alone. Today they use well under a quarter of it.
 name: retail-erp-prod
 
 # Audit 8: logs are kept to 5 files of 20 MB per service (they grew without limit).
@@ -15,6 +17,7 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    mem_limit: 2g
     logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set in deploy/.env}
@@ -36,6 +39,7 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_URL:?set in deploy/.env}/api
     image: retail-erp-api
     restart: unless-stopped
+    mem_limit: 1536m
     logging: *logging
     depends_on:
       postgres:
@@ -69,6 +73,7 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_URL}/api
     image: retail-erp-web
     restart: unless-stopped
+    mem_limit: 768m
     logging: *logging
     depends_on:
       - api

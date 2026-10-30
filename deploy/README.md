@@ -23,7 +23,8 @@ Address: **https://retailerp.52digit.com** — the web app at `/`, the API at `/
    ```
 3. Nginx: copy `nginx-retailerp.conf` to `/etc/nginx/sites-available/retailerp.52digit.com`, link it into `sites-enabled`,
    `nginx -t`, then `systemctl reload nginx` (never restart). Then `certbot --nginx -d retailerp.52digit.com`.
-4. Backups: `cp deploy/retail-erp.cron /etc/cron.d/retail-erp`, then run `deploy/backup.sh` once by hand to check it.
+4. Backups and the health alert: `cp deploy/retail-erp.cron /etc/cron.d/retail-erp` and `cp deploy/retail-erp.logrotate /etc/logrotate.d/retail-erp`,
+   then run `deploy/backup.sh` and `deploy/restore-check.sh` once by hand to check them.
 5. Make the Retail ERP admin (the people who run the service; see every shop at `/admin`). The password is
    generated and kept in a root-only file; read it on the server, never paste it into a chat or a ticket:
    ```sh
@@ -64,6 +65,8 @@ cd /opt/retail-erp/app/deploy && docker compose -f docker-compose.prod.yml --env
 
 Run one copy of the API only. Two copies would each run the nightly jobs and keep their own flood limits; see
 `docs/audit/08-speed-growth.md` before adding a second one.
+
+When something breaks, or to undo an update: `docs/runbook.md`.
 
 ## Checks after every deploy
 

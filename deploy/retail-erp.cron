@@ -2,3 +2,5 @@
 # Copied to /etc/cron.d/retail-erp: database backup every night at 04:00 Indian time
 # (22:30 UTC; the server clock runs on UTC). Audit 8: moved from 02:30, when the nightly jobs run.
 30 22 * * * root /opt/retail-erp/app/deploy/backup.sh >> /var/log/retail-erp-backup.log 2>&1
+# Audit 12: every 5 minutes, check the API, its database and last night's backup; email only on a change.
+*/5 * * * * root /usr/bin/python3 /opt/retail-erp/app/deploy/health-check.py >> /var/log/retail-erp-health.log 2>&1

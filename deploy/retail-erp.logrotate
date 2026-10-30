@@ -1,0 +1,10 @@
+# Copyright (c) 2026, Rademics. All rights reserved.
+# Audit 12: copied to /etc/logrotate.d/retail-erp. The backup and health logs, kept for 8 weeks.
+/var/log/retail-erp-backup.log /var/log/retail-erp-health.log {
+    weekly
+    rotate 8
+    compress
+    missingok
+    notifempty
+    create 0600 root root
+}
