@@ -1,6 +1,9 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { noFormula, readCsv, readSpreadsheet, readXlsx, readZip, writeCsv, writeXlsx, writeXlsxBook, writeZip } from './spreadsheet.js';
+import { csvRow, noFormula, readCsv, readSpreadsheet, readXlsx, readZip, writeCsv, writeXlsx, writeXlsxBook, writeZip, ZipFileWriter } from './spreadsheet.js';
 
 describe('our own .xlsx reader and writer (plan 10 answer 1)', () => {
   it('writes a file that reads back the same, keeping text columns as text', () => {
@@ -91,5 +94,29 @@ describe('code audit, 27 October 2026: unsafe files', () => {
     expect(noFormula('-120.50')).toBe('-120.50');
     expect(noFormula('Ravi')).toBe('Ravi');
     expect(writeCsv([['=1+1', -5, 'ok']])).toContain(`'=1+1,-5,ok`);
+  });
+});
+
+describe('a zip written piece by piece (audit 8: large downloads)', () => {
+  it('reads back the same as one made in memory, with many pieces per file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'zip-test-'));
+    try {
+      const path = join(dir, 'a.zip');
+      const zip = await ZipFileWriter.create(path);
+      const lines = Array.from({ length: 20_000 }, (_, i) => csvRow([`ITM-${i}`, 'Ghee "pure"', i * 1.5]));
+      await zip.add('Item.csv', (async function* () {
+        for (let i = 0; i < lines.length; i += 1000) yield lines.slice(i, i + 1000).join('');
+      })());
+      await zip.add('READ ME.txt', (async function* () {
+        yield 'hello';
+      })());
+      await zip.finish();
+      const files = readZip(await readFile(path));
+      expect(files.get('Item.csv')!.toString('utf8')).toBe(lines.join(''));
+      expect(files.get('READ ME.txt')!.toString('utf8')).toBe('hello');
+      expect(csvRow(['=1+1', null, 'a,b'])).toBe(`'=1+1,,"a,b"\r\n`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

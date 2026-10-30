@@ -320,7 +320,7 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 5. Billing counter and offline | **Done**: 21 findings and the owner's decisions C1–C9, all closed; hands-on till test for the owner | 29 Oct 2026 | `docs/audit/05-billing-counter.md`, `docs/audit/05-till-hands-on-checklist.md` |
 | 6. Dates | **Done**: 14 findings, all closed; midnight date suite | 29 Oct 2026 | `docs/audit/06-dates.md` |
 | 7. Data safety | **Done**: 19 findings (2 Critical, 3 High), all closed; backup restored onto a new server; off-server backup copy left to Session 12 (owner: decide later) | 29 Oct 2026 | `docs/audit/07-data-safety.md` |
-| 8. Speed | Not started | | |
+| 8. Speed and growth | **Done**: 23 findings (10 High), all closed; two years of a busy shop timed before and after | 30 Oct 2026 | `docs/audit/08-speed-growth.md` |
 | 9. Screens and ease of use | Partly done by the launch check | 27 Oct 2026 | `docs/launch-check.md` |
 | 10. Libraries and build | Partly done (upgrades) | 27 Oct 2026 | `docs/launch-check.md` #90, #91 |
 | 11. Tests | Not started | | |
@@ -328,4 +328,4 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 8 (speed and growth). Owner: the hands-on till checklist (05). Carried to Session 12: where the nightly backup copy goes (owner: decide later) and migrations under a separate database login (07). Carried to Session 8: stock re-costing speed (03 #14). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).
+**Next step:** Session 9 (screens, ease of use and accessibility; also paging of the full-stock lists, 08). Owner: the hands-on till checklist (05). Carried to Session 12: where the nightly backup copy goes (owner: decide later), migrations under a separate database login (07), 20 tills on the live server and container limits (08). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).

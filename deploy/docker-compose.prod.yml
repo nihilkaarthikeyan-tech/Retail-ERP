@@ -4,10 +4,18 @@
 # Ports listen on 127.0.0.1 only; Nginx on the server is the only way in.
 name: retail-erp-prod
 
+# Audit 8: logs are kept to 5 files of 20 MB per service (they grew without limit).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set in deploy/.env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env}
@@ -28,6 +36,7 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_URL:?set in deploy/.env}/api
     image: retail-erp-api
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +69,7 @@ services:
         NEXT_PUBLIC_API_URL: ${PUBLIC_URL}/api
     image: retail-erp-web
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - api
     ports:

@@ -9,6 +9,7 @@ import { MailerService } from '../reports/mailer.service.js';
 import { PermissionGuard } from './permission.guard.js';
 import { GENERAL_LIMIT, RateLimitGuard, TOO_MANY } from './rate-limit.js';
 import { SessionGuard } from './session.guard.js';
+import { CleanupService } from './cleanup.service.js';
 
 @Global()
 @Module({
@@ -18,6 +19,7 @@ import { SessionGuard } from './session.guard.js';
     AuthService,
     EmailLinksService,
     MailerService,
+    CleanupService,
     // Order matters: rate limits first (before any database work), then the session
     // guard attaches the user, then the permission guard reads it.
     { provide: APP_GUARD, useClass: RateLimitGuard },

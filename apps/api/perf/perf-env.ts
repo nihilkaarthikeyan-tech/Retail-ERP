@@ -26,4 +26,6 @@ export function usePerfDatabase(): void {
   process.env.WEB_ORIGIN ??= 'http://localhost:3000';
   process.env.MAIL_TRANSPORT = 'memory';
   process.env.SUMMARY_EMAIL_SCHEDULE = 'off';
+  // Audit 8: one test process makes hundreds of requests a minute; the flood limits are timed separately.
+  process.env.RATE_LIMIT = 'off';
 }

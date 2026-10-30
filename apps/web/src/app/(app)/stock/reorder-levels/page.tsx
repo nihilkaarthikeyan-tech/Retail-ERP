@@ -22,6 +22,12 @@ interface FormState {
   active: boolean;
 }
 
+function chunks<T>(list: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
 export default function ReorderLevelsPage() {
   const { user } = useAuth();
   const canManage = hasPermission(user, "stock.locations.manage");
@@ -35,7 +41,11 @@ export default function ReorderLevelsPage() {
   const itemIds = [...new Set((levels.data ?? []).map((r) => r.itemId))];
   // The reorder list carries only item ids; names come from the items list.
   const items = useLoad<ItemDto[]>(
-    () => (canSeeItems ? Promise.all(itemIds.map((id) => api.get<ItemDto>(`/items/${id}`).catch(() => null))).then((r) => r.filter((x): x is ItemDto => x !== null)) : Promise.resolve([])),
+    // Audit 8: 200 items per request (it asked for each item on its own).
+    () =>
+      canSeeItems
+        ? Promise.all(chunks(itemIds, 200).map((ids) => api.get<{ rows: ItemDto[] }>(`/items${query({ ids: ids.join(","), pageSize: 200 })}`).then((r) => r.rows))).then((r) => r.flat())
+        : Promise.resolve([]),
     [canSeeItems, itemIds.join(",")],
   );
   const itemById = new Map((items.data ?? []).map((i) => [i.id, i]));

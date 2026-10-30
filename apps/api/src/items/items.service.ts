@@ -79,6 +79,7 @@ export class ItemsService {
       ...(q.kind === 'service' ? { isStockItem: false, isParentStyle: false } : {}),
       ...(q.kind === 'style' ? { isParentStyle: true } : {}),
       ...(q.active ? { active: q.active === 'true' } : {}),
+      ...(q.ids ? { id: { in: q.ids } } : {}),
       ...(q.search
         ? {
             OR: [

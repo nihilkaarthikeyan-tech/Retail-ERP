@@ -16,7 +16,7 @@ import {
   stockAgeLabels,
   stockTurnover,
 } from 'shared';
-import type { Prisma } from '../generated/prisma/client.js';
+import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { D, fromIso, iso, money, pctText, qty, ReportsCommon, type StoreScope, ZERO } from './reports-common.service.js';
 import { SalesReportsService } from './sales-reports.service.js';
@@ -41,6 +41,29 @@ export class StockAnalysisService {
     return rows.filter((l) => l.kind !== 'folder');
   }
 
+  /**
+   * Audit 8: the quantity per item at the end of each of the given days, in the given places: today's
+   * stock less what moved after that day. Reads only the movements since the earliest day, not the
+   * whole history.
+   */
+  private async stockAt(locs: string[], days: string[], q: Pick<ReportQuery, 'itemId' | 'itemGroupId'>): Promise<Map<string, Decimal>[]> {
+    const out = days.map(() => new Map<string, Decimal>());
+    if (!locs.length) return out;
+    const earliest = [...days].sort()[0];
+    const inLocs = Prisma.join(locs.map((id) => Prisma.sql`${id}::uuid`));
+    const itemCond = Prisma.sql`${q.itemId ? Prisma.sql`AND x."itemId" = ${q.itemId}::uuid` : Prisma.empty} ${q.itemGroupId ? Prisma.sql`AND x."itemId" IN (SELECT id FROM "Item" WHERE "itemGroupId" = ${q.itemGroupId}::uuid)` : Prisma.empty}`;
+    const [positions, after] = await Promise.all([
+      this.prisma.$queryRaw<{ itemId: string; q: Prisma.Decimal }[]>`SELECT x."itemId"::text AS "itemId", SUM(x.quantity) AS q FROM "StockPosition" x WHERE x."locationId" IN (${inLocs}) ${itemCond} GROUP BY 1`,
+      this.prisma.$queryRaw<{ itemId: string; day: string; q: Prisma.Decimal }[]>`SELECT x."itemId"::text AS "itemId", to_char(x."postingDate", 'YYYY-MM-DD') AS day, SUM(x."quantityChange") AS q FROM "StockLedgerEntry" x WHERE x."locationId" IN (${inLocs}) AND x."postingDate" > ${fromIso(earliest)} ${itemCond} GROUP BY 1, 2`,
+    ]);
+    days.forEach((day, i) => {
+      const m = out[i];
+      for (const p of positions) m.set(p.itemId, D(p.q));
+      for (const a of after) if (a.day > day) m.set(a.itemId, (m.get(a.itemId) ?? ZERO).sub(D(a.q)));
+    });
+    return out;
+  }
+
   /** Stock movement for a period: opening, in, out and closing quantity and value per item (blueprint 14 monthly list). */
   async movement(q: ReportQuery, user: CurrentUser) {
     this.common.require(user, 'stock.view');
@@ -49,32 +72,34 @@ export class StockAnalysisService {
     const scope = this.common.scope(user, q.storeId);
     const seesCost = this.common.seesCost(user);
     const locs = (await this.locations(company.id, scope, q.locationId)).map((l) => l.id);
-    const itemFilter: Prisma.StockLedgerEntryWhereInput = {
-      locationId: { in: locs },
-      ...(q.itemId ? { itemId: q.itemId } : {}),
-      ...(q.itemGroupId ? { item: { itemGroupId: q.itemGroupId } } : {}),
-    };
-    const [before, during] = await Promise.all([
-      this.prisma.stockLedgerEntry.groupBy({ by: ['itemId'], where: { ...itemFilter, postingDate: { lt: fromIso(from) } }, _sum: { quantityChange: true, valueChange: true } }),
-      this.prisma.stockLedgerEntry.findMany({ where: { ...itemFilter, postingDate: { gte: fromIso(from), lte: fromIso(to) } }, select: { itemId: true, quantityChange: true, valueChange: true } }),
-    ]);
+    // Audit 8: the opening is today's stock less every movement since the start of the period (it added up
+    // every movement before the period: two years of them), and the in and out totals come from the database.
     const rows = new Map<string, { oq: Decimal; ov: Decimal; iq: Decimal; iv: Decimal; xq: Decimal; xv: Decimal }>();
-    const get = (id: string) => rows.get(id) ?? (rows.set(id, { oq: ZERO, ov: ZERO, iq: ZERO, iv: ZERO, xq: ZERO, xv: ZERO }), rows.get(id)!);
-    for (const b of before) {
-      const r = get(b.itemId);
-      r.oq = D(b._sum.quantityChange);
-      r.ov = D(b._sum.valueChange);
-    }
-    for (const e of during) {
-      const r = get(e.itemId);
-      const q1 = D(e.quantityChange);
-      if (q1.gte(0)) {
-        r.iq = r.iq.add(q1);
-        r.iv = r.iv.add(D(e.valueChange));
-      } else {
-        r.xq = r.xq.add(q1.neg());
-        r.xv = r.xv.add(D(e.valueChange).neg());
-      }
+    if (locs.length) {
+      const inLocs = Prisma.join(locs.map((id) => Prisma.sql`${id}::uuid`));
+      const itemCond = Prisma.sql`${q.itemId ? Prisma.sql`AND x."itemId" = ${q.itemId}::uuid` : Prisma.empty} ${q.itemGroupId ? Prisma.sql`AND x."itemId" IN (SELECT id FROM "Item" WHERE "itemGroupId" = ${q.itemGroupId}::uuid)` : Prisma.empty}`;
+      const sums = await this.prisma.$queryRaw<{ itemId: string; oq: Prisma.Decimal | null; ov: Prisma.Decimal | null; iq: Prisma.Decimal | null; iv: Prisma.Decimal | null; xq: Prisma.Decimal | null; xv: Prisma.Decimal | null }[]>`
+        WITH m AS (
+          SELECT x."itemId",
+                 SUM(x."quantityChange") AS "qSince", SUM(x."valueChange") AS "vSince",
+                 SUM(x."quantityChange") FILTER (WHERE x."postingDate" <= ${fromIso(to)} AND x."quantityChange" >= 0) AS iq,
+                 SUM(x."valueChange") FILTER (WHERE x."postingDate" <= ${fromIso(to)} AND x."quantityChange" >= 0) AS iv,
+                 -SUM(x."quantityChange") FILTER (WHERE x."postingDate" <= ${fromIso(to)} AND x."quantityChange" < 0) AS xq,
+                 -SUM(x."valueChange") FILTER (WHERE x."postingDate" <= ${fromIso(to)} AND x."quantityChange" < 0) AS xv
+          FROM "StockLedgerEntry" x
+          WHERE x."locationId" IN (${inLocs}) AND x."postingDate" >= ${fromIso(from)} ${itemCond}
+          GROUP BY x."itemId"
+        ), p AS (
+          SELECT x."itemId", SUM(x.quantity) AS q, SUM(x.value) AS v
+          FROM "StockPosition" x
+          WHERE x."locationId" IN (${inLocs}) ${itemCond}
+          GROUP BY x."itemId"
+        )
+        SELECT COALESCE(p."itemId", m."itemId")::text AS "itemId",
+               COALESCE(p.q, 0) - COALESCE(m."qSince", 0) AS oq, COALESCE(p.v, 0) - COALESCE(m."vSince", 0) AS ov,
+               m.iq, m.iv, m.xq, m.xv
+        FROM p FULL JOIN m ON m."itemId" = p."itemId"`;
+      for (const r of sums) rows.set(r.itemId, { oq: D(r.oq ?? 0), ov: D(r.ov ?? 0), iq: D(r.iq ?? 0), iv: D(r.iv ?? 0), xq: D(r.xq ?? 0), xv: D(r.xv ?? 0) });
     }
     const items = await this.common.items([...rows.keys()]);
     const totals = { ov: ZERO, iv: ZERO, xv: ZERO, cv: ZERO };
@@ -143,18 +168,19 @@ export class StockAnalysisService {
     const scope = this.common.scope(user, q.storeId);
     const locs = (await this.locations(company.id, scope, q.locationId)).filter((l) => l.kind !== 'transit').map((l) => l.id);
     const itemWhere = { ...(q.itemId ? { itemId: q.itemId } : {}), ...(q.itemGroupId ? { item: { itemGroupId: q.itemGroupId } } : {}) };
-    const [onHand, opening, inflows, lines] = await Promise.all([
-      this.prisma.stockLedgerEntry.groupBy({ by: ['itemId'], where: { locationId: { in: locs }, postingDate: { lte: fromIso(to) }, ...itemWhere }, _sum: { quantityChange: true } }),
-      this.prisma.stockLedgerEntry.groupBy({ by: ['itemId'], where: { locationId: { in: locs }, postingDate: { lt: fromIso(from) }, ...itemWhere }, _sum: { quantityChange: true } }),
+    const [stockAt, inflows, lines] = await Promise.all([
+      // Audit 8: from today's stock less later movements (it added up every movement ever made).
+      this.stockAt(locs, [to, addDays(from, -1)], q),
       this.inflows(locs, from, to),
-      this.sales.lines(company.id, from, to, scope, q),
+      // Audit 8: quantity sold per item, added up by the database.
+      this.sales.totalsBy(company.id, from, to, scope, q, 'item'),
     ]);
     const sold = new Map<string, Decimal>();
-    for (const l of lines) sold.set(l.itemId, (sold.get(l.itemId) ?? ZERO).add(D(l.basicQuantity)));
+    for (const r of lines) if (!r.total) sold.set(r.key, r.allQuantity);
     const came = new Map<string, Decimal>();
     for (const r of inflows) came.set(r.itemId, (came.get(r.itemId) ?? ZERO).add(r.quantity));
-    const openingMap = new Map(opening.map((o) => [o.itemId, D(o._sum.quantityChange)]));
-    const onHandMap = new Map(onHand.map((o) => [o.itemId, D(o._sum.quantityChange)]));
+    const onHandMap = stockAt[0];
+    const openingMap = stockAt[1];
     // Items not kept in stock (a carry bag, a service) have no cover to show.
     const stocked = new Set((await this.prisma.item.findMany({ where: { id: { in: [...new Set([...onHandMap.keys(), ...sold.keys()])] }, isStockItem: true }, select: { id: true } })).map((i) => i.id));
     const ids = [...new Set([...onHandMap.keys(), ...sold.keys()])].filter((id) => stocked.has(id));
@@ -200,6 +226,13 @@ export class StockAnalysisService {
     });
     const held = onHand.filter((o) => D(o._sum.quantityChange).gt(0));
     const inflows = await this.inflows(locs, '2000-01-01', asOf);
+    // Audit 8: grouped once by item (each item searched every inflow: 50,000 items × all arrivals).
+    const inflowsByItem = new Map<string, { date: string; quantity: Decimal }[]>();
+    for (const r of inflows) {
+      const list = inflowsByItem.get(r.itemId) ?? [];
+      list.push({ date: r.date, quantity: r.quantity });
+      inflowsByItem.set(r.itemId, list);
+    }
     const labels = stockAgeLabels();
     const items = await this.common.items(held.map((h) => h.itemId));
     const totals = Object.fromEntries(labels.map((l) => [l, { quantity: ZERO, value: ZERO }]));
@@ -207,7 +240,7 @@ export class StockAnalysisService {
       const quantity = D(h._sum.quantityChange);
       const value = D(h._sum.valueChange);
       const unitCost = quantity.gt(0) ? value.div(quantity) : ZERO;
-      const bands = stockAge(quantity, inflows.filter((r) => r.itemId === h.itemId).map((r) => ({ date: r.date, quantity: r.quantity })), asOf);
+      const bands = stockAge(quantity, inflowsByItem.get(h.itemId) ?? [], asOf);
       const out: Record<string, { quantity: string; value?: string }> = {};
       for (const l of labels) {
         const v = bands[l].mul(unitCost);
@@ -260,8 +293,8 @@ export class StockAnalysisService {
       rows.push({ documentId: d.id, number: d.number, date: iso(d.postingDate), reason: LOSS_REASONS[reason], item: items.get(e.itemId)?.name ?? e.itemId, quantity: qty(D(e._sum.quantityChange).neg()), value: money(value.neg()) });
     }
     const loss = [...byReason.values()].reduce((s, r) => s.add(r.value), ZERO);
-    const lines = await this.sales.lines(company.id, from, to, scope);
-    const netSales = lines.reduce((s, l) => s.add(D(l.taxableAmount)), ZERO);
+    // Audit 8: net sales from the database's total.
+    const netSales = (await this.sales.totalsBy(company.id, from, to, scope, {}, 'all')).find((r) => r.total)?.totals.net ?? ZERO;
     return {
       from,
       to,

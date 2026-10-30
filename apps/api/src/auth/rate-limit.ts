@@ -10,8 +10,11 @@ import { clientIp } from '../common/request-context.js';
 
 const MINUTE = 60_000;
 
-/** Every request to the API, per visitor: about 20 a second. */
-export const GENERAL_LIMIT = { ttl: MINUTE, limit: 1200 };
+/**
+ * Every request to the API, per visitor: about 100 a second. Audit 8: a shop's tills share one address,
+ * and 20 tills scanning once a second each already make 1,200 requests a minute.
+ */
+export const GENERAL_LIMIT = { ttl: MINUTE, limit: 6000 };
 
 /** Tighter limits on the doors a stranger can knock on. */
 export const RATE_LIMITS = {
@@ -21,6 +24,8 @@ export const RATE_LIMITS = {
   emailLink: { ttl: 15 * MINUTE, limit: 20 },
   contactForm: { ttl: 60 * MINUTE, limit: 5 },
   clientError: { ttl: MINUTE, limit: 20 },
+  /** "Send a test now" of the summary email (audit 8: each one uses the day's email allowance). */
+  testEmail: { ttl: 60 * MINUTE, limit: 5 },
   /** Manager PINs and cashier switching at the till (audit 1, 28 October 2026). */
   pin: { ttl: 10 * MINUTE, limit: 60 },
 } as const;

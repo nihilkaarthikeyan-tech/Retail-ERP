@@ -4,7 +4,9 @@
 // parts. Only what imports and templates need is supported: the first sheet,
 // text, numbers and true/false; dates come through as spreadsheet numbers and
 // are read by readDate. CSV files are read with the separator detected.
-import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
+import { once } from 'node:events';
+import { open, type FileHandle } from 'node:fs/promises';
+import { crc32, createDeflateRaw, deflateRawSync, inflateRawSync } from 'node:zlib';
 
 export type Cell = string | number | boolean | null;
 export type Sheet = Cell[][];
@@ -110,6 +112,96 @@ export function writeZip(entries: ZipEntry[]): Buffer {
   end.writeUInt32LE(centralSize, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, ...centrals, end]);
+}
+
+/**
+ * Audit 8: a zip written to a file piece by piece, for downloads too big to hold in memory (a large
+ * shop's "all my data"). Each file is compressed as its content arrives; its sizes are filled into
+ * its header afterwards, so the result is the same plain zip writeZip makes (no ZIP64: up to 4 GB).
+ */
+export class ZipFileWriter {
+  private offset = 0;
+  private readonly centrals: Buffer[] = [];
+  private entries = 0;
+
+  private constructor(private readonly fd: FileHandle) {}
+
+  static async create(path: string): Promise<ZipFileWriter> {
+    return new ZipFileWriter(await open(path, 'wx', 0o600));
+  }
+
+  private async append(b: Buffer): Promise<void> {
+    await this.fd.write(b, 0, b.length, this.offset);
+    this.offset += b.length;
+  }
+
+  /** Adds one file whose content comes in pieces. */
+  async add(fileName: string, content: AsyncIterable<string | Buffer>): Promise<void> {
+    const name = Buffer.from(fileName, 'utf8');
+    const start = this.offset;
+    await this.append(Buffer.alloc(30 + name.length));
+    let crc = 0;
+    let size = 0;
+    let packed = 0;
+    const deflate = createDeflateRaw();
+    const drain = (async () => {
+      for await (const out of deflate as AsyncIterable<Buffer>) {
+        await this.append(out);
+        packed += out.length;
+      }
+    })();
+    for await (const piece of content) {
+      const b = typeof piece === 'string' ? Buffer.from(piece, 'utf8') : piece;
+      crc = crc32(b, crc);
+      size += b.length;
+      if (!deflate.write(b)) await once(deflate, 'drain');
+    }
+    deflate.end();
+    await drain;
+    if (size > 0xffffffff || this.offset > 0xffffffff) throw new Error('The download would be larger than 4 GB');
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // file names in UTF-8
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc >>> 0, 14);
+    local.writeUInt32LE(packed, 18);
+    local.writeUInt32LE(size, 22);
+    local.writeUInt16LE(name.length, 26);
+    await this.fd.write(Buffer.concat([local, name]), 0, 30 + name.length, start);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(crc >>> 0, 16);
+    central.writeUInt32LE(packed, 20);
+    central.writeUInt32LE(size, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(start, 42);
+    this.centrals.push(central, name);
+    this.entries++;
+  }
+
+  /** Writes the table of contents and closes the file. */
+  async finish(): Promise<void> {
+    const at = this.offset;
+    const dir = Buffer.concat(this.centrals);
+    await this.append(dir);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(this.entries, 8);
+    end.writeUInt16LE(this.entries, 10);
+    end.writeUInt32LE(dir.length, 12);
+    end.writeUInt32LE(at, 16);
+    await this.append(end);
+    await this.fd.close();
+  }
+
+  async abandon(): Promise<void> {
+    await this.fd.close().catch(() => undefined);
+  }
 }
 
 // ---- XML ----
@@ -340,6 +432,17 @@ export function writeCsv(rows: Sheet): string {
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   return `﻿${rows.map((r) => r.map(esc).join(',')).join('\r\n')}\r\n`;
+}
+
+/** One CSV line (with its line break), escaped as writeCsv does; for files written piece by piece. */
+export function csvRow(cells: Cell[]): string {
+  return `${cells.map(csvCell).join(',')}\r\n`;
+}
+
+function csvCell(c: Cell): string {
+  if (c === null || c === undefined) return '';
+  const s = typeof c === 'string' ? noFormula(c) : String(c);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 /** Code audit, 27 October 2026: text starting with = + - @ would run as a formula when the

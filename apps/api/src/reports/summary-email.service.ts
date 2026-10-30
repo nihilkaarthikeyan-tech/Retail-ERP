@@ -169,9 +169,10 @@ export class SummaryEmailService {
       });
     }
     if (figures.includes('month_to_date')) {
-      const lines = await this.sales.lines(companyId, `${day.slice(0, 7)}-01`, day, { ids: null });
-      const net = lines.reduce((s, l) => s.add(D(l.taxableAmount)), ZERO);
-      const cost = lines.reduce((s, l) => s.add(D(l.cost)), ZERO);
+      // Audit 8: the month's totals from the database.
+      const month = (await this.sales.totalsBy(companyId, `${day.slice(0, 7)}-01`, day, { ids: null }, {}, 'all')).find((r) => r.total)?.totals;
+      const net = month?.net ?? ZERO;
+      const cost = month?.cost ?? ZERO;
       sections.push({ title: 'This month so far', rows: [['Sales (before GST)', rupees(net)], ['Gross margin', `${grossMarginPercent(net, cost)?.toFixed(2) ?? '—'}%`]] });
     }
     if (figures.includes('cash_and_bank')) {

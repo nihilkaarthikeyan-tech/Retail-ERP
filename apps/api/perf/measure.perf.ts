@@ -4,13 +4,13 @@
 // and bill screens, every report and dashboard — and writes the results to
 // perf/out/measure.json.
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { addDays } from 'shared';
+import { addDays, shortFinancialYear } from 'shared';
 import { vi } from 'vitest';
-import { PrismaService } from '../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER } from '../test/helpers.js';
 
 const START = process.env.PERF_START ?? '2025-10-01';
@@ -21,20 +21,25 @@ const OUT = new URL('./out/', import.meta.url);
 const RUNS = 3;
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 const results: { area: string; what: string; status: number; ms: number[]; kb: number; rows?: number }[] = [];
 
 const median = (v: number[]) => [...v].sort((a, b) => a - b)[Math.floor(v.length / 2)];
 
-async function time(area: string, what: string, path: string, runs = RUNS) {
+async function time(area: string, what: string, path: string, runs = RUNS, headers: Record<string, string> = {}) {
+  // Audit 8: written before each request, so a crash shows which one it was.
+  mkdirSync(OUT, { recursive: true });
+  appendFileSync(new URL('progress.log', OUT), `${new Date().toISOString()} start ${what} ${path}
+`);
   const ms: number[] = [];
   let status = 0;
   let kb = 0;
   let rows: number | undefined;
   for (let i = 0; i < runs; i++) {
     const t0 = performance.now();
-    const res = await owner.get(path).buffer(true);
+    // Audit 8: the all-data download of a large shop is over the test client's 200 MB default.
+    const res = await owner.get(path).set(headers).maxResponseSize(4_000_000_000).buffer(true);
     ms.push(performance.now() - t0);
     status = res.status;
     kb = Math.round((Number(res.headers['content-length']) || JSON.stringify(res.body ?? '').length) / 1024);
@@ -43,6 +48,8 @@ async function time(area: string, what: string, path: string, runs = RUNS) {
     if (status >= 300) break;
   }
   results.push({ area, what, status, ms: ms.map(Math.round), kb, rows });
+  appendFileSync(new URL('progress.log', OUT), `${area} | ${what} | ${status} | ${ms.map(Math.round).join(' ')} ms
+`);
   console.log(`${area} | ${what} | ${status} | median ${Math.round(median(ms))} ms | ${kb} KB${rows !== undefined ? ` | ${rows} rows` : ''}`);
 }
 
@@ -50,7 +57,7 @@ beforeAll(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(`${END}T21:30:00+05:30`));
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
   owner = await login(app, OWNER.email, OWNER.password);
 });
 
@@ -134,7 +141,25 @@ describe('speed on a year of data', () => {
     await time('report', 'supplier statement', `/reports/party-statement/supplier/${supplier}?${year}`);
     await time('report', 'stock against accounts', '/reports/stock-vs-accounts');
     await time('report', 'book health', '/reports/book-health');
+    // Audit 8: the places the code review expected to be slowest at this size.
+    const walkIn = (await prisma.customer.findFirst({ where: { isWalkIn: true } }))?.id;
+    const someCustomer = await prisma.customer.findFirstOrThrow({ where: { isWalkIn: false, mobile: { not: null } } });
+    await time('audit 8', 'stock balance as on a past date', `/stock/balance?${s}&asOf=${addDays(END, -60)}`);
+    await time('audit 8', 'stock history of a shop (no item)', `/stock/ledger?${s}&limit=200`);
+    await time('audit 8', 'ageing (customers)', `/reports/ageing?asOf=${END}&partyType=customer`);
+    await time('audit 8', 'till: find a bill to return by part of its number', `/pos/bills?search=${encodeURIComponent(someBill.slice(-5))}&kind=sale`);
+    await time('audit 8', 'GSTR-1 for the last month', `/reports/gst/gstr1?period=${END.slice(0, 7)}`);
+    await time('audit 8', 'GSTR-3B for the last month', `/reports/gst/gstr3b?period=${END.slice(0, 7)}`);
+    await time('audit 8', 'till payments report with no dates', '/pos/reports/payments');
+    if (walkIn) await time('audit 8', 'purchase history of the walk-in customer', `/customers/${walkIn}/purchases`);
+    await time('audit 8', 'customer search by part of a mobile number', `/customers?search=${someCustomer.mobile!.slice(-6)}`);
+    await time('audit 8', 'item search by part of a name', '/items?search=ear&pageSize=50');
+    await time('audit 8', 'change history, first page', '/audit?limit=50');
+    await time('audit 8', 'reorder levels of a shop', `/stock/reorder-levels?${s}`);
     await time('check', 'stock consistency check (whole database)', '/stock/consistency', 1);
+    await time('export', 'download all my data (zip)', '/data-export', 1);
+    // The test runs the API in this process: its memory after the biggest jobs (MB, in the ms column).
+    results.push({ area: 'memory', what: 'API memory after the reports and the download (MB)', status: 200, ms: [Math.round(process.memoryUsage().rss / 1048576)], kb: 0 });
     await time('export', 'export all items to Excel', '/exports/items', 1);
   });
 
@@ -145,7 +170,8 @@ describe('speed on a year of data', () => {
     const tills = await prisma.till.findMany({ orderBy: { code: 'asc' } });
     const cash = (await prisma.paymentMethod.findFirstOrThrow({ where: { code: 'CASH' } })).id;
     const fy = (await prisma.financialYear.findFirstOrThrow({ where: { startDate: { lte: new Date(`${date}T00:00:00Z`) }, endDate: { gte: new Date(`${date}T00:00:00Z`) } } })).name;
-    const popular = (await prisma.posBillLine.groupBy({ by: ['itemId'], _count: true, orderBy: { _count: { itemId: 'desc' } }, take: 300 })).map((r) => r.itemId);
+    // Audit 8: items made by the API (the copies made by amplify.perf.ts have ids the bill form does not accept).
+    const popular = (await prisma.posBillLine.groupBy({ by: ['itemId'], _count: true, orderBy: { _count: { itemId: 'desc' } }, take: 3000 })).map((r) => r.itemId).filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)).slice(0, 300);
     const sellList = (await prisma.catalogueSettings.findFirstOrThrow()).defaultSellingPriceListId!;
     const prices = new Map((await prisma.price.findMany({ where: { priceListId: sellList, itemId: { in: popular } } })).map((p) => [p.itemId, Number(p.price)]));
 
@@ -153,13 +179,19 @@ describe('speed on a year of data', () => {
     const open: { till: (typeof tills)[number]; token: string; shift: string; n: number }[] = [];
     for (const till of tills) {
       const token = (await owner.post(`/pos/tills/${till.id}/register`).send({ deviceName: `${till.code} speed test` })).body.token as string;
-      const shift = randomUUID();
-      await owner.post('/pos/shifts').set('x-till-token', token).send({ clientId: shift, tillId: till.id, cash: [{ paymentMethodId: cash, amount: '2000' }] });
-      const last = await prisma.posBill.findFirst({ where: { tillId: till.id, number: { contains: `-${fy}-` } }, orderBy: { number: 'desc' } });
-      open.push({ till, token, shift, n: last ? Number(last.number.slice(-6)) : 0 });
+      // A shift left open by an earlier run is carried on (one open shift per till).
+      const left = await prisma.shift.findFirst({ where: { tillId: till.id, status: 'open' } });
+      const shift = left?.clientId ?? randomUUID();
+      if (!left) {
+        const opened = await owner.post('/pos/shifts').set('x-till-token', token).send({ clientId: shift, tillId: till.id, cash: [{ paymentMethodId: cash, amount: '2000' }] });
+        if (opened.status !== 201) throw new Error(`shift refused: ${JSON.stringify(opened.body).slice(0, 300)}`);
+      }
+      // The till's own series only (copies made by amplify.perf.ts carry an extra /n).
+      const last = (await prisma.$queryRaw<{ n: string | null }[]>`SELECT max(number) AS n FROM "PosBill" WHERE "tillId" = ${till.id}::uuid AND number ~ ${`^${till.seriesKind}/${shortFinancialYear(fy)}/[0-9]{6}$`}`)[0].n;
+      open.push({ till, token, shift, n: last ? Number(last.slice(-6)) : 0 });
     }
     const t = open[0];
-    await time('till', 'download item list for offline use (start of day)', `/pos/till/${t.till.id}/snapshot`, 2);
+    await time('till', 'download item list for offline use (start of day)', `/pos/till/${t.till.id}/snapshot`, 2, { 'x-till-token': t.token });
     const codes = (await prisma.barcode.findMany({ where: { itemId: { in: popular.slice(0, 20) } }, select: { code: true } })).map((b) => b.code);
     const scan: number[] = [];
     for (const c of codes) {
@@ -178,7 +210,7 @@ describe('speed on a year of data', () => {
         tillId: o.till.id,
         shiftClientId: o.shift,
         soldAt: new Date().toISOString(),
-        sale: { number: `${o.till.seriesKind}-${fy}-${String(o.n).padStart(6, '0')}`, lines: lines.map((itemId, i) => ({ lineNo: i + 1, itemId, quantity: '1' })) },
+        sale: { number: `${o.till.seriesKind}/${shortFinancialYear(fy)}/${String(o.n).padStart(6, '0')}`, lines: lines.map((itemId, i) => ({ lineNo: i + 1, itemId, quantity: '1' })) },
         payments: [{ paymentMethodId: cash, amount: String(total) }],
       };
     };
@@ -189,6 +221,8 @@ describe('speed on a year of data', () => {
       return performance.now() - t0;
     };
     vi.setSystemTime(new Date(`${date}T11:00:00+05:30`));
+    // Sign-ins end after 30 idle minutes (audit 1): the clock jumped, so sign in again as staff would.
+    owner = await login(app, OWNER.email, OWNER.password);
     const alone: number[] = [];
     for (let k = 0; k < 40; k++) alone.push(await post(t, k));
     results.push({ area: 'till', what: 'save a 3-item bill, one till busy', status: 201, ms: alone.map(Math.round), kb: 0 });
@@ -197,6 +231,7 @@ describe('speed on a year of data', () => {
     results.push({ area: 'till', what: `save a 3-item bill, all ${open.length} tills at the same moment`, status: 201, ms: together.map(Math.round), kb: 0 });
 
     vi.setSystemTime(new Date(`${date}T21:15:00+05:30`));
+    owner = await login(app, OWNER.email, OWNER.password);
     const close: number[] = [];
     for (const o of open) {
       const shift = await prisma.shift.findUniqueOrThrow({ where: { tillId_clientId: { tillId: o.till.id, clientId: o.shift } } });

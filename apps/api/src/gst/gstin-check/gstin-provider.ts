@@ -30,8 +30,11 @@ export class GstinCheckUnavailable extends Error {
 
 export interface GstinProvider {
   readonly name: string;
-  /** The facts, or `not_found`; throws GstinCheckUnavailable when it cannot say. */
-  lookup(gstin: string): Promise<GstinFacts>;
+  /**
+   * The facts, or `not_found`; throws GstinCheckUnavailable when it cannot say. `patient` (the nightly
+   * re-check) tries three times for 15 s each; a person waiting gets one try of 6 s (audit 8).
+   */
+  lookup(gstin: string, patient?: boolean): Promise<GstinFacts>;
 }
 
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -66,21 +69,22 @@ export class GstinApiProvider implements GstinProvider {
     private readonly fetchFn: typeof fetch = fetch,
   ) {}
 
-  async lookup(gstin: string): Promise<GstinFacts> {
+  async lookup(gstin: string, patient = false): Promise<GstinFacts> {
+    const tries = patient ? 3 : 1;
     if (!this.key) throw new GstinCheckUnavailable('GSTIN checks are not set up on this server yet', 'not_configured');
     for (let attempt = 1; ; attempt++) {
       let res: Response;
       try {
-        res = await this.fetchFn(`${this.baseUrl}/v1/gstin/${encodeURIComponent(gstin)}`, { headers: { 'x-api-key': this.key, accept: 'application/json' }, signal: AbortSignal.timeout(15_000) });
+        res = await this.fetchFn(`${this.baseUrl}/v1/gstin/${encodeURIComponent(gstin)}`, { headers: { 'x-api-key': this.key, accept: 'application/json' }, signal: AbortSignal.timeout(patient ? 15_000 : 6_000) });
       } catch {
-        if (attempt < 3) {
+        if (attempt < tries) {
           await pause(attempt);
           continue;
         }
         throw new GstinCheckUnavailable('The GST network could not be reached just now', 'down');
       }
       if (res.status === 404) return { ...EMPTY, status: 'not_found' };
-      if ((res.status === 429 || res.status === 502) && attempt < 3) {
+      if ((res.status === 429 || res.status === 502) && attempt < tries) {
         await pause(attempt);
         continue;
       }

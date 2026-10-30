@@ -156,7 +156,7 @@ export class EmailLinksService {
       return;
     }
     try {
-      await this.mailer.send({ to: [to], subject, html: emailHtml(htmlLines, button, after), text: textLines.join('\n\n') });
+      await this.mailer.send({ to: [to], subject, html: emailHtml(htmlLines, button, after), text: textLines.join('\n\n') }, 'account');
     } catch (err) {
       // The answer to the visitor stays the same; the problem is in the server log.
       this.log.error(`Could not send "${subject}": ${err instanceof Error ? err.message : String(err)}`);

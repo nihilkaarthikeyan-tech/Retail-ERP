@@ -18,7 +18,7 @@ import { errorMessage } from "@/lib/api";
 import { APPROVAL_SPENT, BelowCostError, CreditApprovalError, type EngineState, PriceChangedError, SEND_UNCERTAIN, type TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
 import { tillModuleOn, withoutSwitchedOff } from "@/lib/till/modules";
-import { billDiscountStamp, type ComputedLine, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, listPriceFor, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
+import { billDiscountStamp, type ComputedLine, findItem, type DraftBill, type DraftLine, hasNamedCustomer, isDraftEmpty, listPriceFor, type NeededApproval, priceBill, scan, searchItems, setAsideWarnings } from "@/lib/till/pricing";
 import { helperToken, openDrawer, type PrintableReceipt, printWithHelper, withHeader } from "@/lib/till/receipt";
 import type { Receipt, SnapItem, StoredSnapshot, TillAlteration, TillCustomerPoints, TillOrder } from "@/lib/till/types";
 import { formatDate } from "@/lib/format";
@@ -411,7 +411,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (!draft) return;
     const lines: DraftLine[] = order.lines.map((l) => ({ key: engine.uuid(), itemId: l.item.id, unitId: l.unitId, quantity: l.quantity, barcode: null, priceOverride: null, discountPercent: "0", orderLineId: l.id, agreedPrice: l.price }));
     const basic = order.lines.map((l) => {
-      const factor = snapshot.items.find((i) => i.id === l.item.id)?.units.find((u) => u.unitId === l.unitId)?.factor ?? "1";
+      const factor = findItem(snapshot, l.item.id)?.units.find((u) => u.unitId === l.unitId)?.factor ?? "1";
       return { itemId: l.item.id, quantity: new Decimal(l.quantity).mul(factor).toString() };
     });
     const kept = draft.lines.filter((l) => !l.orderLineId);
@@ -476,7 +476,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
     if (!draft) return;
     if (need.kind === "return_without_bill") return setApproval({ need, request: noBillRequest(draft) });
     const line = need.lineKey ? draft.lines.find((l) => l.key === need.lineKey) : null;
-    const item = line ? snapshot.items.find((i) => i.id === line.itemId) : null;
+    const item = line ? findItem(snapshot, line.itemId) : null;
     const details = need.kind === "bill_discount" ? `bill discount ${draft.billDiscount?.amount ?? `${draft.billDiscount?.percent}%`}` : `${item?.code ?? ""} ${need.kind === "price_change" ? `price ${line?.priceOverride}` : `${line?.discountPercent}%`}`;
     // Audit 5: the bill discount approved (percent when typed as one, else rupees) is checked by the server.
     const figure = need.kind !== "bill_discount" ? {} : draft.billDiscount?.percent ? { percent: draft.billDiscount.percent } : draft.billDiscount?.amount ? { amount: new Decimal(draft.billDiscount.amount).toFixed(2) } : {};
@@ -1225,7 +1225,7 @@ export function BillingScreen({ engine, state, snapshot, cashierName }: BillingS
           open
           staff={staff}
           current={staffLine ? (draft.lines.find((l) => l.key === staffLine)?.salesStaffId ?? null) : (draft.salesStaffId ?? null)}
-          forLine={staffLine ? (snapshot.items.find((i) => i.id === draft.lines.find((l) => l.key === staffLine)?.itemId)?.name ?? "this line") : null}
+          forLine={staffLine ? (findItem(snapshot, draft.lines.find((l) => l.key === staffLine)?.itemId ?? "")?.name ?? "this line") : null}
           onPick={(id) => {
             if (staffLine) patchLine(staffLine, { salesStaffId: id });
             else change({ ...draft, salesStaffId: id });

@@ -321,3 +321,20 @@ describe('14.3 The Retail ERP admin', () => {
     await prisma.platformAdmin.update({ where: { email: ADMIN.email }, data: { lockedUntil: null } });
   });
 });
+
+describe('14.9 audit 8: each shop has its own modules on and off', () => {
+  it('a module switched off in one shop stays on in the other, at once', async () => {
+    await resetDatabase(prisma);
+    const A = await makeShop(SETUP_INPUT, OWNER.email, OWNER.password);
+    const B = await makeShop(OTHER, OTHER.admin.email, PASSWORD);
+    // Both read their maps first, so each is cached.
+    await A.agent.get('/orders').expect(200);
+    await B.agent.get('/orders').expect(200);
+    expect((await A.agent.patch('/modules/customer_orders').send({ enabled: false, confirm: true }).expect(200)).body).toMatchObject({ done: true });
+    expect((await A.agent.get('/orders')).status).toBe(403);
+    // Shop B never switched it off: it must not get shop A's map (one cache for the whole server did).
+    await B.agent.get('/orders').expect(200);
+    await A.agent.get('/orders').expect(403);
+    await B.agent.get('/orders').expect(200);
+  });
+});

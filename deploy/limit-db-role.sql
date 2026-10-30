@@ -12,6 +12,8 @@ BEGIN
   END IF;
 END $$;
 ALTER ROLE retail_erp_owner PASSWORD :pw;
+-- Audit 8: the "contains" search index needs pg_trgm, which only the superuser may switch on.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 GRANT retail_erp_app TO retail_erp_owner;
 GRANT CONNECT, TEMPORARY ON DATABASE :"DBNAME" TO retail_erp_owner;
 ALTER SCHEMA public OWNER TO retail_erp_owner;

@@ -23,6 +23,7 @@
     "postinstall": "prisma generate",
     "prisma": "prisma",
     "perf:seed": "vitest run --config ./vitest.config.perf.ts perf/seed.perf.ts",
+    "perf:amplify": "vitest run --config ./vitest.config.perf.ts perf/amplify.perf.ts",
     "perf:measure": "vitest run --config ./vitest.config.perf.ts perf/measure.perf.ts"
   },
   "dependencies": {

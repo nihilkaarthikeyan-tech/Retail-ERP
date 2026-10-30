@@ -12,8 +12,24 @@ import { TENANT_DB_ROLE, tenantStore } from './tenancy.js';
  * which row-level security shows only that shop's rows. With no shop known the
  * setting is empty and the database shows nothing (fails safe).
  */
+/**
+ * Audit 8: pool limits. A request waits at most 15 s for a free connection (it waited for ever), and the
+ * database stops any statement after 5 minutes and any transaction left idle for 2 minutes, so one stuck
+ * job cannot hold connections the shops need. DB_POOL_MAX sets the size (default 20 per pool).
+ */
+export function poolConfig(connectionString: string): pg.PoolConfig {
+  return {
+    connectionString,
+    max: Number(process.env.DB_POOL_MAX ?? 20),
+    connectionTimeoutMillis: 15_000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 300_000,
+    idle_in_transaction_session_timeout: 120_000,
+  };
+}
+
 function shopPool(connectionString: string, role: string | null): pg.Pool {
-  const pool = new pg.Pool({ connectionString });
+  const pool = new pg.Pool(poolConfig(connectionString));
   const rawConnect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
 
   async function checkout(): Promise<pg.PoolClient> {
@@ -56,7 +72,7 @@ async function shopFor(client: pg.PoolClient): Promise<string> {
 }
 
 /** Tables that hold no shop of their own (system tables; the Company row is the shop itself). */
-const NOT_SHOP_TABLES = new Set(['Lead', 'PlatformAdmin', 'PlatformSession', 'OfficialHsnCode', 'ReferenceDataVersion']);
+const NOT_SHOP_TABLES = new Set(['Lead', 'PlatformAdmin', 'PlatformSession', 'OfficialHsnCode', 'ReferenceDataVersion', 'MailDay']);
 
 /** The database client for everything a shop does: sees only the current shop's rows. */
 @Injectable()
@@ -123,7 +139,7 @@ export class SystemPrisma extends PrismaClient implements OnModuleDestroy {
   constructor() {
     // In the automated tests the system client also fills in the shop of rows a test writes directly.
     const url = requireEnv('DATABASE_URL');
-    super({ adapter: process.env.TEST_DEFAULT_SHOP === 'first' ? new PrismaPg(shopPool(url, null), { disposeExternalPool: true }) : new PrismaPg({ connectionString: url }) });
+    super({ adapter: process.env.TEST_DEFAULT_SHOP === 'first' ? new PrismaPg(shopPool(url, null), { disposeExternalPool: true }) : new PrismaPg(poolConfig(url)) });
   }
 
   async onModuleDestroy(): Promise<void> {

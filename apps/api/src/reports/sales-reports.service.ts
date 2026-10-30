@@ -40,7 +40,7 @@ export interface SaleLineRow {
   cost: Prisma.Decimal | null;
 }
 
-interface Totals {
+export interface Totals {
   saleBills: number;
   returnBills: number;
   quantity: Decimal;
@@ -52,6 +52,16 @@ interface Totals {
   cost: Decimal;
 }
 
+/** Audit 8: what a sales total can be grouped by. */
+export type SalesKey = 'item' | 'group' | 'brand' | 'customer' | 'store' | 'cashier' | 'style' | 'season' | 'attribute' | 'date' | 'date-store' | 'group-week' | 'brand-week' | 'all';
+export interface TotalsRow {
+  key: string;
+  total: boolean;
+  totals: Totals;
+  /** Quantity of sales and returns together (returns count minus). */
+  allQuantity: Decimal;
+}
+
 const emptyTotals = (): Totals => ({ saleBills: 0, returnBills: 0, quantity: ZERO, grossSales: ZERO, returns: ZERO, net: ZERO, tax: ZERO, discounts: ZERO, cost: ZERO });
 
 @Injectable()
@@ -61,8 +71,122 @@ export class SalesReportsService {
     private readonly common: ReportsCommon,
   ) {}
 
+  /** Audit 8: taxable sales per month and store, added up by the database (charts over many months). */
+  async taxableByMonthAndStore(companyId: string, from: string, to: string, scope: StoreScope): Promise<{ month: string; storeId: string; taxable: Prisma.Decimal }[]> {
+    const inScope = scope.ids ? (scope.ids.length ? Prisma.sql`AND t."storeId" IN (${Prisma.join(scope.ids.map((s) => Prisma.sql`${s}::uuid`))})` : Prisma.sql`AND false`) : Prisma.empty;
+    return this.prisma.$queryRaw`
+      SELECT to_char(b."businessDate", 'YYYY-MM') AS month, t."storeId", SUM(l."taxableAmount") AS taxable
+      FROM "PosBillLine" l
+      JOIN "PosBill" b ON b.id = l."billId"
+      JOIN "Till" t ON t.id = b."tillId"
+      WHERE b."companyId" = ${companyId}::uuid AND b.status = 'completed'
+        AND b."businessDate" BETWEEN ${fromIso(from)} AND ${fromIso(to)} ${inScope}
+      GROUP BY 1, 2`;
+  }
+
+/**
+   * Audit 8: sales totals added up by the database, one row per key (plus the whole period as the
+   * row with total = true). Two years of a busy shop is over a million bill lines; reading them
+   * all into memory to add up took the server down.
+   */
+  async totalsBy(companyId: string, from: string, to: string, scope: StoreScope, q: Partial<ReportQuery>, by: SalesKey): Promise<TotalsRow[]> {
+    const key = this.keySql(by, q.attributeId);
+    const rows = await this.prisma.$queryRaw<{ key: string | null; total: boolean; saleBills: bigint; returnBills: bigint; quantity: Prisma.Decimal | null; allQuantity: Prisma.Decimal | null; grossSales: Prisma.Decimal | null; returns: Prisma.Decimal | null; net: Prisma.Decimal | null; tax: Prisma.Decimal | null; discounts: Prisma.Decimal | null; cost: Prisma.Decimal | null }[]>`
+      SELECT x.key, GROUPING(x.key) = 1 AS total,
+             COUNT(DISTINCT x."billId") FILTER (WHERE x.kind = 'sale') AS "saleBills",
+             COUNT(DISTINCT x."billId") FILTER (WHERE x.kind = 'return') AS "returnBills",
+             SUM(x."basicQuantity") FILTER (WHERE x.kind = 'sale') AS quantity,
+             SUM(x."basicQuantity") AS "allQuantity",
+             SUM(x."taxableAmount") FILTER (WHERE x.kind = 'sale') AS "grossSales",
+             SUM(x."taxableAmount") FILTER (WHERE x.kind = 'return') AS returns,
+             SUM(x."taxableAmount") AS net,
+             SUM(x.tax) AS tax,
+             SUM(x."discountAmount") FILTER (WHERE x.kind = 'sale') AS discounts,
+             SUM(x.cost) AS cost
+      FROM (
+        SELECT ${key} AS key, l."billId", b.kind::text AS kind, l."basicQuantity", l."taxableAmount", l.cgst + l.sgst + l.igst AS tax, l."discountAmount", -e."valueChange" AS cost
+        FROM "PosBillLine" l
+        JOIN "PosBill" b ON b.id = l."billId"
+        -- Audit 8: each line's own stock movement, joined (one lookup per line took 14 s for two years). A
+        -- completed bill has one movement per stock line; reversals belong to cancelled bills only.
+        LEFT JOIN "StockLedgerEntry" e ON e."documentId" = b.id AND e."documentLineId" = l.id AND e."documentType" = 'pos_bill' AND NOT e."isCancellation"
+        JOIN "Till" t ON t.id = b."tillId"
+        JOIN "Item" i ON i.id = l."itemId"
+        LEFT JOIN "Item" p ON p.id = i."parentItemId"
+        WHERE b."companyId" = ${companyId}::uuid AND b.status = 'completed'
+          AND b."businessDate" BETWEEN ${fromIso(from)} AND ${fromIso(to)}
+          ${this.lineConditions(scope, q)}
+      ) x
+      GROUP BY GROUPING SETS ((x.key), ())`;
+    return rows.map((r) => ({
+      key: r.key ?? '',
+      total: r.total,
+      totals: {
+        saleBills: Number(r.saleBills),
+        returnBills: Number(r.returnBills),
+        quantity: D(r.quantity ?? 0),
+        grossSales: D(r.grossSales ?? 0),
+        returns: D(r.returns ?? 0),
+        net: D(r.net ?? 0),
+        tax: D(r.tax ?? 0),
+        discounts: D(r.discounts ?? 0),
+        cost: D(r.cost ?? 0),
+      },
+      allQuantity: D(r.allQuantity ?? 0),
+    }));
+  }
+
+  /** The grouping of a sales total, as SQL over l (line), b (bill), t (till), i (item) and p (its style). */
+  private keySql(by: SalesKey, attributeId?: string): Prisma.Sql {
+    switch (by) {
+      case 'item':
+        return Prisma.sql`l."itemId"::text`;
+      case 'group':
+        return Prisma.sql`i."itemGroupId"::text`;
+      case 'brand':
+        return Prisma.sql`COALESCE(i."brandId"::text, 'none')`;
+      case 'customer':
+        return Prisma.sql`b."customerId"::text`;
+      case 'store':
+        return Prisma.sql`t."storeId"::text`;
+      case 'cashier':
+        return Prisma.sql`b."cashierId"::text`;
+      case 'style':
+        return Prisma.sql`COALESCE(i."parentItemId", i.id)::text`;
+      case 'season':
+        return Prisma.sql`COALESCE(i."seasonId", p."seasonId")::text`;
+      case 'attribute':
+        return attributeId ? Prisma.sql`COALESCE((SELECT v.value FROM "ItemVariantValue" v WHERE v."itemId" = l."itemId" AND v."attributeId" = ${attributeId}::uuid LIMIT 1), 'none')` : Prisma.sql`'none'`;
+      case 'date-store':
+        return Prisma.sql`to_char(b."businessDate", 'YYYY-MM-DD') || '|' || t."storeId"::text`;
+      case 'group-week':
+        return Prisma.sql`i."itemGroupId"::text || '|' || to_char(date_trunc('week', b."businessDate"), 'YYYY-MM-DD')`;
+      case 'brand-week':
+        return Prisma.sql`COALESCE(i."brandId"::text, 'none') || '|' || to_char(date_trunc('week', b."businessDate"), 'YYYY-MM-DD')`;
+      case 'all':
+        return Prisma.sql`'all'`;
+      default:
+        return Prisma.sql`to_char(b."businessDate", 'YYYY-MM-DD')`;
+    }
+  }
+
+  /** The report's filters, as conditions over the same names. */
+  private lineConditions(scope: StoreScope, q: Partial<ReportQuery>): Prisma.Sql {
+    const conds: Prisma.Sql[] = [];
+    if (scope.ids) conds.push(scope.ids.length ? Prisma.sql`AND t."storeId" IN (${Prisma.join(scope.ids.map((id) => Prisma.sql`${id}::uuid`))})` : Prisma.sql`AND false`);
+    if (q.itemId) conds.push(Prisma.sql`AND l."itemId" = ${q.itemId}::uuid`);
+    if (q.itemGroupId) conds.push(Prisma.sql`AND i."itemGroupId" = ${q.itemGroupId}::uuid`);
+    if (q.brandId) conds.push(Prisma.sql`AND i."brandId" = ${q.brandId}::uuid`);
+    if (q.customerId) conds.push(Prisma.sql`AND b."customerId" = ${q.customerId}::uuid`);
+    if (q.cashierId) conds.push(Prisma.sql`AND b."cashierId" = ${q.cashierId}::uuid`);
+    if (q.tillId) conds.push(Prisma.sql`AND b."tillId" = ${q.tillId}::uuid`);
+    // Plan 11 C4: a variant without its own season takes its style's.
+    if (q.seasonId) conds.push(Prisma.sql`AND COALESCE(i."seasonId", (SELECT p2."seasonId" FROM "Item" p2 WHERE p2.id = i."parentItemId")) = ${q.seasonId}::uuid`);
+    return conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
+  }
+
   /** Every completed till bill line in a period, with its cost from the stock records. */
-  async lines(companyId: string, from: string, to: string, scope: StoreScope, q: Partial<ReportQuery> = {}): Promise<SaleLineRow[]> {
+  async lines(companyId: string, from: string, to: string, scope: StoreScope, q: Partial<ReportQuery> = {}, opts: { discountedOnly?: boolean } = {}): Promise<SaleLineRow[]> {
     const conds: Prisma.Sql[] = [];
     if (scope.ids) conds.push(scope.ids.length ? Prisma.sql`AND t."storeId" IN (${Prisma.join(scope.ids.map((s) => Prisma.sql`${s}::uuid`))})` : Prisma.sql`AND false`);
     if (q.itemId) conds.push(Prisma.sql`AND l."itemId" = ${q.itemId}::uuid`);
@@ -86,22 +210,8 @@ export class SalesReportsService {
       WHERE b."companyId" = ${companyId}::uuid AND b.status = 'completed'
         AND b."businessDate" BETWEEN ${fromIso(from)} AND ${fromIso(to)}
         ${conds.length ? Prisma.join(conds, ' ') : Prisma.empty}
+        ${opts.discountedOnly ? Prisma.sql`AND b.kind = 'sale' AND (l."discountAmount" <> 0 OR l."offerDiscount" <> 0 OR l."listPrice" > l.price)` : Prisma.empty}
       ORDER BY b."soldAt", l."lineNo"`;
-  }
-
-  private add(t: Totals, l: SaleLineRow) {
-    const taxable = D(l.taxableAmount);
-    t.net = t.net.add(taxable);
-    t.tax = t.tax.add(D(l.tax));
-    t.cost = t.cost.add(D(l.cost));
-    if (l.kind === 'sale') {
-      t.grossSales = t.grossSales.add(taxable);
-      t.quantity = t.quantity.add(D(l.basicQuantity));
-      // A line's discount already includes its offer saving and its share of the bill discount.
-      t.discounts = t.discounts.add(D(l.discountAmount));
-    } else {
-      t.returns = t.returns.add(taxable);
-    }
   }
 
   private totalsDto(t: Totals, seesCost: boolean) {
@@ -127,7 +237,7 @@ export class SalesReportsService {
     const { from, to } = this.common.period(q.from, q.to);
     const scope = this.common.scope(user, q.storeId);
     const seesCost = this.common.seesCost(user);
-    const lines = await this.lines(company.id, from, to, scope);
+    const sums = (await this.totalsBy(company.id, from, to, scope, {}, 'date-store')).filter((r) => !r.total);
     const bills = await this.prisma.posBill.groupBy({
       by: ['businessDate', 'kind', 'tillId'],
       where: { companyId: company.id, status: 'completed', businessDate: { gte: fromIso(from), lte: fromIso(to) }, ...(scope.ids ? { till: { storeId: { in: scope.ids } } } : {}) },
@@ -143,7 +253,10 @@ export class SalesReportsService {
       if (b.kind === 'sale') t.saleBills += b._count._all;
       else t.returnBills += b._count._all;
     }
-    for (const l of lines) this.add(get(key(iso(l.businessDate)!, l.storeId)), l);
+    for (const r of sums) {
+      const t = get(r.key);
+      for (const f of ['quantity', 'grossSales', 'returns', 'net', 'tax', 'discounts', 'cost'] as const) t[f] = t[f].add(r.totals[f]);
+    }
     const total = emptyTotals();
     const rows = [...groups.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -172,29 +285,12 @@ export class SalesReportsService {
     // Plan 12: grouping by style or size and colour, or by season, belongs to those optional modules.
     if (by === 'style' || by === 'attribute') await assertModuleOn(this.prisma, 'variants');
     if (by === 'season' || q.seasonId) await assertModuleOn(this.prisma, 'seasons');
-    const lines = await this.lines(company.id, from, to, scope, q);
-    // Plan 11 C3, C4: style, size or colour, and season come from the item's style and values.
-    const styled = by === 'style' || by === 'attribute' || by === 'season' ? await this.styleKeys([...new Set(lines.map((l) => l.itemId))], q.attributeId) : null;
-    const keyOf = (l: SaleLineRow) =>
-      styled
-        ? styled.get(l.itemId)![by as 'style' | 'attribute' | 'season']
-        : by === 'item' ? l.itemId : by === 'group' ? l.itemGroupId : by === 'brand' ? (l.brandId ?? 'none') : by === 'customer' ? l.customerId : by === 'store' ? l.storeId : by === 'cashier' ? l.cashierId : iso(l.businessDate)!;
-    const groups = new Map<string, Totals & { bills: Set<string> }>();
-    for (const l of lines) {
-      const k = keyOf(l);
-      const t = groups.get(k) ?? { ...emptyTotals(), bills: new Set<string>() };
-      this.add(t, l);
-      if (l.kind === 'sale') t.bills.add(l.billId);
-      groups.set(k, t);
-    }
-    const names = await this.namesFor(by, [...groups.keys()], company.id);
-    const total = emptyTotals();
-    const rows = [...groups.entries()].map(([k, t]) => {
-      t.saleBills = t.bills.size;
-      for (const f of ['quantity', 'grossSales', 'returns', 'net', 'tax', 'discounts', 'cost'] as const) total[f] = total[f].add(t[f]);
-      return { key: k, ...names(k), ...this.totalsDto(t, seesCost), _q: t.quantity, _net: t.net, _margin: t.net.sub(t.cost) };
-    });
-    total.saleBills = new Set(lines.filter((l) => l.kind === 'sale').map((l) => l.billId)).size;
+    // Plan 11 C3, C4: style, size or colour, and season come from the item's style and values (in the SQL).
+    const sums = await this.totalsBy(company.id, from, to, scope, q, by === 'day' || by === 'week' || by === 'month' ? 'date' : by);
+    const groups = sums.filter((r) => !r.total);
+    const names = await this.namesFor(by, groups.map((r) => r.key), company.id);
+    const total = sums.find((r) => r.total)?.totals ?? emptyTotals();
+    const rows = groups.map(({ key: k, totals: t }) => ({ key: k, ...names(k), ...this.totalsDto(t, seesCost), _q: t.quantity, _net: t.net, _margin: t.net.sub(t.cost) }));
     return { from, to, groupBy: by, workedOutAt: new Date().toISOString(), rows, totals: this.totalsDto(total, seesCost), seesCost };
   }
 
@@ -229,22 +325,14 @@ export class SalesReportsService {
     const { from, to } = this.common.period(q.from, q.to, 28);
     const scope = this.common.scope(user, q.storeId);
     const by = q.groupBy === 'brand' ? 'brand' : 'group';
-    const lines = await this.lines(company.id, from, to, scope, q);
-    const weekOf = (d: Date) => {
-      // Weeks start on Monday.
-      const day = (d.getUTCDay() + 6) % 7;
-      return iso(new Date(d.getTime() - day * 86_400_000))!;
-    };
-    const weeks = [...new Set(lines.map((l) => weekOf(l.businessDate)))].sort();
+    // Weeks start on Monday (date_trunc('week') in the SQL).
+    const sums = (await this.totalsBy(company.id, from, to, scope, q, by === 'brand' ? 'brand-week' : 'group-week')).filter((r) => !r.total);
+    const weeks = [...new Set(sums.map((r) => r.key.split('|')[1]))].sort();
     const table = new Map<string, Map<string, { net: Decimal; quantity: Decimal }>>();
-    for (const l of lines) {
-      const k = by === 'brand' ? (l.brandId ?? 'none') : l.itemGroupId;
+    for (const r of sums) {
+      const [k, w] = r.key.split('|');
       const row = table.get(k) ?? new Map();
-      const w = weekOf(l.businessDate);
-      const cell = row.get(w) ?? { net: ZERO, quantity: ZERO };
-      cell.net = cell.net.add(D(l.taxableAmount));
-      cell.quantity = cell.quantity.add(D(l.basicQuantity));
-      row.set(w, cell);
+      row.set(w, { net: r.totals.net, quantity: r.allQuantity });
       table.set(k, row);
     }
     const names = await this.namesFor(by, [...table.keys()], company.id);
@@ -309,7 +397,8 @@ export class SalesReportsService {
     const company = await this.common.current();
     const { from, to } = this.common.period(q.from, q.to, 7);
     const scope = this.common.scope(user, q.storeId);
-    const lines = (await this.lines(company.id, from, to, scope, q)).filter((l) => l.kind === 'sale');
+    // Audit 8: only lines with a discount, an offer or a lower price are read.
+    const lines = await this.lines(company.id, from, to, scope, q, { discountedOnly: true });
     const billIds = [...new Set(lines.map((l) => l.billId))];
     const bills = new Map(
       (await this.prisma.posBill.findMany({ where: { id: { in: billIds } }, select: { id: true, billDiscount: true, couponId: true, approvedById: true } })).map((b) => [b.id, b]),
@@ -394,21 +483,6 @@ export class SalesReportsService {
     }
     if (by === 'attribute') return (k) => ({ code: null, name: k === 'none' ? 'Not given' : k });
     return (k) => ({ code: null, name: k });
-  }
-
-  /**
-   * Plan 11 C3, C4: for each item, the style it belongs to (itself when it has
-   * none), its value of one attribute (e.g. its size) and its season (a variant
-   * without its own season takes its style's). "none" when there is nothing.
-   */
-  private async styleKeys(itemIds: string[], attributeId?: string): Promise<Map<string, { style: string; attribute: string; season: string }>> {
-    const items = await this.prisma.item.findMany({
-      where: { id: { in: itemIds } },
-      select: { id: true, parentItemId: true, seasonId: true, parent: { select: { seasonId: true } }, variantValues: attributeId ? { where: { attributeId }, select: { value: true } } : false },
-    });
-    return new Map(
-      items.map((i) => [i.id, { style: i.parentItemId ?? i.id, attribute: (i.variantValues as { value: string }[] | undefined)?.[0]?.value ?? 'none', season: i.seasonId ?? i.parent?.seasonId ?? 'none' }]),
-    );
   }
 }
 

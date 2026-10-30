@@ -17,6 +17,8 @@ type Db = Prisma.TransactionClient | PrismaService;
 const REUSE_MS = 24 * 60 * 60 * 1000;
 /** At most this many paid checks a day per shop (a guard against a runaway import or a loop). */
 const DAILY_LIMIT = 300;
+/** Audit 8: how long checks wait after the GST network was found down. */
+const DOWN_PAUSE_MS = 2 * 60 * 1000;
 /** At most this many records re-checked per shop per night. */
 const NIGHTLY_LIMIT = 50;
 
@@ -70,7 +72,7 @@ export class GstinCheckService implements OnApplicationBootstrap {
   }
 
   /** Asks the GST network (or reuses an answer from the last day); never throws for a network problem. */
-  async check(raw: string, actor: Actor): Promise<GstinCheckResult> {
+  async check(raw: string, actor: Actor, patient = false): Promise<GstinCheckResult> {
     const gstin = raw.trim().toUpperCase();
     const problem = gstinProblem(gstin, isStateCode);
     if (problem) throw new BadRequestException(problem);
@@ -82,11 +84,14 @@ export class GstinCheckService implements OnApplicationBootstrap {
 
     const usedToday = await this.prisma.gstinCheck.count({ where: { status: { not: 'unavailable' }, createdAt: { gte: since } } });
     let row;
-    if (usedToday >= DAILY_LIMIT) {
-      row = await this.prisma.gstinCheck.create({ data: { gstin, provider: this.provider.name, status: 'unavailable', problem: 'busy', createdById: actor.userId } });
+    // Audit 8: while the GST network was found down in the last 2 minutes, nobody waits on it again
+    // (an import of thousands of customers would wait on each); the nightly re-check catches up.
+    const down = !patient && (await this.prisma.gstinCheck.count({ where: { status: 'unavailable', problem: 'down', createdAt: { gte: new Date(Date.now() - DOWN_PAUSE_MS) } } })) > 0;
+    if (usedToday >= DAILY_LIMIT || down) {
+      row = await this.prisma.gstinCheck.create({ data: { gstin, provider: this.provider.name, status: 'unavailable', problem: down ? 'down' : 'busy', createdById: actor.userId } });
     } else {
       try {
-        const facts = await this.provider.lookup(gstin);
+        const facts = await this.provider.lookup(gstin, patient);
         row = await this.prisma.gstinCheck.create({ data: { gstin, provider: this.provider.name, status: facts.status, facts: facts as unknown as Prisma.InputJsonValue, createdById: actor.userId } });
       } catch (err) {
         if (!(err instanceof GstinCheckUnavailable)) throw err;
@@ -146,7 +151,7 @@ export class GstinCheckService implements OnApplicationBootstrap {
       ['supplier', suppliers],
     ] as const) {
       for (const r of rows) {
-        const result = await this.check(r.gstin!, system).catch(() => null);
+        const result = await this.check(r.gstin!, system, true).catch(() => null);
         if (!result || result.status === 'unavailable') continue;
         await this.applyToParty(this.prisma, kind, r.id, r.gstin);
         done++;

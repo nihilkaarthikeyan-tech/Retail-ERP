@@ -11,10 +11,10 @@ import { performance } from 'node:perf_hooks';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
-import { addDays, DENOMINATIONS } from 'shared';
+import { addDays, DENOMINATIONS, shortFinancialYear } from 'shared';
 import { vi } from 'vitest';
 import { writeXlsx, type Sheet } from '../src/imports/spreadsheet.js';
-import { PrismaService } from '../src/prisma/prisma.service.js';
+import { SystemPrisma } from '../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, resetDatabase, SETUP_INPUT } from '../test/helpers.js';
 
 const START = process.env.PERF_START ?? '2025-10-01';
@@ -71,7 +71,7 @@ function save() {
 // ---- API calls ----
 
 let app: INestApplication<App>;
-let prisma: PrismaService;
+let prisma: SystemPrisma;
 let owner: Agent;
 
 let relogin: Promise<Agent> | null = null;
@@ -205,7 +205,7 @@ beforeAll(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   setClock(addDays(START, -12), '10:00');
   app = await createTestApp();
-  prisma = app.get(PrismaService);
+  prisma = app.get(SystemPrisma);
 });
 
 afterAll(async () => {
@@ -216,7 +216,8 @@ afterAll(async () => {
 
 describe('a year of trading for three shops', () => {
   it('sets up the company, shops, tills, items, customers and opening stock', async () => {
-    if (process.env.PERF_RESUME && (await prisma.posBill.count()) > 0) {
+    // Audit 8: also after a set-up that finished with no bills yet.
+    if (process.env.PERF_RESUME && ((await prisma.posBill.count()) > 0 || (await prisma.till.count()) > 0)) {
       await resume();
       setUpDone = true;
       return;
@@ -431,7 +432,8 @@ async function tradeDay(date: string, weekday: number) {
 function nextNumber(t: Till, date: string) {
   const fy = fyName(date);
   t.counters[fy] = (t.counters[fy] ?? 0) + 1;
-  return `${t.prefix}-${fy}-${String(t.counters[fy]).padStart(6, '0')}`;
+  // Audit 8: the series form since audit 5, e.g. MAT1/2627/000001.
+  return `${t.prefix}/${shortFinancialYear(fy)}/${String(t.counters[fy]).padStart(6, '0')}`;
 }
 
 function paymentFor(total: number) {
@@ -634,8 +636,8 @@ async function monthEnd(date: string) {
 
 /** Rebuilds what the trading loop needs from the database, closes any shift left open, and starts the next day. */
 async function resume() {
-  const last = (await prisma.posBill.aggregate({ _max: { businessDate: true } }))._max.businessDate!;
-  const lastDay = last.toISOString().slice(0, 10);
+  const last = (await prisma.posBill.aggregate({ _max: { businessDate: true } }))._max.businessDate;
+  const lastDay = last ? last.toISOString().slice(0, 10) : addDays(START, -1);
   firstDay = Math.round((Date.parse(lastDay) - Date.parse(START)) / 86400_000) + 1;
   setClock(lastDay, '21:15');
   owner = await login(app, OWNER.email, OWNER.password);
@@ -671,7 +673,7 @@ async function resume() {
     const token = (await api('post', `/pos/tills/${till.id}/register`, { deviceName: `${till.code} PC (resumed)` })).token as string;
     const t: Till = { id: till.id, code: till.code, store, token, prefix: till.seriesKind, counters: {}, shiftId: '', shiftClientId: '', recent: [] };
     for (const fy of ['2025-26', '2026-27']) {
-      const top = await prisma.posBill.findFirst({ where: { tillId: till.id, number: { contains: `-${fy}-` } }, orderBy: { number: 'desc' }, select: { number: true } });
+      const top = await prisma.posBill.findFirst({ where: { tillId: till.id, number: { startsWith: `${till.seriesKind}/${shortFinancialYear(fy)}/` } }, orderBy: { number: 'desc' }, select: { number: true } });
       if (top) t.counters[fy] = Number(top.number.slice(-6));
     }
     const recent = await prisma.posBill.findMany({

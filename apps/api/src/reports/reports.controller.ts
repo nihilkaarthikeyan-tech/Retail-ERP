@@ -6,6 +6,7 @@ import { type ExportLogInput, exportLogSchema, type ReportQuery, reportQuerySche
 import { z } from 'zod';
 import { AuditService } from '../audit/audit.service.js';
 import { RequireAnyPermission, RequirePermission } from '../auth/decorators.js';
+import { RateLimit } from '../auth/rate-limit.js';
 import { type Actor, type AuthUser, ReqActor, ReqUser } from '../common/request-context.js';
 import { ZodValidationPipe } from '../common/zod.pipe.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -118,7 +119,7 @@ export class ReportsController {
   @Put('summary-email/settings') @RequirePermission('reports.summary_email') saveSummarySettings(@Body(zod(summaryEmailSettingsSchema)) input: SummaryEmailSettingsInput, @ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.summary.saveSettings(input, actor, user);
   }
-  @Post('summary-email/test') @HttpCode(200) @RequirePermission('reports.summary_email') sendTest(@ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
+  @Post('summary-email/test') @HttpCode(200) @RateLimit('testEmail') @RequirePermission('reports.summary_email') sendTest(@ReqActor() actor: Actor, @ReqUser() user: AuthUser) {
     return this.summary.sendTest(actor, user);
   }
   @Get('summary-email/runs') @RequirePermission('reports.summary_email') summaryRuns(@ReqUser() user: AuthUser) {

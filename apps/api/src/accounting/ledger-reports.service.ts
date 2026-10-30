@@ -319,10 +319,12 @@ export class LedgerReportsService {
     const rows = [];
     const totals = new Map(labels.map((l) => [l, ZERO]));
     let unused = ZERO;
+    // Audit 8: every party's open items in two queries, not two per party.
+    const open = await this.ledger.openItemsByParty(this.prisma, partyType, q.asOf);
     for (const p of parties) {
       // Audit 2: the chosen (or allowed) stores' bills only; settlements still count across the company.
       const stores = q.storeId ? [q.storeId] : allowed;
-      const items = (await this.ledger.openItems(this.prisma, partyType, p.partyId!, q.asOf)).filter((i) => !stores || !i.storeId || stores.includes(i.storeId));
+      const items = (open.get(`${partyType}|${p.partyId}`) ?? []).filter((i) => !stores || !i.storeId || stores.includes(i.storeId));
       if (!items.length) continue;
       const byBand = new Map(labels.map((l) => [l, ZERO]));
       let advance = ZERO;
@@ -385,12 +387,15 @@ export class LedgerReportsService {
     const dr = D(total._sum.debit ?? 0);
     const cr = D(total._sum.credit ?? 0);
     if (!dr.eq(cr)) problems.push(`Total debits ₹${money(dr)} and credits ₹${money(cr)} differ`);
-    const parties = await this.prisma.ledgerLine.groupBy({ by: ['partyType', 'partyId'], where: { companyId: company.id, partyId: { not: null } } });
+    // Audit 8: balances and open items of every party in three queries (it made two per party).
+    const parties = await this.prisma.ledgerLine.groupBy({ by: ['partyType', 'partyId'], where: { companyId: company.id, partyId: { not: null } }, _sum: { debit: true, credit: true } });
+    const openByParty = await this.ledger.openItemsByParty(this.prisma);
     let checked = 0;
     for (const p of parties) {
       const type = p.partyType as 'customer' | 'supplier';
-      const balance = await this.ledger.partyBalance(this.prisma, type, p.partyId!);
-      const items = await this.ledger.openItems(this.prisma, type, p.partyId!);
+      const dr = D(p._sum.debit ?? 0).sub(D(p._sum.credit ?? 0));
+      const balance = type === 'customer' ? dr : dr.neg();
+      const items = openByParty.get(`${type}|${p.partyId}`) ?? [];
       const open = items.reduce((s, i) => s.add(i.owed), ZERO);
       // Party lines without an open item (none expected) would show here as a difference.
       if (!balance.eq(open)) problems.push(`${type} ${p.partyId}: ledger balance ₹${money(balance)} but open items ₹${money(open)}`);

@@ -51,21 +51,31 @@ export class StockReportsService {
     let rows: BalanceRow[];
     if (q.asOf) {
       const until = endOfBusinessDay(q.asOf);
+      // Audit 8: each stocked item's last movement before the date, found through the index (sorting every
+      // movement of the shop never finished on two years of data). Every item and place that ever moved has a position.
       rows = await this.prisma.$queryRaw<BalanceRow[]>`
-        SELECT DISTINCT ON ("itemId", "locationId") "itemId", "locationId", "quantityAfter" AS quantity, "unitCostAfter" AS "unitCost", "valueAfter" AS value
-        FROM "StockLedgerEntry"
-        WHERE "locationId" IN (${Prisma.join(locIds.map((id) => Prisma.sql`${id}::uuid`))}) AND "postingAt" < ${until}
-          ${q.itemId ? Prisma.sql`AND "itemId" = ${q.itemId}::uuid` : Prisma.empty}
-        ORDER BY "itemId", "locationId", "postingAt" DESC, "id" DESC`;
+        SELECT p."itemId", p."locationId", e."quantityAfter" AS quantity, e."unitCostAfter" AS "unitCost", e."valueAfter" AS value
+        FROM "StockPosition" p
+        CROSS JOIN LATERAL (
+          SELECT x."quantityAfter", x."unitCostAfter", x."valueAfter" FROM "StockLedgerEntry" x
+          WHERE x."itemId" = p."itemId" AND x."locationId" = p."locationId" AND x."postingAt" < ${until}
+          ORDER BY x."postingAt" DESC, x.id DESC LIMIT 1
+        ) e
+        WHERE p."locationId" IN (${Prisma.join(locIds.map((id) => Prisma.sql`${id}::uuid`))})
+          ${q.itemId ? Prisma.sql`AND p."itemId" = ${q.itemId}::uuid` : Prisma.empty}`;
     } else {
-      rows = await this.prisma.stockPosition.findMany({ where: { locationId: { in: locIds }, ...(q.itemId ? { itemId: q.itemId } : {}) } });
+      // Audit 8: empty positions are left out by the database (a shop with 50,000 items has many).
+      rows = await this.prisma.stockPosition.findMany({
+        where: { locationId: { in: locIds }, ...(q.itemId ? { itemId: q.itemId } : {}), ...(q.includeZero === 'true' ? {} : { OR: [{ quantity: { not: 0 } }, { value: { not: 0 } }] }) },
+        select: { itemId: true, locationId: true, quantity: true, unitCost: true, value: true },
+      });
     }
     if (q.includeZero !== 'true') rows = rows.filter((r) => !new Decimal(r.quantity.toString()).isZero() || !new Decimal(r.value.toString()).isZero());
-    const itemIds = [...new Set(rows.map((r) => r.itemId))];
     // A group filter includes every group below it in the tree.
     const group = q.groupId ? await this.prisma.itemGroup.findUnique({ where: { id: q.groupId } }) : null;
+    // Audit 8: the shop's items in one read (a list of 50,000 ids was sent to the database and back).
     const items = await this.prisma.item.findMany({
-      where: { id: { in: itemIds }, ...(q.groupId ? { itemGroup: { path: { startsWith: group?.path ?? '//none' } } } : {}) },
+      where: q.itemId ? { id: q.itemId } : q.groupId ? { itemGroup: { path: { startsWith: group?.path ?? '//none' } } } : {},
       select: { id: true, code: true, name: true, itemGroupId: true, baseUnit: { select: { code: true } } },
     });
     const itemMap = new Map(items.map((i) => [i.id, i]));

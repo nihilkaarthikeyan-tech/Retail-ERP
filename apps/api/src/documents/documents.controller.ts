@@ -1,6 +1,8 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Module 10 endpoints (plan 10 §6): printing, labels, import and export, going live.
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import {
@@ -160,7 +162,15 @@ export class DocumentsController {
     sendFile(res, await this.imports.export(kind, format, actor, user));
   }
   @Get('data-export') @RequirePermission('data.export_all') async exportAll(@ReqActor() actor: Actor, @ReqUser() user: AuthUser, @Res() res: Response) {
-    sendFile(res, await this.dataExport.exportAll(actor, user));
+    // Audit 8: the file is streamed from disk and removed once sent (or the download is broken off).
+    const file = await this.dataExport.exportAll(actor, user);
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+    res.setHeader('Content-Length', String((await stat(file.path)).size));
+    const stream = createReadStream(file.path);
+    res.on('close', () => void file.done());
+    stream.on('error', () => res.destroy());
+    stream.pipe(res);
   }
 
   // ---- Going live (decision 72) ----

@@ -6,7 +6,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ACCOUNT_ROLES, combinePosting, Decimal, POSTING_TOLERANCE, roundMoney, STORE_ACCOUNT_ROLES, SYSTEM_ROLES, wrongSideBalance } from 'shared';
 import type { Db } from '../audit/audit.service.js';
-import type { Account, LedgerEntry } from '../generated/prisma/client.js';
+import type { Account, LedgerEntry, Prisma } from '../generated/prisma/client.js';
 import { AccountingSetup } from './accounting-setup.service.js';
 
 type Amount = Decimal | string | number | { toString(): string };
@@ -339,9 +339,46 @@ export class LedgerService {
   async openItems(tx: Db, partyType: 'customer' | 'supplier', partyId: string, asOf?: string): Promise<OpenItemRow[]> {
     const lines = await tx.ledgerLine.findMany({
       where: { partyType, partyId, itemId: { not: null }, ...(asOf ? { entryDate: { lte: fromIso(asOf) } } : {}) },
-      select: { itemType: true, itemId: true, itemNumber: true, dueDate: true, entryDate: true, debit: true, credit: true, storeId: true },
+      select: OPEN_ITEM_LINE,
       orderBy: [{ entryDate: 'asc' }, { id: 'asc' }],
     });
+    const links = await tx.settlement.findMany({ where: { partyType, partyId, undone: false, ...(asOf ? { settledOn: { lte: fromIso(asOf) } } : {}) } });
+    return this.openItemsOf(partyType, lines, links);
+  }
+
+  /**
+   * Audit 8: every party's open items in two queries (reports and dashboards asked once per customer
+   * and supplier). The key is "customer|<id>" or "supplier|<id>".
+   */
+  async openItemsByParty(tx: Db, partyType?: 'customer' | 'supplier', asOf?: string): Promise<Map<string, OpenItemRow[]>> {
+    const lines = await tx.ledgerLine.findMany({
+      where: { partyId: { not: null }, itemId: { not: null }, ...(partyType ? { partyType } : {}), ...(asOf ? { entryDate: { lte: fromIso(asOf) } } : {}) },
+      select: { ...OPEN_ITEM_LINE, partyType: true, partyId: true },
+      orderBy: [{ entryDate: 'asc' }, { id: 'asc' }],
+    });
+    const links = await tx.settlement.findMany({ where: { undone: false, ...(partyType ? { partyType } : {}), ...(asOf ? { settledOn: { lte: fromIso(asOf) } } : {}) } });
+    const group = <T extends { partyType: string | null; partyId: string | null }>(rows: T[]) => {
+      const by = new Map<string, T[]>();
+      for (const r of rows) {
+        const k = `${r.partyType}|${r.partyId}`;
+        const list = by.get(k);
+        if (list) list.push(r);
+        else by.set(k, [r]);
+      }
+      return by;
+    };
+    const linksBy = group(links);
+    const out = new Map<string, OpenItemRow[]>();
+    for (const [k, partyLines] of group(lines)) out.set(k, this.openItemsOf(k.split('|')[0] as 'customer' | 'supplier', partyLines, linksBy.get(k) ?? []));
+    return out;
+  }
+
+  /** One party's open items from its ledger lines (oldest first) and its live settlement links. */
+  private openItemsOf(
+    partyType: 'customer' | 'supplier',
+    lines: { itemType: string | null; itemId: string | null; itemNumber: string | null; dueDate: Date | null; entryDate: Date; debit: Prisma.Decimal; credit: Prisma.Decimal; storeId: string | null }[],
+    links: { billType: string; billId: string; byType: string; byId: string; amount: Prisma.Decimal }[],
+  ): OpenItemRow[] {
     const items = new Map<string, OpenItemRow>();
     for (const l of lines) {
       const k = `${l.itemType}|${l.itemId}`;
@@ -350,7 +387,6 @@ export class LedgerService {
       if (it) it.amount = it.amount.add(signed);
       else items.set(k, { itemType: l.itemType!, itemId: l.itemId!, number: l.itemNumber, date: iso(l.entryDate), dueDate: l.dueDate ? iso(l.dueDate) : null, storeId: l.storeId, amount: signed, settled: ZERO, owed: ZERO });
     }
-    const links = await tx.settlement.findMany({ where: { partyType, partyId, undone: false, ...(asOf ? { settledOn: { lte: fromIso(asOf) } } : {}) } });
     for (const s of links) {
       for (const k of [`${s.billType}|${s.billId}`, `${s.byType}|${s.byId}`]) {
         const it = items.get(k);
@@ -477,3 +513,6 @@ export class LedgerService {
     this.log.warn(message);
   }
 }
+
+/** The ledger line fields an open item is made from. */
+const OPEN_ITEM_LINE = { itemType: true, itemId: true, itemNumber: true, dueDate: true, entryDate: true, debit: true, credit: true, storeId: true } as const;

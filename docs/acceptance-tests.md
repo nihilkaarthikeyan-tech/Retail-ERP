@@ -974,3 +974,18 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### A7.3 The database backs up the rules
 - **Then** deleting a finalised document, changing a gift card entry, a negative gift card balance or a GST rate over 100% are refused by the database itself.
+
+## Audit 8: Speed and growth (30 October 2026; automated in `module19-audit8.e2e-spec.ts`, 14.9, and the speed kit in `apps/api/perf`)
+
+### A8.1 Each shop its own modules
+- **Then** a module switched off in one shop stays on in another, at once.
+
+### A8.2 Stock movement from today's stock
+- **Then** opening, in, out and closing are right for a period before, during and after the movements.
+
+### A8.3 E-mail allowance
+- **Then** after the day's allowance for other e-mails is used, a password e-mail still goes out.
+
+### A8.4 Two years of a busy shop
+- **Given** 504,719 bills over two years and 53,200 items
+- **Then** daily screens, reports for a day or a month and the till are under 2 seconds; no report takes the server down.

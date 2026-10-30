@@ -30,11 +30,16 @@ export class CatchUpService implements OnApplicationBootstrap {
     });
   }
 
+  /** Movements whose value is not yet in the ledger (a partial index keeps this quick). */
+  private unposted() {
+    return this.prisma.$queryRaw<{ id: bigint; documentType: string; documentId: string }[]>`SELECT id, "documentType", "documentId" FROM "StockLedgerEntry" WHERE "ledgerHeld" = false AND "valueChange" <> "postedValue"`;
+  }
+
   /** Returns how many documents were posted. */
   async run(): Promise<number> {
     let count = 0;
-    const pending = await this.prisma.stockLedgerEntry.findMany({ where: { ledgerHeld: false }, select: { id: true, documentType: true, documentId: true, valueChange: true, postedValue: true } });
-    const unposted = pending.filter((e) => !e.valueChange.equals(e.postedValue));
+    // Audit 8: only the movements still to post (it read every movement ever made, at every start).
+    const unposted = await this.unposted();
 
     // Goods receipts (not returns) post their own split entry; cancelled ones net to zero.
     const receiptIds: string[] = [];
@@ -72,7 +77,9 @@ export class CatchUpService implements OnApplicationBootstrap {
         });
       }
     }
-    const shifts = await this.prisma.shift.findMany({ where: { status: 'closed', ledgerEntryId: null }, select: { id: true, closedAt: true } });
+    // Audit 8: only shifts with something to post. An empty shift posts nothing and keeps no entry, so it
+    // was tried again at every start (thousands of them after a year or two).
+    const shifts = await this.prisma.shift.findMany({ where: { status: 'closed', ledgerEntryId: null, OR: [{ bills: { some: {} } }, { cashMovements: { some: {} } }] }, select: { id: true, closedAt: true } });
     for (const s of shifts) {
       const posted = await this.prisma.$transaction(
         async (tx) => {
@@ -90,8 +97,8 @@ export class CatchUpService implements OnApplicationBootstrap {
     }
 
     // Every other stock movement posts against its own account role.
-    const rest = (await this.prisma.stockLedgerEntry.findMany({ where: { ledgerHeld: false, documentType: { notIn: ['pos_bill'] } }, select: { id: true, documentType: true, documentId: true, valueChange: true, postedValue: true } }))
-      .filter((e) => !e.valueChange.equals(e.postedValue))
+    const rest = (await this.unposted())
+      .filter((e) => e.documentType !== 'pos_bill')
       .filter((e) => e.documentType !== 'goods_receipt' || !receiptIds.includes(e.documentId));
     if (rest.length) {
       const ids = rest.map((e) => e.id);
@@ -108,8 +115,9 @@ export class CatchUpService implements OnApplicationBootstrap {
 
     // Supplier bills and debit notes that were posted in purchasing.
     const bills = await this.prisma.supplierBill.findMany({ where: { status: 'unpaid' }, select: { id: true }, orderBy: { postingDate: 'asc' } });
+    const postedBills = new Set((await this.prisma.ledgerEntry.findMany({ where: { documentType: 'supplier_bill', documentId: { in: bills.map((b) => b.id) } }, select: { documentId: true } })).map((e) => e.documentId));
     for (const b of bills) {
-      if (await this.prisma.ledgerEntry.count({ where: { documentType: 'supplier_bill', documentId: b.id } })) continue;
+      if (postedBills.has(b.id)) continue;
       await this.prisma.$transaction((tx) => this.purchase.supplierBill(tx, b.id, null), { timeout: 60_000 });
       count++;
     }

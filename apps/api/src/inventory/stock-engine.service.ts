@@ -53,6 +53,9 @@ const D = (v: DbDecimal | Decimal | string | number) => new Decimal(v.toString()
 
 const ORDER = [{ postingAt: 'asc' as const }, { id: 'asc' as const }];
 
+/** Audit 8: re-costed stock movements written per statement. */
+const UPDATE_BATCH = 2000;
+
 @Injectable()
 export class StockEngine {
   constructor(private readonly ledger: LedgerService) {}
@@ -358,6 +361,9 @@ export class StockEngine {
     // check: an entry and its reversal are left out of the running minimum.
     const reversedLater = new Set(entries.filter((e) => e.kind === 'reverse' && e.reversesId !== null).map((e) => e.reversesId!));
     let pending = new Decimal(0);
+    // Audit 8: the changed rows are written together after the walk (one UPDATE each made a year of a
+    // busy item thousands of round trips while the tills selling it waited).
+    const updates: { id: bigint; quantityChange: string; valueChange: string; unitCost: string; quantityAfter: string; unitCostAfter: string; valueAfter: string; wentNegative: boolean }[] = [];
 
     for (const e of entries) {
       const intent = await this.intentOf(tx, e, recomputed);
@@ -388,20 +394,27 @@ export class StockEngine {
       if (changed) {
         if (!D(e.unitCost).eq(applied.unitCost) || !D(e.valueChange).eq(applied.valueChange)) changedCostIds.push(e.id);
         if (!D(e.valueChange).eq(applied.valueChange)) touched.add(e.id);
-        await tx.stockLedgerEntry.update({
-          where: { id: e.id },
-          data: {
-            quantityChange: applied.quantityChange.toString(),
-            valueChange: applied.valueChange.toFixed(2),
-            unitCost: applied.unitCost.toFixed(4),
-            quantityAfter: applied.after.quantity.toString(),
-            unitCostAfter: applied.after.unitCost.toFixed(4),
-            valueAfter: applied.after.value.toFixed(2),
-            wentNegative: applied.after.quantity.lt(QUANTITY_TOLERANCE.neg()),
-          },
+        updates.push({
+          id: e.id,
+          quantityChange: applied.quantityChange.toString(),
+          valueChange: applied.valueChange.toFixed(2),
+          unitCost: applied.unitCost.toFixed(4),
+          quantityAfter: applied.after.quantity.toString(),
+          unitCostAfter: applied.after.unitCost.toFixed(4),
+          valueAfter: applied.after.value.toFixed(2),
+          wentNegative: applied.after.quantity.lt(QUANTITY_TOLERANCE.neg()),
         });
       }
       state = applied.after;
+    }
+    for (let i = 0; i < updates.length; i += UPDATE_BATCH) {
+      const b = updates.slice(i, i + UPDATE_BATCH);
+      await tx.$executeRaw`
+        UPDATE "StockLedgerEntry" e SET "quantityChange" = v.qc, "valueChange" = v.vc, "unitCost" = v.uc, "quantityAfter" = v.qa, "unitCostAfter" = v.uca, "valueAfter" = v.va, "wentNegative" = v.neg
+        FROM unnest(${b.map((u) => u.id.toString())}::bigint[], ${b.map((u) => u.quantityChange)}::numeric[], ${b.map((u) => u.valueChange)}::numeric[], ${b.map((u) => u.unitCost)}::numeric[],
+                    ${b.map((u) => u.quantityAfter)}::numeric[], ${b.map((u) => u.unitCostAfter)}::numeric[], ${b.map((u) => u.valueAfter)}::numeric[], ${b.map((u) => u.wentNegative)}::boolean[])
+             AS v(id, qc, vc, uc, qa, uca, va, neg)
+        WHERE e.id = v.id`;
     }
 
     // Decision 32: in the back office a movement may not take stock below zero, now or at any later date.

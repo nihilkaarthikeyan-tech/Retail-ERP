@@ -12,7 +12,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { GstReturnsService } from './gst-returns.service.js';
 import { MoneyReportsService } from './money-reports.service.js';
 import { D, fromIso, iso, money, pctText, qty, ReportsCommon, ZERO } from './reports-common.service.js';
-import { type SaleLineRow, SalesReportsService } from './sales-reports.service.js';
+import { type SaleLineRow, SalesReportsService, type TotalsRow } from './sales-reports.service.js';
 
 const IST_OFFSET_MS = 330 * 60_000;
 
@@ -63,6 +63,12 @@ export class DashboardsService {
     return { net, cost, returns, bills: bills.size };
   }
 
+  /** The same figures as salesTotals, from the database's totals. */
+  private fromTotals(rows: TotalsRow[]) {
+    const t = rows.find((r) => r.total)?.totals;
+    return { net: t?.net ?? ZERO, cost: t?.cost ?? ZERO, returns: t?.returns ?? ZERO, bills: t?.saleBills ?? 0 };
+  }
+
   private tile(key: string, label: string, value: Decimal | number, format: string, previous?: Decimal | number | null, hint?: string): Tile {
     const v = typeof value === 'number' ? new Decimal(value) : value;
     const p = previous === undefined || previous === null ? null : typeof previous === 'number' ? new Decimal(previous) : previous;
@@ -94,14 +100,15 @@ export class DashboardsService {
     const scope = this.common.scope(user, storeId);
     const today = businessDate();
     const yesterday = addDays(today, -1);
-    const [todayLines, yLines, monthLines, weekLines] = await Promise.all([
+    // Audit 8: today's lines (for the hours) and totals from the database for the rest.
+    const [todayLines, ySums, monthSums, weekSums] = await Promise.all([
       this.sales.lines(company.id, today, today, scope),
-      this.sales.lines(company.id, yesterday, yesterday, scope),
-      this.sales.lines(company.id, addDays(today, -29), today, scope),
-      this.sales.lines(company.id, addDays(today, -6), today, scope),
+      this.sales.totalsBy(company.id, yesterday, yesterday, scope, {}, 'all'),
+      this.sales.totalsBy(company.id, addDays(today, -29), today, scope, {}, 'date'),
+      this.sales.totalsBy(company.id, addDays(today, -6), today, scope, {}, 'item'),
     ]);
     const t = this.salesTotals(todayLines);
-    const y = this.salesTotals(yLines);
+    const y = this.fromTotals(ySums);
     const avg = (s: { net: Decimal; bills: number }) => (s.bills ? s.net.div(s.bills).toDecimalPlaces(2) : ZERO);
     const cash = await this.money.cashInOpenTills(company.id, scope.ids);
     const reorder = await this.belowReorder(company.id, scope.ids);
@@ -121,7 +128,7 @@ export class DashboardsService {
     }
     const days = new Map<string, Decimal>();
     for (let i = 29; i >= 0; i--) days.set(addDays(today, -i), ZERO);
-    for (const l of monthLines) days.set(iso(l.businessDate)!, (days.get(iso(l.businessDate)!) ?? ZERO).add(D(l.taxableAmount)));
+    for (const r of monthSums) if (!r.total) days.set(r.key, (days.get(r.key) ?? ZERO).add(r.totals.net));
     const billsToday: Prisma.PosBillWhereInput = { companyId: company.id, status: 'completed', businessDate: fromIso(today), ...(scope.ids ? { till: { storeId: { in: scope.ids } } } : {}) };
     const payments = await this.prisma.posPayment.groupBy({ by: ['paymentMethodId'], where: { bill: billsToday }, _sum: { amount: true } });
     const methodRows = await this.prisma.paymentMethod.findMany({ where: { companyId: company.id }, select: { id: true, name: true, kind: true } });
@@ -136,7 +143,7 @@ export class DashboardsService {
       if (cashId && received.has(cashId)) received.set(cashId, received.get(cashId)!.sub(D(b.changeAmount)));
     }
     const top = new Map<string, Decimal>();
-    for (const l of weekLines) top.set(l.itemId, (top.get(l.itemId) ?? ZERO).add(D(l.basicQuantity)));
+    for (const r of weekSums) if (!r.total) top.set(r.key, r.allQuantity);
     const topIds = [...top.entries()].sort((a, b) => b[1].cmp(a[1])).slice(0, 10);
     const items = await this.common.items(topIds.map(([id]) => id));
     return {
@@ -164,9 +171,10 @@ export class DashboardsService {
     const today = businessDate();
     const monthStart = `${today.slice(0, 7)}-01`;
     const prev = previousPeriod(monthStart, today);
-    const [mtd, before] = await Promise.all([this.sales.lines(company.id, monthStart, today, scope), this.sales.lines(company.id, prev.from, prev.to, scope)]);
-    const m = this.salesTotals(mtd);
-    const p = this.salesTotals(before);
+    // Audit 8: totals from the database (two months of lines were read into memory).
+    const [mtd, before] = await Promise.all([this.sales.totalsBy(company.id, monthStart, today, scope, {}, 'all'), this.sales.totalsBy(company.id, prev.from, prev.to, scope, {}, 'all')]);
+    const m = this.fromTotals(mtd);
+    const p = this.fromTotals(before);
     const tiles: Tile[] = [this.tile('sales_mtd', 'Sales this month (before GST)', m.net, 'money', p.net, `Against ${prev.from} to ${prev.to}`)];
     if (seesCost) {
       tiles.push(this.tile('margin_mtd', 'Gross margin this month', grossMarginPercent(m.net, m.cost) ?? ZERO, 'percent', grossMarginPercent(p.net, p.cost)));
@@ -185,27 +193,21 @@ export class DashboardsService {
     }
     // Sales by store per month, the last six months.
     const sixStart = `${addDays(monthStart, -150).slice(0, 7)}-01`;
-    const six = await this.sales.lines(company.id, sixStart, today, scope);
+    // Audit 8: totals from the database (it read every bill line of six months into memory).
+    const six = await this.sales.taxableByMonthAndStore(company.id, sixStart, today, scope);
     const stores = await this.common.stores(company.id);
     const byStoreMonth = new Map<string, Map<string, Decimal>>();
     for (const l of six) {
-      const mk = iso(l.businessDate)!.slice(0, 7);
-      const row = byStoreMonth.get(mk) ?? new Map<string, Decimal>();
+      const row = byStoreMonth.get(l.month) ?? new Map<string, Decimal>();
       const sc = stores.get(l.storeId)?.code ?? l.storeId;
-      row.set(sc, (row.get(sc) ?? ZERO).add(D(l.taxableAmount)));
-      byStoreMonth.set(mk, row);
+      row.set(sc, (row.get(sc) ?? ZERO).add(D(l.taxable)));
+      byStoreMonth.set(l.month, row);
     }
     const charts: Record<string, unknown> = {
       salesByStoreByMonth: [...byStoreMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, row]) => ({ label: month, values: Object.fromEntries([...row.entries()].map(([k, v]) => [k, money(v)])) })),
     };
     if (seesCost) {
-      const groups = new Map<string, { net: Decimal; cost: Decimal }>();
-      for (const l of mtd) {
-        const g = groups.get(l.itemGroupId) ?? { net: ZERO, cost: ZERO };
-        g.net = g.net.add(D(l.taxableAmount));
-        g.cost = g.cost.add(D(l.cost));
-        groups.set(l.itemGroupId, g);
-      }
+      const groups = new Map((await this.sales.totalsBy(company.id, monthStart, today, scope, {}, 'group')).filter((r) => !r.total).map((r) => [r.key, { net: r.totals.net, cost: r.totals.cost }]));
       const names = await this.common.groups([...groups.keys()]);
       charts.marginByGroup = [...groups.entries()].map(([id, g]) => ({ label: names.get(id)?.name ?? id, value: pctText(grossMarginPercent(g.net, g.cost)) ?? '0.00', sales: money(g.net) })).sort((a, b) => D(b.sales).cmp(D(a.sales)));
     }
@@ -312,10 +314,9 @@ export class DashboardsService {
   async dues(companyId: string) {
     const today = businessDate();
     const out = { customers: ZERO, customersOverdue: ZERO, suppliers: ZERO, suppliersOverdue: ZERO };
-    const parties = await this.prisma.ledgerLine.groupBy({ by: ['partyType', 'partyId'], where: { companyId, partyId: { not: null } } });
-    for (const p of parties) {
-      const type = p.partyType as 'customer' | 'supplier';
-      const items = await this.ledger.openItems(this.prisma, type, p.partyId!);
+    // Audit 8: all parties at once (it asked once per customer and supplier).
+    for (const [key, items] of await this.ledger.openItemsByParty(this.prisma)) {
+      const type = key.split('|')[0] as 'customer' | 'supplier';
       for (const i of items) {
         if (i.owed.lte(0)) {
           if (type === 'customer') out.customers = out.customers.add(i.owed);

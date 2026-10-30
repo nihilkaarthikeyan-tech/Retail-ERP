@@ -63,7 +63,8 @@ export class ReportsCommon {
   }
 
   async items(ids: string[]) {
-    const rows = await this.prisma.item.findMany({ where: { id: { in: ids } }, select: { id: true, code: true, name: true, itemGroupId: true, brandId: true, baseUnit: { select: { code: true } } } });
+    // Audit 8: for thousands of items, the shop's whole list in one read is quicker than a list of 50,000 ids.
+    const rows = await this.prisma.item.findMany({ where: ids.length > 2000 ? {} : { id: { in: ids } }, select: { id: true, code: true, name: true, itemGroupId: true, brandId: true, baseUnit: { select: { code: true } } } });
     return new Map(rows.map((r) => [r.id, { id: r.id, code: r.code, name: r.name, itemGroupId: r.itemGroupId, brandId: r.brandId, unit: r.baseUnit.code }]));
   }
 

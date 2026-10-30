@@ -9,6 +9,11 @@ DIR=/var/backups/retail-erp
 mkdir -p "$DIR"
 chmod 700 "$DIR"
 STAMP=$(date +%Y%m%d-%H%M)
+# Audit 8: stop before the disk fills (a backup needs room for one more copy of the last one).
+LAST=$(ls -t "$DIR"/retail-erp-*.dump 2>/dev/null | head -1)
+NEED=$(( $( [ -n "$LAST" ] && wc -c < "$LAST" || echo 0) / 1024 * 2 + 1048576 ))
+FREE=$(df -Pk "$DIR" | awk 'NR==2 {print $4}')
+if [ "$FREE" -lt "$NEED" ]; then echo "$(date -u +%FT%TZ) backup NOT made: only $FREE KB free on the disk, $NEED KB needed"; exit 1; fi
 OUT="$DIR/retail-erp-$STAMP.dump"
 trap 'rm -f "$OUT.part"' EXIT
 docker exec retail-erp-prod-postgres-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' > "$OUT.part"

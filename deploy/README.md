@@ -55,6 +55,16 @@ cd deploy && docker compose -f docker-compose.prod.yml --env-file .env up -d --b
 
 The API applies new database migrations by itself when it starts. Take a backup first (`deploy/backup.sh`).
 
+Audit 8: the "contains" search needs the `pg_trgm` extension, which only the database superuser may switch on
+(the API's own login may not). Once per server, before the first update that needs it:
+
+```sh
+cd /opt/retail-erp/app/deploy && docker compose -f docker-compose.prod.yml --env-file .env exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm"'
+```
+
+Run one copy of the API only. Two copies would each run the nightly jobs and keep their own flood limits; see
+`docs/audit/08-speed-growth.md` before adding a second one.
+
 ## Checks after every deploy
 
 - `https://retailerp.52digit.com` opens; logging in works.

@@ -186,18 +186,30 @@ export class ImportKindsService {
         const settings = await this.prisma.catalogueSettings.findFirst();
         const seasons = new Map((await this.prisma.season.findMany({ where: { companyId }, select: { id: true, code: true } })).map((s) => [s.id, s.code]));
         const today = businessDate();
-        const rows = await this.prisma.item.findMany({
-          where: { isParentStyle: false },
-          include: { itemGroup: true, brand: true, baseUnit: true, units: { include: { unit: true } }, barcodes: { where: { active: true }, orderBy: { createdAt: 'asc' } } },
-          orderBy: { code: 'asc' },
-        });
+        // Audit 8: 5,000 items at a time (one read of 50,000 items with their units and barcodes passed more
+        // values than the database takes in one query, and the export failed).
+        const rows = [];
+        for (let skip = 0; ; skip += 5000) {
+          const page = await this.prisma.item.findMany({
+            where: { isParentStyle: false },
+            include: { itemGroup: true, brand: true, baseUnit: true, units: { include: { unit: true } }, barcodes: { where: { active: true }, orderBy: { createdAt: 'asc' } } },
+            orderBy: [{ code: 'asc' }, { id: 'asc' }],
+            skip,
+            take: 5000,
+          });
+          rows.push(...page);
+          if (page.length < 5000) break;
+        }
         const prices = settings?.defaultSellingPriceListId
           ? await this.prisma.price.findMany({ where: { priceListId: settings.defaultSellingPriceListId, customerId: null, supplierId: null, batchId: null, startDate: { lte: new Date(`${today}T00:00:00Z`) }, OR: [{ endDate: null }, { endDate: { gte: new Date(`${today}T00:00:00Z`) } }] }, orderBy: { startDate: 'desc' } })
           : [];
+        // The latest price per item and unit (the list is newest first), looked up instead of searched for each item.
+        const priceOf = new Map<string, (typeof prices)[number]>();
+        for (const p of prices) if (!priceOf.has(`${p.itemId}|${p.unitId}`)) priceOf.set(`${p.itemId}|${p.unitId}`, p);
         return rows.map((i) => {
           const pack = i.units.find((u) => u.unitId !== i.baseUnitId);
           const basicBarcodes = i.barcodes.filter((b) => !b.unitId || b.unitId === i.baseUnitId);
-          const price = prices.find((p) => p.itemId === i.id && p.unitId === i.baseUnitId);
+          const price = priceOf.get(`${i.id}|${i.baseUnitId}`);
           return [
             i.code,
             i.name,
@@ -527,11 +539,14 @@ export class ImportKindsService {
         const rows = await this.prisma.price.findMany({
           // Audit 1 (28 October 2026): buying lists only for people who may see buying prices (as on the Prices screen).
           where: { priceList: { companyId, ...(hasPermission(user, 'buying_prices.view') ? {} : { forBuying: false }) }, supplierId: null, batchId: null },
-          include: { priceList: true, item: true, unit: true },
+          include: { priceList: true, unit: true },
           orderBy: [{ priceList: { code: 'asc' } }, { item: { code: 'asc' } }, { startDate: 'asc' }],
         });
-        const customers = new Map((await this.prisma.customer.findMany({ where: { id: { in: rows.map((r) => r.customerId).filter((x): x is string => !!x) } }, select: { id: true, code: true } })).map((c) => [c.id, c.code]));
-        return rows.map((p) => [p.priceList.code, p.item.code, p.unit.code, Number(p.price.toString()), iso(p.startDate), iso(p.endDate), p.customerId ? (customers.get(p.customerId) ?? null) : null]);
+        // Audit 8: codes from the shop's lists (a list of 50,000 item ids is more than the database takes at once).
+        const items = new Map((await this.prisma.item.findMany({ select: { id: true, code: true } })).map((i) => [i.id, i.code]));
+        const customerIds = [...new Set(rows.map((r) => r.customerId).filter((x): x is string => !!x))];
+        const customers = new Map((await this.prisma.customer.findMany({ where: customerIds.length > 2000 ? {} : { id: { in: customerIds } }, select: { id: true, code: true } })).map((c) => [c.id, c.code]));
+        return rows.map((p) => [p.priceList.code, items.get(p.itemId) ?? p.itemId, p.unit.code, Number(p.price.toString()), iso(p.startDate), iso(p.endDate), p.customerId ? (customers.get(p.customerId) ?? null) : null]);
       },
     };
   }
@@ -629,7 +644,8 @@ export class ImportKindsService {
       },
       exportRows: async ({ companyId }) => {
         const rows = await this.prisma.customer.findMany({ where: { companyId, isWalkIn: false }, include: { customerGroup: true, paymentTerms: true }, orderBy: { code: 'asc' } });
-        const addresses = await this.prisma.address.findMany({ where: { partyType: 'customer', partyId: { in: rows.map((r) => r.id) }, isMain: true } });
+        // Audit 8: every main address of the shop (a list of all customer ids is too long past ~30,000).
+        const addresses = await this.prisma.address.findMany({ where: { partyType: 'customer', isMain: true } });
         return rows.map((c) => {
           const a = addresses.find((x) => x.partyId === c.id);
           return [
@@ -690,7 +706,7 @@ export class ImportKindsService {
       },
       exportRows: async ({ companyId }) => {
         const rows = await this.prisma.supplier.findMany({ where: { companyId }, include: { supplierGroup: true, paymentTerms: true }, orderBy: { code: 'asc' } });
-        const addresses = await this.prisma.address.findMany({ where: { partyType: 'supplier', partyId: { in: rows.map((r) => r.id) }, isMain: true } });
+        const addresses = await this.prisma.address.findMany({ where: { partyType: 'supplier', isMain: true } });
         return rows.map((s) => {
           const a = addresses.find((x) => x.partyId === s.id);
           return [s.code, s.name, s.mobile, s.email, s.supplierGroup.code, s.gstin, s.pan, s.stateCode, s.paymentTerms?.code ?? null, a?.addressLine1 ?? null, a?.addressLine2 ?? null, a?.city ?? null, a?.pincode ?? null];
@@ -728,7 +744,7 @@ export class ImportKindsService {
       exportRows: async ({ companyId }) => {
         const stores = await this.prisma.store.findMany({ where: { companyId }, select: { id: true, code: true } });
         const rows = await this.prisma.reorderLevel.findMany({ where: { storeId: { in: stores.map((s) => s.id) } } });
-        const items = new Map((await this.prisma.item.findMany({ where: { id: { in: rows.map((r) => r.itemId) } }, select: { id: true, code: true } })).map((i) => [i.id, i.code]));
+        const items = new Map((await this.prisma.item.findMany({ select: { id: true, code: true } })).map((i) => [i.id, i.code]));
         return rows.map((r) => [items.get(r.itemId) ?? null, stores.find((s) => s.id === r.storeId)?.code ?? null, Number(r.level.toString()), Number(r.quantity.toString())]);
       },
     };

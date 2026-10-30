@@ -385,6 +385,8 @@ model AuditLog {
   @@index([userId, at])
   @@index([at])
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([companyId, at])
 }
 
 // ---------------------------------------------------------------------------
@@ -643,6 +645,9 @@ model Item {
   @@index([seasonId])
   @@index([itemGroupId])
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_name_trgm_idx")
+  @@index([code(ops: raw("gin_trgm_ops"))], type: Gin, map: "Item_code_trgm_idx")
 }
 
 /// Units an item is bought or sold in. The basic unit row always has factor 1.
@@ -683,6 +688,8 @@ model Barcode {
 
   @@unique([companyId, code])
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([itemId])
 }
 
 /// Which attributes a style varies by.
@@ -1009,6 +1016,9 @@ model Customer {
   @@unique([companyId, code])
   @@index([mobile])
   @@index([name])
+  /// Audit 8 (speed).
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_name_trgm_idx")
+  @@index([mobile(ops: raw("gin_trgm_ops"))], type: Gin, map: "Customer_mobile_trgm_idx")
 }
 
 model SupplierGroup {
@@ -1253,6 +1263,8 @@ model StockDocumentLine {
 
   @@index([documentId])
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([itemId])
 }
 
 /// Stock history: one line per item, location and movement. Append-only
@@ -1301,10 +1313,15 @@ model StockLedgerEntry {
   location StockLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([itemId, locationId, postingAt, id])
+  /// Audit 8: the start-up catch-up looks only for movements not yet in the ledger.
+  @@index([companyId], map: "StockLedgerEntry_unposted_idx", where: raw("\"ledgerHeld\" = false AND \"valueChange\" <> \"postedValue\""))
   @@index([documentId])
   @@index([costSourceId])
   @@index([postingDate])
   @@index([documentLineId])
+  /// Audit 8 (speed).
+  @@index([locationId, postingAt(sort: Desc), id(sort: Desc)])
+  @@index([locationId, postingDate])
 }
 
 /// Current stock per item × location. Always equals the sum of the ledger.
@@ -1665,6 +1682,8 @@ model GoodsReceiptLine {
   @@index([receiptId])
   @@index([orderLineId])
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([itemId])
 }
 
 model SupplierBill {
@@ -2233,6 +2252,13 @@ model PosBill {
   @@unique([companyId, number])
   @@index([shiftId])
   @@index([companyId, businessDate])
+  /// Audit 8 (speed).
+  @@index([companyId, soldAt(sort: Desc)])
+  @@index([returnOfId])
+  @@index([customerId, businessDate])
+  @@index([companyId, gstPeriod])
+  @@index([tillId, number])
+  @@index([number(ops: raw("gin_trgm_ops"))], type: Gin, map: "PosBill_number_trgm_idx")
 }
 
 model PosBillLine {
@@ -2300,6 +2326,9 @@ model PosPayment {
   paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id])
 
   @@index([companyId])
+  /// Audit 8 (speed).
+  @@index([billId])
+  @@index([paymentMethodId])
 }
 
 model Offer {
@@ -2607,6 +2636,8 @@ model LedgerLine {
   @@index([companyId, entryDate])
   @@index([partyType, partyId, entryDate])
   @@index([itemType, itemId])
+  /// Audit 8 (speed).
+  @@index([entryId])
 }
 
 /// A link: how much of one open item (e.g. a payment) settles another (e.g. a bill). Undone links stay.
@@ -3637,4 +3668,11 @@ model GstFiledPeriod {
 
   @@unique([gstRegistrationId, period, returnType])
   @@index([companyId])
+}
+
+/// Audit 8: emails sent per day (Indian date), counted per recipient, against the mailbox's daily
+/// allowance. For the whole system, not one shop.
+model MailDay {
+  day  DateTime @id @db.Date
+  sent Int      @default(0)
 }

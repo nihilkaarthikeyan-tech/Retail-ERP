@@ -196,6 +196,13 @@ export const itemQuerySchema = z.object({
   seasonId: z.string().uuid().optional(),
   kind: z.enum(['stock', 'service', 'style']).optional(),
   active: z.enum(['true', 'false']).optional(),
+  /** Audit 8: these items only (comma-separated ids, at most 200), for screens that hold item ids. */
+  ids: z
+    .string()
+    .trim()
+    .transform((v) => v.split(',').filter(Boolean))
+    .pipe(z.array(z.string().uuid()).max(200))
+    .optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
 });
