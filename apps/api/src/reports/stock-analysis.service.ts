@@ -167,7 +167,6 @@ export class StockAnalysisService {
     const from = addDays(to, -(days - 1));
     const scope = this.common.scope(user, q.storeId);
     const locs = (await this.locations(company.id, scope, q.locationId)).filter((l) => l.kind !== 'transit').map((l) => l.id);
-    const itemWhere = { ...(q.itemId ? { itemId: q.itemId } : {}), ...(q.itemGroupId ? { item: { itemGroupId: q.itemGroupId } } : {}) };
     const [stockAt, inflows, lines] = await Promise.all([
       // Audit 8: from today's stock less later movements (it added up every movement ever made).
       this.stockAt(locs, [to, addDays(from, -1)], q),

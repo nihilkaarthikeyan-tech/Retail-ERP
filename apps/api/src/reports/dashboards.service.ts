@@ -182,7 +182,7 @@ export class DashboardsService {
       tiles.push(this.tile('stock_value', 'Stock value', D(stock._sum.value), 'money'));
     }
     if (hasPermission(user, 'accounts.view')) {
-      const dues = await this.dues(company.id);
+      const dues = await this.dues();
       tiles.push(this.tile('customer_dues', 'Customers owe', dues.customers, 'money', null, `₹${money(dues.customersOverdue)} overdue`));
       tiles.push(this.tile('supplier_dues', 'The shop owes suppliers', dues.suppliers, 'money', null, `₹${money(dues.suppliersOverdue)} overdue`));
     }
@@ -288,7 +288,7 @@ export class DashboardsService {
       this.tile('cash_in_tills', 'Cash in open tills now', await this.money.cashInOpenTills(company.id, scope.ids), 'money'),
     ];
     if (!scope.ids) {
-      const dues = await this.dues(company.id);
+      const dues = await this.dues();
       tiles.push(this.tile('customers_overdue', 'Customer dues overdue', dues.customersOverdue, 'money', null, `of ₹${money(dues.customers)} owed`));
     }
     const monthStart = `${today.slice(0, 7)}-01`;
@@ -310,8 +310,8 @@ export class DashboardsService {
     };
   }
 
-  /** What customers owe and what the shop owes suppliers, with the overdue parts (from the ledger). */
-  async dues(companyId: string) {
+  /** What customers owe and what the shop owes suppliers, with the overdue parts (from the ledger; the shop is the current one). */
+  async dues() {
     const today = businessDate();
     const out = { customers: ZERO, customersOverdue: ZERO, suppliers: ZERO, suppliersOverdue: ZERO };
     // Audit 8: all parties at once (it asked once per customer and supplier).

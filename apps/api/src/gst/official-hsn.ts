@@ -17,7 +17,7 @@ export interface OfficialHsnRow {
  * 030559) and two have a space inside ("2307 00"); valid codes have 2, 4, 6 or 8 digits.
  */
 export function cleanHsnCode(raw: unknown): string | null {
-  const digits = String(raw ?? '').replace(/\s+/g, '');
+  const digits = (typeof raw === 'string' || typeof raw === 'number' ? String(raw) : '').replace(/\s+/g, '');
   if (!/^\d+$/.test(digits)) return null;
   const code = digits.length % 2 === 1 ? `0${digits}` : digits;
   return [2, 4, 6, 8].includes(code.length) ? code : null;
@@ -25,7 +25,8 @@ export function cleanHsnCode(raw: unknown): string | null {
 
 /** The description without Excel's leftover line-break marks; "~" (heading~detail) shown as " — ". */
 export function cleanHsnDescription(raw: unknown): string {
-  return String(raw ?? '')
+  // Only text or a number is read; anything else (an empty or odd cell) counts as no description.
+  return (typeof raw === 'string' || typeof raw === 'number' ? String(raw) : '')
     .replace(/_x000D_/g, ' ')
     .replace(/\s*~\s*/g, ' — ')
     .replace(/\s+/g, ' ')

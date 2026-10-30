@@ -181,7 +181,7 @@ export class SummaryEmailService {
       sections.push({ title: 'Cash and bank', rows: [['Bank', rupees(sum('Bank'))], ['Cash in hand', rupees(sum('Cash'))], ['Cash in open tills now', rupees(await this.money.cashInOpenTills(companyId, null))]] });
     }
     if (figures.includes('dues')) {
-      const d = await this.dashboards.dues(companyId);
+      const d = await this.dashboards.dues();
       sections.push({ title: 'Dues', rows: [['Customers owe', `${rupees(d.customers)} (${rupees(d.customersOverdue)} overdue)`], ['The shop owes suppliers', `${rupees(d.suppliers)} (${rupees(d.suppliersOverdue)} overdue)`]] });
     }
     if (figures.includes('reorder')) {

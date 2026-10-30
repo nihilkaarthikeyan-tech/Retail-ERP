@@ -48,7 +48,7 @@ const isoDay = (v: unknown): string | null => {
 };
 
 function statusOf(v: unknown): GstinNetworkStatus {
-  const s = String(v ?? '').toLowerCase();
+  const s = (typeof v === 'string' ? v : '').toLowerCase();
   if (s.includes('cancel')) return 'cancelled';
   if (s.includes('suspend')) return 'suspended';
   if (s.includes('active') && !s.includes('inactive')) return 'active';

@@ -1,0 +1,75 @@
+# Copyright (c) 2026, Rademics. All rights reserved.
+# Audit 14: every push to main and every pull request runs the type checks, lint and all tests on
+# GitHub (free for a public repository). The acceptance tests use their own throwaway PostgreSQL;
+# no secrets are needed and none are used.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, lint and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Kolkata
+      # Read by Prisma's config while it generates its code; nothing connects to it.
+      DATABASE_URL: postgresql://build:build@localhost:5432/build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter shared run build
+      - name: Type checks
+        run: |
+          for p in apps/api apps/web packages/shared apps/till-helper; do (cd $p && npx tsc --noEmit -p tsconfig.json); done
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm audit --prod
+
+  acceptance:
+    name: Acceptance tests (API and database)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TZ: Asia/Kolkata
+      TEST_DATABASE_URL: postgresql://retail_erp:ci-only-password@localhost:5432/retail_erp_test?schema=public
+      DATABASE_URL: postgresql://retail_erp:ci-only-password@localhost:5432/retail_erp_test?schema=public
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: retail_erp
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: retail_erp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U retail_erp -d retail_erp_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter shared run build
+      - run: pnpm test:e2e
