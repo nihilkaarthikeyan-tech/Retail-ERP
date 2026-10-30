@@ -7,4 +7,6 @@
     missingok
     notifempty
     create 0600 root root
+    # /var/log belongs to the syslog group on Ubuntu (as in its own rsyslog settings).
+    su root syslog
 }

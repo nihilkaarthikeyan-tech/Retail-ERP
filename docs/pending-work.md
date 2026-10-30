@@ -100,7 +100,9 @@ Full list with reasons: `docs/coverage-check.md`.
 
 ## 5. Going live
 
-- Company server set-up, backups and restore test.
+- Company server set-up and restore test: done (audit 12, 30 October 2026). Still open: **a copy of each night's backup kept off the server** (owner to choose: cloud storage such as Backblaze B2, Google Drive, or an office computer).
+- **Database changes under their own login** (audit 7, carried by audit 12): today the API's login owns the tables so it can apply database changes at start-up. Shop requests still switch to the limited role, so row-level security applies to them. Splitting it means a one-off migration container on each deploy and a runtime login that only reads and writes rows. Do it before many shops, with its own short plan, at a quiet hour.
+- **SEZ e-invoice codes** (audit 4, checked again in audit 12): the e-invoice schema still uses SEZWP / SEZWOP; a future split (SEZWPA / SEZWPNA) has no start date. Check the official schema at einvoice1.gst.gov.in when the first shop switches on e-invoicing; the portal refuses a wrong code, so it cannot be filed wrongly.
 - Loading real items, customers, suppliers and opening stock (Excel import is ready).
 - Staff training, and setting the go-live date (clears trial data).
 

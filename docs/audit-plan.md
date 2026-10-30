@@ -300,8 +300,8 @@ To add before many shops (owner to choose; each needs a short plan first):
 
 - [ ] Sessions 1 to 7 done with no Critical or High open
 - [x] The owner's decisions L1 to L12 recorded (`docs/decisions.md`, 28 October 2026)
-- [ ] Security upgrades deployed (done 27 October 2026); live server checks pass (Session 12)
-- [x] Backup restore tested (audit 7, 29 October 2026: onto a new server; repeat on the live server in Session 12)
+- [x] Security upgrades deployed (27 October 2026); live server checks pass (audit 12, 30 October 2026)
+- [x] Backup restore tested (audit 7 onto a new server; audit 12, 30 October 2026, on the live server)
 - [ ] A copy of each night's backup kept off the server (owner to decide; Session 12)
 - [ ] Terms and privacy policy published
 - [ ] Two pilot shops ran two weeks with books, stock and GST agreeing
@@ -324,8 +324,8 @@ To add before many shops (owner to choose; each needs a short plan first):
 | 9. Screens and ease of use | **Done**: 22 findings (8 High), all closed; first shop walked through and timed (8 min to the first bill); a whole sale by keyboard; two owner points | 30 Oct 2026 | `docs/audit/09-screens.md` |
 | 10. Libraries and build | **Done**: 7 findings, all closed; `pnpm audit` clean; images 2.1–2.3 GB → 0.86 and 0.40 GB, non-root; monthly routine | 30 Oct 2026 | `docs/audit/10-libraries-build.md`, `docs/library-updates.md` |
 | 11. Tests | **Done**: 18 findings (3 High), all closed; the 9 minimum scenarios checked end to end; the till priced against the server; two product fixes (box size on orders, till changes download); full suite passed three times in a row | 30 Oct 2026 | `docs/audit/11-tests.md` |
-| 12. Live server | Not started | | |
+| 12. Live server | **Done**: 8 findings (2 High), all closed; restore done on the live server; down alert, HSTS, memory limits, runbook; 20 tills timed on the server. Off-server backup copy waits on the owner | 30 Oct 2026 | `docs/audit/12-live-server.md`, `docs/runbook.md` |
 | 13. Ready for people | Not started | | |
 | 14. Code health | Not started | | |
 
-**Next step:** Session 12 (the live server, backups and running it; owner present). Owner: shop-type HSN codes and a first-time user test (09). Owner: the hands-on till checklist (05). Carried to Session 12: where the nightly backup copy goes (owner: decide later), migrations under a separate database login (07), 20 tills on the live server and container limits (08). Carried to Session 12: the Rule 138 value of delivery charges and the SEZWPA / SEZWPNA split (04, accepted items).
+**Next step:** Session 13 (ready for people: terms and privacy, help, a pilot; owner present) or Session 14 (code health). Owner: where the nightly backup copy goes (12); renew the Hostinger email plan before 3 November; shop-type HSN codes and a first-time user test (09); the hands-on till checklist (05). In `docs/pending-work.md`: database changes under their own login, SEZ e-invoice codes.
