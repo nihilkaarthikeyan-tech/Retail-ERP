@@ -103,9 +103,9 @@ describe('audit 2: money and accounts', () => {
     // An offline bill of yesterday arriving now is kept, and listed: its accounts go to today.
     const tee = await item('Offline T-shirt');
     await owner.post('/prices').send({ priceListId: sellList, itemId: tee.id, price: '300', startDate: '2026-04-01' }).expect(201);
-    const c = (await owner.post('/stock/counts').send({ countType: 'opening', storeId: MAIN, locationId: loc['MAIN-FLOOR'], postingDate: addDays(today(), -2), lines: [{ itemId: tee.id, countedQuantity: '5', unitCost: '100' }] })).body;
-    if (c.id) await owner.post(`/stock/documents/${c.id}/finalise`);
-    await owner.post('/pos/gst-rates').send({ hsnCode: '6109', rate: '5', effectiveFrom: '2026-04-01' });
+    const c = (await owner.post('/stock/counts').send({ countType: 'opening', storeId: MAIN, locationId: loc['MAIN-FLOOR'], postingDate: addDays(today(), -2), lines: [{ itemId: tee.id, countedQuantity: '5', unitCost: '100' }] }).expect(201)).body;
+    await owner.post(`/stock/documents/${c.id}/finalise`).expect(200);
+    await owner.post('/pos/gst-rates').send({ hsnCode: '6109', rate: '5', effectiveFrom: '2026-04-01' }).expect(201);
     const yesterday = new Date(Date.now() - 86_400_000).toISOString();
     const offline = await owner.post('/pos/bills').set('x-till-token', token).send({ clientId: randomUUID(), tillId: till.id, shiftClientId, offline: true, soldAt: yesterday, sale: { number: 'MAT1/2627/000001', lines: [{ lineNo: 1, itemId: tee.id, quantity: '1' }] }, payments: [{ paymentMethodId: pm.CASH, amount: '300' }] });
     expect(offline.status, JSON.stringify(offline.body)).toBe(201);
@@ -113,7 +113,7 @@ describe('audit 2: money and accounts', () => {
     await owner.patch('/accounting/lock-date').send({ lockDate: null, reason: 'Test over' }).expect(200);
 
     // A gift card sold by card at the till is in the till payments report's card total.
-    await owner.patch('/modules/gift_cards').send({ enabled: true });
+    await owner.patch('/modules/gift_cards').send({ enabled: true }).expect(200);
     await owner.post('/pos/gift-cards/sell').set('x-till-token', token).send({ clientId: randomUUID(), tillId: till.id, amount: '500', paymentMethodId: pm.CARD, reference: 'APPR-1' }).expect(201);
     const report = (await owner.get(`/pos/reports/payments?from=${today()}&to=${today()}`).expect(200)).body as { method: string; kind: string; amount: string }[];
     expect(report.find((r) => r.kind === 'card')?.amount).toBe('500.00');

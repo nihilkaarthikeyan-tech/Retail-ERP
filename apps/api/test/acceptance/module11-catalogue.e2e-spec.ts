@@ -271,9 +271,14 @@ describe('11.16 reports by style, size and colour (C3)', () => {
     const byStyle = (await owner.get(`/reports/item-sales?${q}&groupBy=style`).expect(200)).body;
     expect(byStyle.rows).toHaveLength(1);
     expect(byStyle.rows[0]).toMatchObject({ code: 'SHIRT', name: 'Oxford shirt', quantity: '5' });
-    const sizesTotal = bySize.rows.reduce((s: number, r: { netSales: string }) => s + Math.round(Number(r.netSales) * 100), 0);
-    expect(sizesTotal).toBe(Math.round(Number(byStyle.rows[0].netSales) * 100));
-    expect(bySize.totals.netSales).toBe(byStyle.totals.netSales);
+    // Net sales are before GST, worked per bill line at 5% inside the ₹799 price:
+    // 1 × 799 → CGST = SGST = 799 × 2.5 / 105 = ₹19.02, so ₹760.96;
+    // 2 × 799 = 1,598 → CGST = SGST = ₹38.05, so ₹1,521.90.
+    // S = 760.96; M = 1,521.90 (Red) + 760.96 (Blue) = 2,282.86; L = 760.96; all = 3,804.78.
+    expect([rows.S.netSales, rows.M.netSales, rows.L.netSales]).toEqual(['760.96', '2282.86', '760.96']);
+    expect(byStyle.rows[0].netSales).toBe('3804.78');
+    expect(bySize.totals.netSales).toBe('3804.78');
+    expect(byStyle.totals.netSales).toBe('3804.78');
     const byColour = (await owner.get(`/reports/item-sales?${q}&groupBy=attribute&attributeId=${colourId}`).expect(200)).body;
     expect(byColour.rows.map((r: { name: string; quantity: string }) => [r.name, r.quantity]).sort()).toEqual([
       ['Blue', '1'],

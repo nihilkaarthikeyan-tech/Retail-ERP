@@ -17,6 +17,7 @@ import { useLoad } from "@/lib/use-load";
 import { BillLineGrid } from "./bills-line-grid";
 import { type BillLineDraft, billLineProblem, billLineToInput, KIND_EXPLANATIONS, lineForItem, linesFromBill, linesFromDraftReceipt, linesFromReceipt, type NewBillKind, previewBill } from "./bills-lines";
 import { useUnsavedChanges } from "@/lib/unsaved";
+import { useInterState } from "./use-place-of-supply";
 
 interface BillEditorProps {
   kind: NewBillKind;
@@ -89,7 +90,8 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
 
   const storeId = header.storeId || (kind === "receives_goods" ? defaultStoreId(user, stores) : "");
   const shelves = storeId ? stockLocationsOf(locations.data ?? [], storeId) : [];
-  const preview = previewBill(lines, header.reverseCharge === "yes");
+  const interState = useInterState(header.supplier?.id, storeId);
+  const preview = previewBill(lines, header.reverseCharge === "yes", interState);
 
   function set<K extends keyof HeaderState>(key: K, value: HeaderState[K]) {
     setHeader((h) => ({ ...h, [key]: value }));
@@ -227,7 +229,7 @@ function EditorForm({ kind, bill, onSaved, onClose, initialLines }: BillEditorPr
           &quot;Input credit&quot; on a line when its GST cannot be claimed back; that GST is then added to the cost of the goods.
         </p>
       ) : null}
-      <BillLineGrid kind={kind} lines={lines} onChange={setLines} problems={problems} shelves={shelves} prices={rights.prices} />
+      <BillLineGrid kind={kind} lines={lines} onChange={setLines} problems={problems} shelves={shelves} prices={rights.prices} interState={interState} />
       {errors.lines ? (
         <p className="field-error" role="alert">
           {errors.lines}

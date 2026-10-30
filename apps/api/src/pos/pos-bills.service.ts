@@ -40,7 +40,8 @@ import {
   type ReceiptLoyalty,
   returnRatio,
   returnRefundSplit,
-  isCreditNoteLate,
+  returnSupplyOf,
+  TILL_NUMBER_DIGITS,
   isExpiredOn,
   planOffers,
   type PosBillQuery,
@@ -966,7 +967,8 @@ export class PosBillsService {
    */
   private async checkNumber(number: string, till: TillWithRefs, fyName: string, offline: boolean, flags: Set<string>) {
     const prefix = tillNumberSeries(till.seriesKind, fyName);
-    const inSeries = (p: string) => number.startsWith(p) && /^\d{6}$/.test(number.slice(p.length));
+    const digits = new RegExp(`^\\d{${TILL_NUMBER_DIGITS}}$`);
+    const inSeries = (p: string) => number.startsWith(p) && digits.test(number.slice(p.length));
     if (inSeries(prefix)) return;
     if (offline && inSeries(tillNumberSeries(`${till.store.code}-${till.code}`, fyName))) return;
     // Audit 5: the office changed the till's invoice prefix while it was offline; its bills numbered with
@@ -1790,7 +1792,9 @@ export class PosBillsService {
       if (orig.status !== 'completed') throw new BadRequestException(`Bill ${orig.number} is cancelled`);
       if (orig.customerId !== ctx.customer.id) throw new BadRequestException('A return must be for the same customer as the original bill');
       const origDate = iso(orig.businessDate)!;
-      original = { number: orig.number, date: origDate, late: isCreditNoteLate(origDate, date) };
+      // Audit 14: the same rule the till uses (returnSupplyOf in shared).
+      const kept = returnSupplyOf({ invoiceKind: orig.invoiceKind, cgst: orig.cgst.toString(), sgst: orig.sgst.toString(), igst: orig.igst.toString(), placeOfSupply: orig.placeOfSupply, buyerSituation: orig.buyerSituation, businessDate: origDate }, ctx.seller.stateCode, date);
+      original = { number: orig.number, date: origDate, late: kept.late };
       // Audit 4: the credit note belongs to the GSTIN that sold the goods (its GSTR-1 and its tax account);
       // a store under another GSTIN of the company cannot take it back on its own till.
       if (orig.gstRegistrationId && ctx.seller.registrationId && orig.gstRegistrationId !== ctx.seller.registrationId) {
@@ -1799,15 +1803,12 @@ export class PosBillsService {
       }
       registrationId = orig.gstRegistrationId ?? registrationId;
       buyer = { gstin: orig.buyerGstin, name: orig.buyerName, address: orig.buyerAddress, stateCode: orig.buyerStateCode, taxSituation: null };
-      const place = orig.placeOfSupply ?? ctx.seller.stateCode;
       supply = {
         invoiceKind: orig.invoiceKind as Supply['invoiceKind'],
         situation: taxSituationOf(orig.buyerGstin, orig.buyerSituation),
-        placeOfSupply: place,
-        // A supply to an SEZ is inter-state even in the seller's own state (IGST Act s.7(5)(b)).
-        interState: !D(orig.igst).isZero() || place !== ctx.seller.stateCode || orig.buyerSituation === 'sez',
-        // Audit 4 T7 (CGST Act s.34(2)): after the time limit the customer is refunded but the GST is not reduced.
-        noTax: orig.invoiceKind === 'bill_of_supply' || original.late || D(orig.cgst).add(D(orig.sgst)).add(D(orig.igst)).isZero(),
+        placeOfSupply: orig.placeOfSupply ?? ctx.seller.stateCode,
+        interState: kept.interState,
+        noTax: kept.noTax,
         problem: null,
       };
       for (const l of part.lines) {

@@ -8,10 +8,10 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { addDays, businessDate, Decimal, gstinCheckCharacter } from 'shared';
+import { addDays, businessDate, Decimal, gstinCheckCharacter, suggestGst } from 'shared';
 import { invalidateModuleCache } from '../../src/modules/module-map.js';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
-import { type Agent, createTestApp, setUpCompany, storeId } from '../helpers.js';
+import { type Agent, createTestApp, OWNER, setUpCompany, storeId } from '../helpers.js';
 
 // The till works out every bill itself (apps/web/src/lib/till/pricing.ts); the same code is used
 // here, fed with the till's own snapshot from the server, so a difference shows up as a failure.
@@ -342,6 +342,110 @@ describe('audit 11b (1): the till prices a bill exactly as the server does', () 
     const res = await T(owner.post('/pos/bills')).send(sale([{ itemId: rice.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '105' }], { expectedTotal: '1.00' })).expect(409);
     expect(res.body.message).toMatch(/^PRICE_CHANGED: the server total is ₹105\.00, the till showed ₹1\.00/);
     expect(await prisma.posBill.count()).toBe(0);
+  });
+
+  // ---- Audit 14: the cases where the till and the server used to disagree ----
+
+  it('audit 14 (D2): a return without the bill reduces no GST on the till either: −₹105.00 taxable, no tax', async () => {
+    const ownerId = (await prisma.user.findUniqueOrThrow({ where: { email: OWNER.email } })).id;
+    await owner.post('/pos/pin').send({ pin: '7391', currentPassword: OWNER.password }).expect(200);
+    await openShift();
+    await snapshot();
+    const approvalToken = (await owner.post('/pos/approvals').send({ tillId, managerId: ownerId, pin: '7391', action: 'return_without_bill' }).expect(200)).body.token as string;
+    const draft: DraftBill = {
+      ...till.emptyDraft(randomUUID()),
+      ret: { originalBillId: null, originalNumber: null, customerId: null, reason: 'No bill', paidOnAccount: false, approvalToken, lines: [{ key: 'n1', originalLineId: null, itemId: rice.id, unitId: pcs, code: rice.code, name: 'Ponni Rice 1 kg', quantity: '1', priceOverride: null }] },
+    };
+    const { return: back } = await viaTill(draft, { ret: num() });
+    expect(savedLines(back!)).toEqual([['-105.00', '0.00', '0', '-105.00', '0.00', '0.00', '0.00']]);
+  });
+
+  it('audit 14 (D3, D4): a phone sold by the box of 2 needs 2 serials on the till too, and comes back with the serials ticked', async () => {
+    const box = (await prisma.unit.findFirstOrThrow({ where: { code: 'BOX' } })).id;
+    await owner.post('/pos/gst-rates').send({ hsnCode: '8517', rate: '18', effectiveFrom: '2026-04-01' }).expect(201);
+    const phone = await item('Phone twin pack', '8517', '11800', { trackSerials: true, units: [{ unitId: box, factor: '2' }] });
+    const doc = (await owner.post('/stock/documents').send({ storeId: MAIN, kind: 'stock_in', reason: 'found', toLocationId: floor, lines: [{ itemId: phone.id, quantity: '4', unitCost: '9000', serialNumbers: ['P1', 'P2', 'P3', 'P4'] }] }).expect(201)).body;
+    await owner.post(`/stock/documents/${doc.id}/finalise`).expect(200);
+    await openShift();
+    await snapshot();
+    // One serial for a box of 2 is a problem on the till, as on the server.
+    expect(till.priceBill({ ...till.emptyDraft(randomUUID()), lines: [line(phone.id, '1', { unitId: box, serials: 'P1' } as Partial<DraftLine>)] }, { snapshot: snap, date: today() }).problems).toEqual([`Line 1: scan the 2 serial number(s) of ${phone.code}`]);
+    const { sale: bill } = await viaTill({ ...till.emptyDraft(randomUUID()), lines: [line(phone.id, '1', { unitId: box, serials: 'P1, P2' } as Partial<DraftLine>)] }, { sale: num() });
+    expect(billFigures(bill!)).toEqual({ total: '23600.00', rounding: '0.00', taxable: '20000.00', cgst: '1800.00', sgst: '1800.00', igst: '0.00' });
+
+    const ol = bill!.lines[0];
+    const back = (serials: string[]): DraftBill => ({
+      ...till.emptyDraft(randomUUID()),
+      buyer: { gstin: '', name: 'Walk-in customer', address: '', stateCode: '' },
+      ret: {
+        originalBillId: bill!.id,
+        originalNumber: bill!.number,
+        customerId: bill!.customerId,
+        reason: null,
+        supply: { interState: false, noTax: false },
+        lines: [{ key: 'r1', itemId: phone.id, unitId: ol.unitId, code: ol.item.code, name: ol.item.name, quantity: '1', originalLineId: ol.id, maxQuantity: '1', originalQuantity: ol.quantity, originalPrice: ol.price, originalDiscount: ol.discountAmount, originalLineTotal: ol.lineTotal, gstRate: ol.gstRate, isFree: false, serials }],
+      },
+    });
+    // Without the serials ticked the till says so (the server always refused, and the till did not).
+    expect(till.priceBill(back([]), { snapshot: snap, date: today() }).problems).toEqual([`${phone.code}: tick the 2 serial number(s) coming back`]);
+    const { return: ret } = await viaTill(back(['P1', 'P2']), { ret: num() });
+    expect(billFigures(ret!)).toEqual({ total: '-23600.00', rounding: '0.00', taxable: '-20000.00', cgst: '-1800.00', sgst: '-1800.00', igst: '0.00' });
+    expect((await prisma.serialNumber.findMany({ where: { itemId: phone.id, status: 'in_stock' }, orderBy: { serial: 'asc' } })).map((s) => s.serial)).toEqual(['P1', 'P2', 'P3', 'P4']);
+  });
+
+  it('audit 14 (D6): a customer whose billing address has a Karnataka GSTIN is billed IGST on the till, as on the server', async () => {
+    const TN_GSTIN = `33AABCT1234A1Z${gstinCheckCharacter('33AABCT1234A1Z')}`;
+    const c = (await owner.post('/customers').send({ name: 'Tamil Traders', mobile: '9840011223', gstin: TN_GSTIN }).expect(201)).body as { id: string };
+    await owner.post(`/customers/${c.id}/addresses`).send({ addressLine1: '12 MG Road', city: 'Bengaluru', stateCode: '29', pincode: '560001', gstin: KA_GSTIN, isBilling: true, isMain: true }).expect(201);
+    await openShift();
+    await snapshot();
+    const customer = (snap as unknown as { customers: { id: string; gstin: string | null }[] }).customers.find((x) => x.id === c.id)!;
+    expect(customer.gstin).toBe(KA_GSTIN);
+    const { sale: bill } = await viaTill({ ...till.emptyDraft(randomUUID()), customer, lines: [line(rice.id, '1')] }, { sale: num() });
+    expect(billFigures(bill!)).toEqual({ total: '105.00', rounding: '0.00', taxable: '100.00', cgst: '0.00', sgst: '0.00', igst: '5.00' });
+  });
+
+  it('audit 14 (D7): with "save typed prices" on, an item with no price sells at the typed price on the till too, and keeps it', async () => {
+    await owner.patch('/catalogue/settings').send({ saveTypedPrices: true, allowPriceChangeOnBill: true }).expect(200);
+    await owner.patch(`/pos/tills/${tillId}`).send({ allowPriceChange: true }).expect(200);
+    const comb = await item('Wooden comb', '3402', null);
+    await opening(comb.id, '10', '20');
+    await openShift();
+    await snapshot();
+    const { sale: bill } = await viaTill({ ...till.emptyDraft(randomUUID()), lines: [line(comb.id, '1', { priceOverride: '59' })] }, { sale: num() });
+    expect(billFigures(bill!)).toEqual({ total: '59.00', rounding: '0.00', taxable: '50.00', cgst: '4.50', sgst: '4.50', igst: '0.00' });
+    expect((await prisma.price.findFirstOrThrow({ where: { itemId: comb.id } })).price.toFixed(2)).toBe('59.00');
+  });
+
+  it('audit 14 (D8): a business buyer with taxable and exempt goods on one bill is stopped on the till, with the server\'s words', async () => {
+    await owner.post('/pos/gst-rates').send({ hsnCode: '0401', rate: '0', effectiveFrom: '2026-04-01' }).expect(201);
+    const milk = await item('Milk 500 ml', '0401', '30');
+    await opening(milk.id, '10', '25');
+    await openShift();
+    await snapshot();
+    const draft: DraftBill = { ...till.emptyDraft(randomUUID()), lines: [line(rice.id, '1'), line(milk.id, '1')], buyer: { gstin: KA_GSTIN, name: 'Kaveri Traders', address: '12 MG Road, Bengaluru 560001', stateCode: '29' } };
+    const priced = till.priceBill(draft, { snapshot: snap, date: today() });
+    const words = 'A business buyer gets exempt goods on a separate bill (a bill of supply): bill the taxable and the exempt goods apart';
+    expect(priced.problems).toEqual([words]);
+    const paid: DraftBill = { ...draft, payments: [{ methodId: pm.CASH, amount: priced.due.toFixed(2), reference: '' }] };
+    const res = await T(owner.post('/pos/bills')).send(till.buildTransaction(paid, priced, snap.till.paymentMethods, { clientId: randomUUID(), tillId, shiftClientId, soldAt: new Date().toISOString(), offline: false, numbers: { sale: num() } })).expect(400);
+    expect(res.body.message).toBe(words);
+    expect(await prisma.posBill.count()).toBe(0);
+  });
+
+  it('audit 14 (D5): a supplier in another state is inter-state for the purchase screens, as the bill is saved', async () => {
+    const ka = (await owner.post('/suppliers').send({ name: 'Mysore Mills', gstin: KA_GSTIN }).expect(201)).body as { id: string };
+    const tn = (await owner.post('/suppliers').send({ name: 'Salem Mills', gstin: `33AABCS1234A1Z${gstinCheckCharacter('33AABCS1234A1Z')}` }).expect(201)).body as { id: string };
+    expect((await owner.get(`/purchase/place-of-supply?supplierId=${ka.id}&storeId=${MAIN}`).expect(200)).body).toEqual({ interState: true, placeOfSupply: '33', supplierState: '29' });
+    expect((await owner.get(`/purchase/place-of-supply?supplierId=${tn.id}`).expect(200)).body).toMatchObject({ interState: false });
+    // The preview's IGST (suggestGst with interState, as bills-lines.ts previews) is what the bill saves: ₹1,001.42 at 5%.
+    expect(suggestGst('1001.42', '5', true)).toMatchObject({ cgst: new Decimal(0), sgst: new Decimal(0) });
+    expect(suggestGst('1001.42', '5', true).igst.toFixed(2)).toBe('50.07');
+    const service = await item('Packing service', '3402', null, { isStockItem: false });
+    const draft = (
+      await owner.post('/purchase/bills').send({ kind: 'services', supplierId: ka.id, supplierBillNo: 'MM/1', supplierBillDate: today(), lines: [{ itemId: service.id, quantity: '1', rate: '1001.42', gstRate: '5' }] }).expect(201)
+    ).body as { lines: { cgst: string; sgst: string; igst: string }[] };
+    expect(draft.lines.map((l) => [l.cgst, l.sgst, l.igst])).toEqual([['0.00', '0.00', '50.07']]);
   });
 });
 

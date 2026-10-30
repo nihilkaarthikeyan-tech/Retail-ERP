@@ -9,5 +9,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test-setup.ts"],
+    // Audit 14: room for the 10-second waits in src/test-setup.ts.
+    testTimeout: 30_000,
   },
 });

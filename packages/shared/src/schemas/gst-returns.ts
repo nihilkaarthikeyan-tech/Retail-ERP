@@ -13,7 +13,7 @@ export const gstReturnQuerySchema = z.object({
     .refine((p) => gstReturnPeriod(p) !== null, 'Choose a month (2026-09) or a quarter (2026-Q2)')
     .optional(),
   /** The GST registration (GSTIN); the API takes the first one the user may see when left out. */
-  gstRegistrationId: z.string().uuid().optional(),
+  gstRegistrationId: z.uuid().optional(),
   /** Sales tax register only. */
   kind: z.enum(['business', 'consumer']).optional(),
   placeOfSupply: z.string().refine(isStateCode, 'Unknown GST state code').optional(),
@@ -27,7 +27,7 @@ export type GstReturnQuery = z.infer<typeof gstReturnQuerySchema>;
  * months (2026-04, 2026-05).
  */
 export const gstFiledPeriodSchema = z.object({
-  gstRegistrationId: z.string().uuid(),
+  gstRegistrationId: z.uuid(),
   period: z.string().refine((p) => gstReturnPeriod(p) !== null, 'Choose a month (2026-09) or a quarter (2026-Q2)'),
   returnType: z.enum(['gstr1', 'iff'], { message: 'Choose GSTR-1 or IFF' }),
   filedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Give the filing date as YYYY-MM-DD'),

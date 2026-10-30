@@ -71,7 +71,7 @@ function gfMultiply(x: number, y: number): number {
 
 /** Generator polynomial of the given degree (highest term left out; coefficients from x^(d-1) down). */
 export function rsGenerator(degree: number): number[] {
-  const result = new Array<number>(degree).fill(0);
+  const result = Array.from({ length: degree }, () => 0);
   result[degree - 1] = 1;
   let root = 1;
   for (let i = 0; i < degree; i++) {
@@ -86,7 +86,7 @@ export function rsGenerator(degree: number): number[] {
 
 /** Error-correction codewords for one block of data. */
 export function rsRemainder(data: number[], generator: number[]): number[] {
-  const result = new Array<number>(generator.length).fill(0);
+  const result = Array.from({ length: generator.length }, () => 0);
   for (const b of data) {
     const factor = b ^ (result.shift() as number);
     result.push(0);
@@ -130,8 +130,8 @@ class Grid {
 
   constructor(readonly version: number) {
     this.size = qrSize(version);
-    this.modules = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));
-    this.fixed = Array.from({ length: this.size }, () => new Array<boolean>(this.size).fill(false));
+    this.modules = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => false));
+    this.fixed = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => false));
   }
 
   set(x: number, y: number, dark: boolean) {

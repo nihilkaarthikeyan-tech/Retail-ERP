@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Module 9 endpoints (plan 09 §7). Each checks the permission here; the store
 // limit and cost visibility are applied in the services (rule 11, decision 70).
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Put, Query } from '@nestjs/common';
 import { type ExportLogInput, exportLogSchema, type ReportQuery, reportQuerySchema, type SummaryEmailSettingsInput, summaryEmailSettingsSchema } from 'shared';
 import { z } from 'zod';
 import { AuditService } from '../audit/audit.service.js';
@@ -124,10 +124,5 @@ export class ReportsController {
   }
   @Get('summary-email/runs') @RequirePermission('reports.summary_email') summaryRuns(@ReqUser() user: AuthUser) {
     return this.summary.runs(user);
-  }
-  @Get('summary-email/preview/:figures') @RequirePermission('reports.summary_email') async preview(@Param('figures') figures: string, @ReqUser() user: AuthUser) {
-    const company = await this.prisma.company.findFirstOrThrow({ orderBy: { createdAt: 'asc' } });
-    void user;
-    return this.summary.compose(company.id, figures.split(',').filter(Boolean) as never, new Date());
   }
 }

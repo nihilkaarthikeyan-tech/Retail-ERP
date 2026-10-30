@@ -40,12 +40,5 @@ export function enterCompany(companyId: string): void {
   store.companyId = companyId;
 }
 
-/** The shop of the current request or job; throws when none is set. */
-export function currentCompanyId(): string {
-  const id = storage.getStore()?.companyId;
-  if (!id) throw new Error('No shop is set for this request');
-  return id;
-}
-
 /** The database role every shop's requests run as (row-level security applies to it). */
 export const TENANT_DB_ROLE = 'retail_erp_app';

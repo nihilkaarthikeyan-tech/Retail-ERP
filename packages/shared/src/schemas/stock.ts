@@ -35,8 +35,8 @@ export const ACCOUNT_ROLE_BY_REASON: Record<string, string> = {
 };
 
 export const createLocationSchema = z.object({
-  storeId: z.string().uuid(),
-  parentId: z.string().uuid().optional().nullable(),
+  storeId: z.uuid(),
+  parentId: z.uuid().optional().nullable(),
   code: itemCode,
   name: trimmed(60),
   kind: z.enum(['folder', 'shelf', 'rejected']),
@@ -46,11 +46,11 @@ export const updateLocationSchema = z.object({ name: trimmed(60), active: z.bool
 export type UpdateLocationInput = z.infer<typeof updateLocationSchema>;
 
 export const stockLineSchema = z.object({
-  itemId: z.string().uuid(),
-  unitId: z.string().uuid().optional(),
+  itemId: z.uuid(),
+  unitId: z.uuid().optional(),
   quantity: positiveDecimalString,
   /** Existing batch (out, move, transfer, or receiving more of a known batch). */
-  batchId: z.string().uuid().optional().nullable(),
+  batchId: z.uuid().optional().nullable(),
   /** New batch on a stock-in: number (or blank for automatic numbering), dates. */
   batchNumber: z.string().trim().max(40).optional().nullable(),
   manufactureDate: isoDate.optional().nullable(),
@@ -64,11 +64,11 @@ export type StockLineInput = z.infer<typeof stockLineSchema>;
 export const createStockDocumentSchema = z.object({
   kind: z.enum(STOCK_DOC_KINDS),
   reason: z.enum([...STOCK_IN_REASONS, ...STOCK_OUT_REASONS]).optional().nullable(),
-  storeId: z.string().uuid(),
-  fromLocationId: z.string().uuid().optional().nullable(),
-  toLocationId: z.string().uuid().optional().nullable(),
+  storeId: z.uuid(),
+  fromLocationId: z.uuid().optional().nullable(),
+  toLocationId: z.uuid().optional().nullable(),
   /** Transfers: the receiving store. */
-  toStoreId: z.string().uuid().optional().nullable(),
+  toStoreId: z.uuid().optional().nullable(),
   postingDate: isoDate.optional(),
   postingTime: hhmm.optional(),
   remarks: optionalText(300),
@@ -80,7 +80,7 @@ export const updateStockDocumentSchema = createStockDocumentSchema.omit({ kind: 
 export type UpdateStockDocumentInput = z.infer<typeof updateStockDocumentSchema>;
 
 export const receiveTransferSchema = z.object({
-  toLocationId: z.string().uuid().optional(),
+  toLocationId: z.uuid().optional(),
   postingDate: isoDate.optional(),
   postingTime: hhmm.optional(),
   remarks: optionalText(300),
@@ -88,7 +88,7 @@ export const receiveTransferSchema = z.object({
   lines: z
     .array(
       z.object({
-        sendLineId: z.string().uuid(),
+        sendLineId: z.uuid(),
         quantity: positiveDecimalString,
         serialNumbers: z.array(z.string().trim().min(1).max(60)).optional(),
       }),
@@ -98,8 +98,8 @@ export const receiveTransferSchema = z.object({
 export type ReceiveTransferInput = z.infer<typeof receiveTransferSchema>;
 
 export const countLineSchema = z.object({
-  itemId: z.string().uuid(),
-  batchId: z.string().uuid().optional().nullable(),
+  itemId: z.uuid(),
+  batchId: z.uuid().optional().nullable(),
   batchNumber: z.string().trim().max(40).optional().nullable(),
   expiryDate: isoDate.optional().nullable(),
   countedQuantity: nonNegativeDecimalString,
@@ -111,8 +111,8 @@ export type CountLineInput = z.infer<typeof countLineSchema>;
 
 export const createCountSchema = z.object({
   countType: z.enum(COUNT_TYPES),
-  storeId: z.string().uuid(),
-  locationId: z.string().uuid(),
+  storeId: z.uuid(),
+  locationId: z.uuid(),
   blind: z.boolean().optional(),
   postingDate: isoDate.optional(),
   postingTime: hhmm.optional(),
@@ -129,7 +129,7 @@ export type CancelStockDocumentInput = z.infer<typeof cancelStockDocumentSchema>
 export const stockDocumentQuerySchema = z.object({
   kind: z.enum(['stock_in', 'stock_out', 'move', 'transfer_send', 'transfer_receive', 'count']).optional(),
   status: z.enum(['draft', 'finalised', 'cancelled']).optional(),
-  storeId: z.string().uuid().optional(),
+  storeId: z.uuid().optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -138,20 +138,20 @@ export const stockDocumentQuerySchema = z.object({
 export type StockDocumentQuery = z.infer<typeof stockDocumentQuerySchema>;
 
 export const stockBalanceQuerySchema = z.object({
-  storeId: z.string().uuid().optional(),
-  locationId: z.string().uuid().optional(),
-  itemId: z.string().uuid().optional(),
-  groupId: z.string().uuid().optional(),
+  storeId: z.uuid().optional(),
+  locationId: z.uuid().optional(),
+  itemId: z.uuid().optional(),
+  groupId: z.uuid().optional(),
   asOf: isoDate.optional(),
   includeZero: z.enum(['true', 'false']).optional(),
 });
 export type StockBalanceQuery = z.infer<typeof stockBalanceQuerySchema>;
 
 export const stockLedgerQuerySchema = z.object({
-  itemId: z.string().uuid().optional(),
-  locationId: z.string().uuid().optional(),
-  storeId: z.string().uuid().optional(),
-  batchId: z.string().uuid().optional(),
+  itemId: z.uuid().optional(),
+  locationId: z.uuid().optional(),
+  storeId: z.uuid().optional(),
+  batchId: z.uuid().optional(),
   from: isoDate.optional(),
   to: isoDate.optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
@@ -159,8 +159,8 @@ export const stockLedgerQuerySchema = z.object({
 export type StockLedgerQuery = z.infer<typeof stockLedgerQuerySchema>;
 
 export const reorderLevelSchema = z.object({
-  itemId: z.string().uuid(),
-  storeId: z.string().uuid(),
+  itemId: z.uuid(),
+  storeId: z.uuid(),
   level: nonNegativeDecimalString,
   quantity: positiveDecimalString,
   requestType: z.enum(['buy', 'move']).optional(),

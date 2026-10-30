@@ -27,6 +27,7 @@
 import { z } from 'zod';
 import { daysBetween } from './accounting.js';
 import { endOfBusinessDay } from './business-date.js';
+import { textOf } from './import-cells.js';
 import { Decimal, type DecimalInput, roundMoney } from './rounding.js';
 
 const D = (v: DecimalInput) => new Decimal(v);
@@ -73,7 +74,7 @@ const addDays = (isoDate: string, days: number) => new Date(Date.parse(`${isoDat
  */
 export function parsePortalDateTime(value: unknown): Date | null {
   if (value === null || value === undefined) return null;
-  const s = String(value).trim();
+  const s = textOf(value).trim();
   if (!s) return null;
   if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(s) && !Number.isNaN(Date.parse(s))) return new Date(s);
   let m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?)?$/.exec(s);
@@ -620,8 +621,8 @@ function records(fileText: string): Record<string, unknown>[] {
       }
       const errors = Object.entries(o).find(([k, x]) => /error/i.test(k) && Array.isArray(x)) as [string, Record<string, unknown>[]] | undefined;
       if (errors) {
-        flat.errorcode = errors[1].map((e) => e.ErrorCode ?? e.errorCode ?? '').filter(Boolean).join(', ');
-        flat.errormessage = errors[1].map((e) => e.ErrorMessage ?? e.errorMessage ?? '').filter(Boolean).join('; ');
+        flat.errorcode = errors[1].map((e) => textOf(e.ErrorCode ?? e.errorCode)).filter(Boolean).join(', ');
+        flat.errormessage = errors[1].map((e) => textOf(e.ErrorMessage ?? e.errorMessage)).filter(Boolean).join('; ');
       }
       out.push(flat);
     };
@@ -637,7 +638,7 @@ function records(fileText: string): Record<string, unknown>[] {
 const pick = (r: Record<string, unknown>, keys: string[]): string | null => {
   for (const k of keys) {
     const v = r[k];
-    if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim();
+    if (textOf(v).trim() !== '') return textOf(v).trim();
   }
   return null;
 };
@@ -652,7 +653,7 @@ export function signedPayload(jwt: string | null | undefined): Record<string, un
     const json = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     const claims = JSON.parse(json) as Record<string, unknown>;
     const data = typeof claims.data === 'string' ? (JSON.parse(claims.data) as Record<string, unknown>) : (claims.data as Record<string, unknown> | undefined);
-    return { ...claims, ...(data ?? {}) };
+    return { ...claims, ...data };
   } catch {
     return null;
   }
@@ -736,7 +737,7 @@ export function parseEWayResults(fileText: string): EWayResult[] {
 
 // ---- Input validation (API authoritative, web forms reuse) ----
 
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a date');
 
 export const eInvoiceQuerySchema = z.object({
@@ -759,7 +760,7 @@ export const eInvoiceCancelSchema = z.object({
   reason: z.enum(['1', '2', '3', '4']),
   remark: z.string().trim().max(100).optional(),
   /** When it was cancelled on the portal; defaults to now. */
-  cancelledAt: z.string().datetime({ offset: true }).optional(),
+  cancelledAt: z.iso.datetime({ offset: true }).optional(),
 });
 export type EInvoiceCancelInput = z.infer<typeof eInvoiceCancelSchema>;
 
@@ -797,9 +798,9 @@ export type EWayUpdateInput = z.infer<typeof eWayUpdateSchema>;
 export const eWayGeneratedSchema = z.object({
   number: z.string().trim().regex(/^[0-9]{12}$/, 'The e-way bill number is 12 digits'),
   /** When the portal made it; defaults to now. */
-  generatedAt: z.string().datetime({ offset: true }).optional(),
+  generatedAt: z.iso.datetime({ offset: true }).optional(),
   /** As printed by the portal; worked out from the distance when left out. */
-  validUntil: z.string().datetime({ offset: true }).optional(),
+  validUntil: z.iso.datetime({ offset: true }).optional(),
 });
 export type EWayGeneratedInput = z.infer<typeof eWayGeneratedSchema>;
 

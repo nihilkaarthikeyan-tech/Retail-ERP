@@ -22,8 +22,8 @@ describe('amount in words (scenario 10.1)', () => {
 /** Reads EAN-13 bars back to digits, independently of the encoder's tables' order (scenario 10.4). */
 function decodeEan13(modules: string): string {
   const L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
-  const flip = (p: string) => [...p].map((b) => (b === '1' ? '0' : '1')).join('');
-  const G = L.map((p) => [...flip(p)].reverse().join(''));
+  const flip = (p: string) => p.split('').map((b) => (b === '1' ? '0' : '1')).join('');
+  const G = L.map((p) => flip(p).split('').reverse().join(''));
   const R = L.map(flip);
   expect(modules.slice(0, 3)).toBe('101');
   expect(modules.slice(45, 50)).toBe('01010');
@@ -59,7 +59,7 @@ describe('barcodes', () => {
   it('every Code 128 symbol has the right width and is unique', () => {
     expect(CODE128_WIDTHS).toHaveLength(107);
     for (const [i, w] of CODE128_WIDTHS.entries()) {
-      expect([...w].reduce((s, x) => s + Number(x), 0)).toBe(i === 106 ? 13 : 11);
+      expect(w.split('').reduce((s, x) => s + Number(x), 0)).toBe(i === 106 ? 13 : 11);
     }
     expect(new Set(CODE128_WIDTHS).size).toBe(107);
   });

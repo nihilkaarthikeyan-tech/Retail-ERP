@@ -215,7 +215,7 @@ export class AccountingController {
   }
 
   // ---- Reports ----
-  @Get('ledger/entries') @RequirePermission('accounts.view') documentEntries(@Query(zod(z.object({ documentType: z.string().max(40), documentId: z.string().uuid() }))) q: { documentType: string; documentId: string }, @ReqUser() user: AuthUser) {
+  @Get('ledger/entries') @RequirePermission('accounts.view') documentEntries(@Query(zod(z.object({ documentType: z.string().max(40), documentId: z.uuid() }))) q: { documentType: string; documentId: string }, @ReqUser() user: AuthUser) {
     return this.reports.forDocument(q.documentType, q.documentId, user);
   }
   @Get('reports/general-ledger') @RequirePermission('accounts.view') generalLedger(@Query(zod(ledgerQuerySchema)) q: LedgerQuery, @ReqUser() user: AuthUser) {

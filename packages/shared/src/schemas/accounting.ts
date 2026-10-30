@@ -8,7 +8,7 @@ import { queryBoolean } from './reports.js';
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
 const isoDate = z.string().refine(isIsoDate, 'Choose a date');
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 
 /** How the system uses an account (blueprint 11 "Chart of accounts"). */
 export const ACCOUNT_KINDS = [

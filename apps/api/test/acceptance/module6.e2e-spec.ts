@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { addDays, businessDate, Decimal } from 'shared';
+import { addDays, businessDate } from 'shared';
 import { StockReportsService } from '../../src/inventory/stock-reports.service.js';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, OWNER, roleId, setUpCompany, storeId } from '../helpers.js';
@@ -232,9 +232,11 @@ describe('6.4 selling beyond stock, 6.6 card and UPI, 6.7 never saved twice', ()
   it('till reports count cash after the change given back, like the shift close', async () => {
     await T(owner.post('/pos/bills')).send(sale([{ itemId: atta.id, quantity: '1' }], [{ paymentMethodId: pm.CASH, amount: '1000' }])).expect(201);
     const shift = (await owner.get(`/pos/till/${tillId}/shift`).expect(200)).body;
-    const expectedCash = new Decimal(shift.expected.find((e: { paymentMethodId: string }) => e.paymentMethodId === pm.CASH).expected).sub('2000');
+    // Cash kept today: tea ₹450 (6.4) + atta ₹899 (6.7, sent 5 times, saved once) + this atta ₹899
+    // (₹1,000 handed over, ₹101 back) = ₹2,248.00; the shift adds its ₹2,000 opening float.
+    expect(shift.expected.find((e: { paymentMethodId: string }) => e.paymentMethodId === pm.CASH).expected).toBe('4248.00');
     const report = (await owner.get(`/pos/reports/payments?from=${today()}&to=${today()}`).expect(200)).body as { method: string; amount: string }[];
-    expect(report.find((r) => r.method === 'Cash')!.amount).toBe(expectedCash.toFixed(2));
+    expect(report.find((r) => r.method === 'Cash')!.amount).toBe('2248.00');
     const register = (await owner.get(`/pos/reports/register?from=${today()}&to=${today()}`).expect(200)).body as { payments: string }[];
     expect(register.at(-1)!.payments).toMatch(/Cash 1000\.00, change given 101\.00/);
   });

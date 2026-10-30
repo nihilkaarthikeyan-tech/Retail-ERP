@@ -32,7 +32,6 @@ export const customerInclude = {
 } satisfies Prisma.CustomerInclude;
 export type CustomerRow = Prisma.CustomerGetPayload<{ include: typeof customerInclude }>;
 
-export type GstTreatment = 'same_state' | 'other_state' | 'unregistered';
 
 @Injectable()
 export class CustomersService {
@@ -236,16 +235,6 @@ export class CustomersService {
     if (group?.skipCreditCheck) return new Decimal(0);
     if (group && group.creditLimit.gt(0)) return group.creditLimit;
     return (await this.settings.get(db)).defaultCreditLimit;
-  }
-
-  /** Same-state → CGST + SGST; other state → IGST; no GSTIN → consumer sale (blueprint 13 decides the rates). */
-  async gstTreatmentFor(db: Db, customer: Customer, addressId?: string | null): Promise<GstTreatment> {
-    const company = await db.company.findUniqueOrThrow({ where: { id: customer.companyId } });
-    const address = addressId ? await db.address.findUnique({ where: { id: addressId } }) : await db.address.findFirst({ where: { partyType: 'customer', partyId: customer.id, isMain: true, active: true } });
-    const gstin = address?.gstin ?? customer.gstin;
-    const stateCode = address?.stateCode ?? customer.stateCode;
-    if (!gstin && !stateCode) return 'unregistered';
-    return stateCode === company.stateCode ? 'same_state' : 'other_state';
   }
 
   // ---- Checks ----

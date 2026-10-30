@@ -195,8 +195,15 @@ describe("OrdersEditor", () => {
 
   it("shows a clearly marked estimate while editing and the server's total otherwise", async () => {
     renderEditor(["purchase.view", "purchase.order", "buying_prices.view"], order());
-    expect(await screen.findByText("Order total")).toBeTruthy();
-    expect(screen.getAllByText("₹19,950.00").length).toBeGreaterThan(0);
+    // The totals box shows the server's figures against their own labels.
+    const totals = (await screen.findByText("Order total")).closest(".card")!;
+    const pairs = [...totals.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+    expect(pairs).toEqual([
+      ["Taxable value", "₹19,000.00"],
+      ["GST", "₹950.00"],
+      ["Rounding", "₹0.00"],
+      ["Total", "₹19,950.00"],
+    ]);
     expect(screen.queryByText(/estimate/i)).toBeNull();
 
     // 200 × ₹90 less 10% = ₹16,200.00 taxable; 5% GST = ₹810.00; total ₹17,010.00.

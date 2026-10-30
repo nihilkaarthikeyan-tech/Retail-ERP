@@ -214,17 +214,24 @@ describe('audit 4: GST and the law', () => {
   });
 
   it('IFF: a quarterly filer’s first month lists only business invoices; the third month has none', async () => {
-    const thisMonth = businessDate().slice(0, 7);
-    const m = Number(thisMonth.slice(5, 7));
-    const res = await owner.get(`/reports/gst/gstr1?period=${thisMonth}`);
-    if (m % 3 === 0) {
-      expect(res.status).toBe(400);
-      expect(res.body.message).toMatch(/third month/);
-    } else {
-      expect(res.status).toBe(200);
-      expect(res.body).toMatchObject({ iff: true, b2cs: [], b2cl: [], hsnBusiness: [], documents: [] });
-      expect(res.body.b2b.length).toBeGreaterThan(0);
-    }
+    // Fixed months, not today's: bills that reached the till late (offline) from July and
+    // September 2026, which are always in the past and not marked as filed, so each stays in its
+    // own month (pos-bills.service reportPeriod). July is the first month of a quarter, September the third.
+    const offline = (soldAt: string, extra: Record<string, unknown> = {}) => ({ ...sale([{ itemId: shirt.id, quantity: '1' }], '1050', extra), offline: true, shiftClientId, soldAt });
+    const kaveri = { buyer: { gstin: KA_GSTIN, name: 'Kaveri Traders', address: 'Bengaluru' } };
+    const july = (await made(T(owner.post('/pos/bills')).send(offline('2026-07-15T11:00:00+05:30', kaveri)))).sale;
+    await made(T(owner.post('/pos/bills')).send(offline('2026-07-16T11:00:00+05:30'))); // a walk-in: not in the IFF
+    await made(T(owner.post('/pos/bills')).send(offline('2026-09-15T11:00:00+05:30', kaveri)));
+
+    const first = (await owner.get('/reports/gst/gstr1?period=2026-07').expect(200)).body;
+    expect(first).toMatchObject({ iff: true, b2cs: [], b2cl: [], hsnBusiness: [], documents: [] });
+    // Exactly the one business invoice: ₹1,050 to Karnataka, taxable ₹1,000 and IGST ₹50 at 5%.
+    expect(first.b2b).toHaveLength(1);
+    expect(first.b2b[0]).toMatchObject({ number: july.number, date: '2026-07-15', value: '1050.00', placeOfSupply: '29', buyerGstin: KA_GSTIN, invType: 'R', interState: true });
+    expect(first.b2b[0].items).toEqual([{ rate: '5.00', taxable: '1000.00', igst: '50.00', cgst: '0.00', sgst: '0.00', cess: '0.00' }]);
+
+    const third = await owner.get('/reports/gst/gstr1?period=2026-09').expect(400);
+    expect(third.body.message).toMatch(/third month/);
   });
 
   it('T13: a composition shop gets the CMP-08 figure (1% of taxable turnover) and cannot sell to another state', async () => {

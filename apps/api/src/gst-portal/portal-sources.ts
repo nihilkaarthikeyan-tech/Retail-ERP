@@ -3,7 +3,7 @@
 // e-invoice and e-way bill files are built from (packages/shared/src/gst-portal.ts).
 // Nothing here writes; the services decide what to do with the result.
 import { NotFoundException } from '@nestjs/common';
-import { Decimal, type EInvoiceSource, type EWaySource, eWayValue, INDIAN_STATES, pickGstRate, type TaxSituation, taxSituationOf, uqcFor } from 'shared';
+import { Decimal, type EInvoiceSource, type EWaySource, EWAY_SUB_SUPPLY, eWayValue, INDIAN_STATES, pickGstRate, type TaxSituation, taxSituationOf, uqcFor } from 'shared';
 import type { Db } from '../audit/audit.service.js';
 import type { TransferGstService } from '../inventory/transfer-gst.service.js';
 
@@ -270,7 +270,7 @@ export async function eWayFromBill(db: Db, billId: string): Promise<EWayDocument
     cancelled: bill.status === 'cancelled',
     source: {
       userGstin: seller.gstin ?? '',
-      subSupplyType: 1,
+      subSupplyType: EWAY_SUB_SUPPLY.supply,
       docType: bill.invoiceKind === 'bill_of_supply' ? 'BIL' : 'INV',
       number: bill.number,
       date,
@@ -346,7 +346,7 @@ export async function eWayFromTransfer(db: Db, documentId: string, transferGst?:
     source: {
       userGstin: from.gstin ?? '',
       // Master codes: 1 = supply (to a registration under another GSTIN), 5 = for own use (same GSTIN).
-      subSupplyType: tax ? 1 : 5,
+      subSupplyType: tax ? EWAY_SUB_SUPPLY.supply : EWAY_SUB_SUPPLY.own_use,
       docType: invoiced ? 'INV' : tax ? 'BIL' : 'CHL',
       number: d.number,
       date,

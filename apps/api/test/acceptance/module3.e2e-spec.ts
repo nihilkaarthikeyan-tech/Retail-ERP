@@ -2,7 +2,7 @@
 // Automated versions of docs/acceptance-tests.md, section "Module 3".
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { businessDate, SYSTEM_ROLES } from 'shared';
+import { businessDate, resolveSupply, SYSTEM_ROLES } from 'shared';
 import { CustomersService } from '../../src/parties/customers.service.js';
 import { SuppliersService } from '../../src/parties/suppliers.service.js';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
@@ -86,12 +86,11 @@ describe('3.2 A business customer with a GSTIN in another state', () => {
       .expect(201);
     expect(res.body).toMatchObject({ isBusiness: true, stateCode: '29', gstin: '29AAACR1234A1ZZ' });
 
-    const customers = app.get(CustomersService);
+    // Audit 14: billed by the shop in Tamil Nadu, the same rule as the till and the server (resolveSupply) gives IGST.
     const row = await prisma.customer.findUniqueOrThrow({ where: { id: res.body.id } });
-    expect(await customers.gstTreatmentFor(prisma, row)).toBe('other_state');
-
+    expect(resolveSupply({ sellerState: '33', scheme: 'regular', buyerGstin: row.gstin, taxSituation: row.taxSituation })).toMatchObject({ invoiceKind: 'business', placeOfSupply: '29', interState: true });
     const local = await prisma.customer.findFirstOrThrow({ where: { code: 'CUS-000001' } });
-    expect(await customers.gstTreatmentFor(prisma, local)).toBe('unregistered');
+    expect(resolveSupply({ sellerState: '33', scheme: 'regular', buyerGstin: local.gstin, taxSituation: local.taxSituation })).toMatchObject({ invoiceKind: 'consumer', interState: false });
 
     const mismatch = await owner.post('/customers').send({ name: 'Wrong state', gstin: '29AAACR1234A1ZZ', stateCode: '33' }).expect(400);
     expect(mismatch.body.message).toMatch(/is for Karnataka \(29\), not Tamil Nadu \(33\)/);

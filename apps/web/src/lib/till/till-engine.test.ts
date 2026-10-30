@@ -135,13 +135,17 @@ describe("pricing on the till matches the server (scenario 6.1)", () => {
     const offline = buildTransaction(d, bill, s.till.paymentMethods, { ...opts, offline: true });
     expect(offline.expectedTotal).toBeUndefined();
     expect(offline.sale!.lines.some((l) => l.freeOfLineNo === 1)).toBe(true);
-    for (const l of offline.sale!.lines.filter((x) => x.charged)) {
-      const c = l.charged!;
-      const recomputed = new Decimal(c.price).mul(l.quantity).toDecimalPlaces(2).sub(c.discountAmount).sub(c.offerDiscount ?? "0");
-      expect(recomputed.toFixed(2)).toBe(new Decimal(c.lineTotal).toFixed(2));
-    }
-    const sum = offline.sale!.lines.reduce((a, l) => a.add(l.charged?.lineTotal ?? "0"), new Decimal(0));
-    expect(sum.toFixed(2)).toBe(bill.sale!.exact.toFixed(2));
+    // Worked by hand: Parle-G 2 × ₹10 = ₹20.00 (buy 2 get 1, the free packet is its own line);
+    // Basmati 1 × ₹120 less 5% (₹6.00) = ₹114.00. The ₹1 bill discount is shared by value:
+    // 20/134 = ₹0.15 to Parle-G, the remaining ₹0.85 to Basmati. Bill: ₹134 − ₹1 = ₹133.00.
+    const charged = offline.sale!.lines.map((l) => [l.itemId, l.quantity, l.freeOfLineNo ?? null, l.charged ?? null]);
+    expect(charged).toEqual([
+      [PARLE, "2", null, { listPrice: "10.00", price: "10.00", discountAmount: "0.15", offerDiscount: "0.00", gstRate: "18", lineTotal: "19.85" }],
+      [PARLE, "1", 1, null],
+      [BASMATI, "1", null, { listPrice: "120.00", price: "120.00", discountAmount: "6.85", offerDiscount: "0.00", gstRate: "5", lineTotal: "113.15" }],
+    ]);
+    expect(bill.sale!.exact.toFixed(2)).toBe("133.00");
+    expect(bill.net.toFixed(2)).toBe("133.00");
     const online = buildTransaction(d, bill, s.till.paymentMethods, { ...opts, offline: false });
     expect(online.expectedTotal).toBe(bill.net.toFixed(2));
     expect(online.sale!.lines.every((l) => !l.charged && !l.freeOfLineNo)).toBe(true);
@@ -500,14 +504,15 @@ describe("return without the original bill (plan 11 A9, scenario 11.8)", () => {
   const refund = [{ methodId: CASH, amount: "120", reference: "" }];
   const ok = { repeated: false, sale: null, return: null, net: "-120.00", change: "0.00", receipts: [] } satisfies TransactionResult;
 
-  it("is priced from the till's list at today's GST and needs a manager's approval", () => {
+  it("is priced from the till's list, reduces no GST (a return note) and needs a manager's approval", () => {
     const s = sampleSnapshot();
     const bill = priceBill(draft([], { ret: noBill([back(BASMATI, "1")]) }), { snapshot: s, date: DATE });
     expect(bill.problems).toEqual([]);
     expect(bill.net.toFixed(2)).toBe("-120.00");
     expect(bill.approvals).toEqual([expect.objectContaining({ kind: "return_without_bill", lineKey: null })]);
     const l = bill.ret!.lines[0];
-    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-114.28", "-2.86", "-2.86"]);
+    // Audit 14: without the original invoice the GST is not reduced (rule 53(1A)(g)), exactly as the server saves it.
+    expect([l.tax.taxable.toFixed(2), l.tax.cgst.toFixed(2), l.tax.sgst.toFixed(2)]).toEqual(["-120.00", "0.00", "0.00"]);
     // Once approved nothing more is asked; a typed price is what comes back.
     const approved = priceBill(draft([], { ret: noBill([back(BASMATI, "1", "100")], "t") }), { snapshot: s, date: DATE });
     expect(approved.approvals).toEqual([]);

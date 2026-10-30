@@ -200,14 +200,14 @@ Cashiers still never see cost (decision 70).
 ## 7. API
 
 ```
-GET/POST/PATCH /pos/tills, /pos/payment-methods, /pos/offers, /pos/coupons, /pos/gst-rates (+ POST /pos/gst-rates/:id/approve)
+GET/POST/PATCH /pos/tills, /pos/payment-methods, /pos/offers, /pos/coupons, /pos/gst-rates (no approve step; a rate applies once saved)
 POST /pos/tills/:id/register                      (till computer pairing; returns a device token)
-GET  /pos/till/snapshot?since=                    (till set-up, catalogue, prices, offers, customers; changes only)
+GET  /pos/till/:id/snapshot?since=                (till set-up, catalogue, prices, offers, customers; changes only)
 POST /pos/shifts            POST /pos/shifts/:id/cash-movements      POST /pos/shifts/:id/close
 POST /pos/bills             (idempotent on tillId + clientId; sale, return or exchange pair)
 GET  /pos/bills?…  GET /pos/bills/:id   POST /pos/bills/:id/cancel   POST /pos/bills/:id/reprint
 POST /pos/approvals         (manager PIN check → a short-lived approval token tied to the action)
-POST /users/me/pin          POST /pos/switch-cashier
+GET/POST /pos/pin   DELETE /pos/pins/:userId   POST /pos/switch-cashier
 GET  /pos/reports/{register|payments|shifts/:id|hourly|by-cashier|offline-check|sync-problems|parked}
 ```
 
@@ -230,7 +230,7 @@ Sample data:
 - **Basmati Rice 1 kg:** sold at ₹120, which includes 5% GST; stock 100 at a cost of ₹90.
 - **Surf Excel 1 kg:** sold at ₹132, which includes 18% GST; stock 50 at a cost of ₹95.
 
-GST figures are provisional until the CA approves.
+GST figures use the rates saved in the GST rate list. (Changed 22 October 2026: there is no CA approval step and bills are never provisional.)
 
 - **6.1 A sale ★:** 2 Basmati + 1 Surf = ₹372.00.
   - Basmati: taxable ₹228.57, CGST ₹5.72 + SGST ₹5.71. Surf: taxable ₹111.86, CGST ₹10.07 + SGST ₹10.07.

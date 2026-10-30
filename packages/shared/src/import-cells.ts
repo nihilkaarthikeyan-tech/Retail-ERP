@@ -7,6 +7,13 @@ import { isIsoDate } from './financial-year.js';
 
 export type CellResult<T> = { ok: true; value: T } | { ok: false; problem: string };
 
+/** Audit 14: a cell or field as text: text, numbers and yes/no as written; anything else (empty, an object) is no text, never "[object Object]". */
+export function textOf(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean') return String(v);
+  return '';
+}
+
 /** A number as typed in India or abroad: 1,05,000.50 · 105000.5 · ₹ 1,200 · -45. */
 export function readNumber(raw: unknown): CellResult<string> {
   if (typeof raw === 'number') {
@@ -14,7 +21,7 @@ export function readNumber(raw: unknown): CellResult<string> {
     // Spreadsheet numbers come as binary floats; 15 significant digits is what the spreadsheet itself shows.
     return { ok: true, value: String(Number(raw.toPrecision(15))) };
   }
-  const text = String(raw ?? '').trim().replace(/^₹\s*/, '').replace(/^Rs\.?\s*/i, '');
+  const text = textOf(raw).trim().replace(/^₹\s*/, '').replace(/^Rs\.?\s*/i, '');
   if (text === '') return { ok: false, problem: 'is empty' };
   if (!/^-?[\d,]*\.?\d+$/.test(text)) return { ok: false, problem: `"${text}" is not a number` };
   const [whole] = text.replace(/^-/, '').split('.');
@@ -42,7 +49,7 @@ export function excelSerialToIso(serial: number): string {
 export function readDate(raw: unknown): CellResult<string> {
   if (typeof raw === 'number') return raw > 0 && raw < 2958466 ? { ok: true, value: excelSerialToIso(raw) } : { ok: false, problem: 'is not a date' };
   if (raw instanceof Date) return { ok: true, value: raw.toISOString().slice(0, 10) };
-  const text = String(raw ?? '').trim();
+  const text = textOf(raw).trim();
   if (text === '') return { ok: false, problem: 'is empty' };
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return isIsoDate(text) ? { ok: true, value: text } : { ok: false, problem: `"${text}" is not a real date` };
   let m = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/);
@@ -106,15 +113,15 @@ export function readText(raw: unknown, opts: { digitsLength?: number[] } = {}): 
     if (opts.digitsLength && !opts.digitsLength.includes(s.length)) return { ok: false, problem: `${s} looks like a number that lost its leading zeros; format the column as text` };
     return { ok: true, value: s };
   }
-  const text = String(raw).trim();
+  const text = textOf(raw).trim();
   return text ? { ok: true, value: text } : { ok: false, problem: 'is empty' };
 }
 
 /** Yes / no columns. */
 export function readYesNo(raw: unknown): CellResult<boolean> {
   if (typeof raw === 'boolean') return { ok: true, value: raw };
-  const t = String(raw ?? '').trim().toLowerCase();
+  const t = textOf(raw).trim().toLowerCase();
   if (['yes', 'y', 'true', '1'].includes(t)) return { ok: true, value: true };
   if (['no', 'n', 'false', '0', ''].includes(t)) return { ok: true, value: false };
-  return { ok: false, problem: `"${raw}" should be Yes or No` };
+  return { ok: false, problem: `"${textOf(raw)}" should be Yes or No` };
 }

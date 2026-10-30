@@ -534,7 +534,6 @@ export interface PartySettingsDto {
   defaultPaymentTermsId: string | null;
   defaultCreditLimit: string;
   walkInCustomerId: string | null;
-  gstTreatmentFrom: "billing" | "delivery";
   updatedAt: string;
 }
 

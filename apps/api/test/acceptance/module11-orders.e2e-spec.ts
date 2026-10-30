@@ -297,9 +297,10 @@ describe('11.21 cancelling an order', () => {
     expect((await owner.get('/orders?view=advances').expect(200)).body).toMatchObject({ advancesHeld: '500.00', rows: [expect.objectContaining({ id: o.id })] });
 
     const cashier = await person('Ravi', 'ravi@rademics.test', 'cashier');
-    // Until the roles are given the new rights by migration, only the owner takes orders.
-    const listed = await cashier.get('/orders');
-    expect([200, 403]).toContain(listed.status);
+    // The Cashier role has "orders.manage" (shared permissions.ts, made with the company's roles),
+    // and the orders list asks for exactly that right (orders.controller), so the cashier sees MAIN's orders.
+    const listed = (await cashier.get('/orders').expect(200)).body.rows as { id: string }[];
+    expect(listed.map((r) => r.id)).toContain(o.id);
   });
 });
 

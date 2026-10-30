@@ -1,4 +1,4 @@
-**Decided 28 October 2026 (owner accepted the recommendation).** Yes: off for cosmetics, on for the rest |**Decided 28 October 2026 (owner accepted the recommendation).** Tighten to 1 paisa per bill |**Decided 28 October 2026 (owner accepted the recommendation).** Yes: e-invoice and GSTR-1 usually expect them equal |**Decided 28 October 2026 (owner accepted the recommendation).** Yes, 10% for clothing and fancy shops |**Decided 28 October 2026 (owner accepted the recommendation).** (a) |**Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** **Decided 28 October 2026 (owner accepted the recommendation).** Yes ||||# Decisions — Version 1 Baseline
+# Decisions — Version 1 Baseline
 
 This file records the agreed answers to the 81 open questions in `docs/blueprint/99-open-questions.md`.
 
@@ -6,7 +6,7 @@ This file records the agreed answers to the 81 open questions in `docs/blueprint
 
 - Where this file and the blueprint differ, **this file wins**.
 - Items marked **OPEN** are not decided yet. Do not build those parts until the project owner records a decision here.
-- Items marked **CA APPROVAL REQUIRED** (questions 43 and 55–64) must be formally approved by the company's Chartered Accountant or tax consultant **before the GST module is built**. (Changed 22 October 2026 for GST: there is no separate approval step; GST settings and rates apply as soon as they are saved. See the change log.)
+- Questions 43 and 55–64 were first marked **CA APPROVAL REQUIRED**. **Changed 22 October 2026:** there is no separate accountant approval step. GST settings and rates apply as soon as they are saved, and bills are never provisional. The Chartered Accountant may still review the settings, but nothing waits for it. See the change log.
 - Any later change to a decision is recorded in the change log at the end, with the date and the reason.
 
 Baseline agreed: 14 October 2026.
@@ -26,7 +26,7 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | Stock, inter-shop transfers, stock counts | Bank statement matching (53) |
 | Billing counter with offline queue, returns, exchange, shift close, card/UPI payment recording | Card/UPI settlement matching (54) |
 | Basic accounts | Direct e-invoice provider connection (63); launch with JSON/Excel export only |
-| GST invoices and GST return data (after CA approval) | WhatsApp receipts (67, 74), label designer (73) |
+| GST invoices and GST return data | WhatsApp receipts (67, 74), label designer (73) |
 | Key daily reports, Excel import | Tally, Marg and Busy imports (77) |
 | Loyalty points and reloadable gift cards (14–16; added 21 October 2026, plan 13) | |
 
@@ -46,24 +46,24 @@ Build **only** what is in the launch column. Items in the "later" column are **d
 | ~~Final list of launch integrations~~ **Decided 28 October 2026:** receipt printer, cash drawer, UPI and WhatsApp bills (WhatsApp built after launch) | 79 |
 | ~~Points from the launch check~~ **Decided 28 October 2026:** all recommendations accepted | L1–L12 below |
 
-### Waiting for the owner: points from the launch check (27 October 2026)
+### Decided: points from the launch check (27 October 2026)
 
-Found while testing every screen and auditing the code before launch (`docs/launch-check.md`, problem numbers in brackets). Nothing below is built until the owner records a decision here. Each has a recommendation.
+Found while testing every screen and auditing the code before launch (`docs/launch-check.md`, problem numbers in brackets). The owner decided all twelve on 27 and 28 October 2026 (see the change log), and all are built.
 
 | No. | Topic | The question | Recommendation |
 | --- | --- | --- | --- |
 | L1 | HSN codes (27) | The HSN list starts empty, but the GST return's HSN summary needs a description per code. Fill in the common codes of each shop type at set-up, with the official CBIC descriptions? | **Partly decided 28 October 2026:** the official HSN / SAC list of the GST portal is built in (owner asked for it). Decided 28 October 2026: each shop-type template also adds its common codes to the shop's own list at set-up |
-| L2 | Sizes (28) | The clothing template has no "Free size" (dupattas, sarees, some kurtis) and no XS. Add them? | Yes |
-| L3 | Markdowns (32) | A markdown made by mistake cannot be withdrawn or ended early; each new price is ended by hand. Add "Withdraw" (before it starts) and "End now"? | Yes |
-| L4 | Purchase order GST (33) | An item never bought before starts at 0% GST on a purchase order. Start from the GST rate list (per HSN) instead? | Yes |
-| L5 | Freight on goods returned to a supplier (34) | A returned piece leaves stock at full cost including its freight share, but the supplier's debit note clears only the goods, so a few rupees stay in "Goods received not billed" for ever. (a) The freight share goes back to "Freight inward", or (b) the piece leaves at the supplier's rate and the freight stays in the remaining stock? Ask the accountant if unsure. | (a) |
-| L6 | Starting discount limit (49) | Every item starts with a 0% maximum discount, so a new shop cannot give any typed discount until it sets one per item. Let each shop-type template set a starting maximum (for example 10%)? | Yes, 10% for clothing and fancy shops |
+| L2 | Sizes (28) | The clothing template has no "Free size" (dupattas, sarees, some kurtis) and no XS. Add them? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes |
+| L3 | Markdowns (32) | A markdown made by mistake cannot be withdrawn or ended early; each new price is ended by hand. Add "Withdraw" (before it starts) and "End now"? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes |
+| L4 | Purchase order GST (33) | An item never bought before starts at 0% GST on a purchase order. Start from the GST rate list (per HSN) instead? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes |
+| L5 | Freight on goods returned to a supplier (34) | A returned piece leaves stock at full cost including its freight share, but the supplier's debit note clears only the goods, so a few rupees stay in "Goods received not billed" for ever. (a) The freight share goes back to "Freight inward", or (b) the piece leaves at the supplier's rate and the freight stays in the remaining stock? Ask the accountant if unsure. | **Decided 28 October 2026 (owner accepted the recommendation).** (a) |
+| L6 | Starting discount limit (49) | Every item starts with a 0% maximum discount, so a new shop cannot give any typed discount until it sets one per item. Let each shop-type template set a starting maximum (for example 10%)? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes, 10% for clothing and fancy shops |
 | L7 | GST price band for clothing (61) | The till decides the ₹2,500 clothing band on the price including GST; the official rule may be on the value before GST. Which one? Answer from the official CBIC notification. | **Decided 28 October 2026 (owner accepted the recommendation).** the band uses the value **before GST**, after any discount, per piece. Source: CBIC GST Rates FAQ, question 33 ("sale value … refers to the transaction value"), and CGST Act section 15 (the transaction value does not include the GST itself). A till price includes GST, so each band is tried with its own rate taken out; a price that fits neither (₹2,625.01 to ₹2,950 for the ₹2,500 band) takes the higher rate, so the tax is never too low |
-| L8 | CGST and SGST paise (62) | Each line gives its odd paisa to CGST, so a long bill can show CGST a few paise above SGST. Split per bill and rate instead, so they are always equal? | Yes: e-invoice and GSTR-1 usually expect them equal |
-| L9 | Rounding at the till (63) | A till day's accounts entry may be up to ₹0.50 out, and the difference goes to Rounding without notice, which could hide a mistake. Tighten to 1 paisa per bill, or keep ₹0.50 per day? | Tighten to 1 paisa per bill |
-| L10 | Cash accounts of a new store (36) | A new store gets its cash accounts only at its first till shift, so its cash cannot be chosen on a payment before that. Make them when the store is added? | Yes |
+| L8 | CGST and SGST paise (62) | Each line gives its odd paisa to CGST, so a long bill can show CGST a few paise above SGST. Split per bill and rate instead, so they are always equal? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes: e-invoice and GSTR-1 usually expect them equal |
+| L9 | Rounding at the till (63) | A till day's accounts entry may be up to ₹0.50 out, and the difference goes to Rounding without notice, which could hide a mistake. Tighten to 1 paisa per bill, or keep ₹0.50 per day? | **Decided 28 October 2026 (owner accepted the recommendation).** Tighten to 1 paisa per bill |
+| L10 | Cash accounts of a new store (36) | A new store gets its cash accounts only at its first till shift, so its cash cannot be chosen on a payment before that. Make them when the store is added? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes |
 | L11 | The menu on the left (88) | Every screen the person may use is listed: for an owner, 84 links in 9 sections, all open. Keep it, or fold the sections? | **Decided 27 October 2026: fold** (built). "Most used" and the section of the screen you are on stay open; the rest fold to one line each with the number of screens; a section you open stays open on that computer; quick search (Ctrl+K) still finds every screen and report tab |
-| L12 | Batch numbers for cosmetics (89) | Every new batch item starts with "Number batches automatically" ticked. Cosmetics shops usually record the batch number printed on the pack (for recalls). Should the cosmetics template start with it off? | Yes: off for cosmetics, on for the rest |
+| L12 | Batch numbers for cosmetics (89) | Every new batch item starts with "Number batches automatically" ticked. Cosmetics shops usually record the batch number printed on the pack (for recalls). Should the cosmetics template start with it off? | **Decided 28 October 2026 (owner accepted the recommendation).** Yes: off for cosmetics, on for the rest |
 
 ---
 
@@ -166,7 +166,7 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 **42.** One exchange screen that nets the return and the new sale.
 
-**43. CA APPROVAL REQUIRED.** GST receipt and invoice layouts are configurable and approved by the accountant. Required fields include supplier GSTIN, unique serial number, date, item and HSN, quantity, taxable value, tax rate and tax amounts; further fields apply to B2B and inter-state invoices. Source: [CBIC invoice rules](https://cbic-gst.gov.in/gst-invoice-rules.html).
+**43.** (Was "CA approval required"; no separate approval step since 22 October 2026.) GST receipt and invoice layouts are configurable. Required fields include supplier GSTIN, unique serial number, date, item and HSN, quantity, taxable value, tax rate and tax amounts; further fields apply to B2B and inter-state invoices. Source: [CBIC invoice rules](https://cbic-gst.gov.in/gst-invoice-rules.html).
 
 **44.** Payment providers: choose based on terminals the shops already use. Keep payment integration modular so providers can be replaced. Which providers: **OPEN**.
 
@@ -194,11 +194,13 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 
 **54.** Yes, include card and UPI settlement matching (gross bills versus net payout plus fees).
 
-**55. CA APPROVAL REQUIRED.** Start with a standard India-retail chart of accounts; the accountant approves it before use.
+**55.** (Was "CA approval required"; no separate approval step since 22 October 2026.) Start with a standard India-retail chart of accounts, ready to use as soon as the company is set up.
 
-## Tax (GST) — all CA APPROVAL REQUIRED before the GST module is built
+## Tax (GST)
 
-**56.** Never hard-code GST rates. Keep an effective-dated HSN tax master approved by the tax consultant. Major rate changes took effect from 22 September 2025; the applicable rate remains product/HSN-specific. Source: [GST Council release (PIB)](https://www.pib.gov.in/PressReleasePage.aspx?PRID=2163555&lang=2&reg=3).
+Questions 56–64 were first marked "CA approval required". Since 22 October 2026 there is no separate approval step: GST settings and rates apply as soon as they are saved.
+
+**56.** Never hard-code GST rates. Keep an effective-dated HSN tax master (no separate approval step; see above). Major rate changes took effect from 22 September 2025; the applicable rate remains product/HSN-specific. Source: [GST Council release (PIB)](https://www.pib.gov.in/PressReleasePage.aspx?PRID=2163555&lang=2&reg=3).
 
 **57.** E-invoicing applies at ₹5 crore aggregate annual turnover, subject to exclusions and accountant confirmation. The turnover test is across all GSTINs under the same PAN. Source: [Official IRP e-invoice mandate](https://einvoice6.gst.gov.in/content/einvoice-mandate/).
 
@@ -223,6 +225,8 @@ Found while testing every screen and auditing the code before launch (`docs/laun
 **66.** Priority reports: hourly sales, best and worst sellers, stock variance and loss, stock cover, and a loyalty report if loyalty is enabled.
 
 **67.** Daily summaries by email by default. WhatsApp only for opted-in managers and customers, after a provider is chosen.
+
+*What is built (for the owner to note):* the daily summary email is built, but it starts **switched off** for every shop. The Owner switches it on and picks who receives it in Settings. This differs from "by default" above; tell us if it should start switched on.
 
 ## Users, roles and permissions
 

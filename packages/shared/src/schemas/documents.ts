@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
 
 const isoDate = z.string().refine(isIsoDate, 'Choose a date');
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 
 // ---- Printing ----

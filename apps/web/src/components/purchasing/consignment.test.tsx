@@ -124,7 +124,12 @@ describe("ConsignmentOverview", () => {
       </AuthProvider>,
     );
     expect((await screen.findAllByText("₹3,000.00")).length).toBe(2); // held value and owed
-    expect(screen.getAllByText("₹300.00").length).toBeGreaterThan(0);
+    // The supplier's row in "Held by supplier": each amount sits in its own column.
+    const held = screen.getAllByRole("table")[0];
+    const headers = [...held.querySelectorAll("th")].map((h) => h.textContent);
+    const cells = [...held.querySelectorAll("tbody tr")[0].querySelectorAll("td")].map((c) => c.textContent);
+    expect(headers).toEqual(["Supplier", "Store", "Held", "Held value", "Sold, not settled", "Sold amount", "Owed on consignment"]);
+    expect(cells).toEqual([FANCY.name, MAIN.code, "10", "₹3,000.00", "1", "₹300.00", "₹3,000.00"]);
     expect(await screen.findByText(/agree with the "Owed to suppliers on consignment" account/)).toBeTruthy();
     expect(await screen.findByText("CS-MAIN-2026-27-00001")).toBeTruthy();
     expect(screen.getByText("PB-2026-27-00001")).toBeTruthy();

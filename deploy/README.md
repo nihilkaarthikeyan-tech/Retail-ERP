@@ -13,7 +13,7 @@ Address: **https://retailerp.52digit.com** — the web app at `/`, the API at `/
 
 ## First time
 
-1. **DNS (Cloudflare, where 52digit.com is managed):** add an `A` record, name `retailerp`, value the server's IP address.
+1. **DNS (Cloudflare, where 52digit.com is managed):** add an `A` record, name `retailerp`, value the server's IP address (187.127.145.132), with the orange cloud on (proxied). Through Cloudflare the `A` record is enough, because Cloudflare answers visitors on both IPv4 and IPv6. If the record is ever not proxied, also add an `AAAA` record with the value `2a02:4780:63:6034::1`, or visitors on IPv6-only networks (for example Airtel) cannot reach the site.
 2. On the server, as root:
    ```sh
    mkdir -p /opt/retail-erp && cd /opt/retail-erp

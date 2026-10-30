@@ -84,7 +84,7 @@ Accounts: add expense, cash book, bank book · Imports: styles and variants · D
 
 ## API endpoints (main)
 
-`/sales-staff`, `/seasons`, `/markdowns` (preview, apply), `/expenses`, `/reports/cash-book`, `/reports/by-salesperson`,
+`/sales-staff`, `/seasons`, `/markdowns` (preview, apply), `/expenses`, `/reports/cash-book`, `/pos/reports/by-salesperson`,
 `/reports/season-sell-through`, `/customers/:id/purchases`, `/customers/birthdays`, `/pos/deliveries`,
 `/items/:id/apply-to-variants`, import kind `styles_variants`, new offer kinds on `/pos/offers`.
 

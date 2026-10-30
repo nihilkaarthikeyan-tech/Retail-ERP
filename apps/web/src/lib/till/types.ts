@@ -27,6 +27,8 @@ export interface SnapTill {
   fallbackPriceList: { id: string; pricesPerUnit: boolean } | null;
   cashierDiscountPercent: string;
   allowPriceChange: boolean;
+  /** Audit 14: an item with no price may be sold at a typed price, which the server saves as its price. */
+  saveTypedPrices?: boolean;
   autoPrint: boolean;
   receiptFooter: string | null;
   store: { id: string; code: string; name: string; address: string; phone: string | null; stateCode: string | null };
@@ -295,6 +297,8 @@ export interface BillLineDto {
   gstRate: string;
   lineTotal: string;
   salesStaffId?: string | null;
+  /** The serial numbers sold on the line (a return picks from these). */
+  serialNumbers?: string[];
 }
 
 export interface BillDto {
@@ -310,6 +314,8 @@ export interface BillDto {
   total: string;
   offline: boolean;
   /** Plan 08: the bill's GST (a return keeps its original bill's). */
+  cgst?: string;
+  sgst?: string;
   igst?: string;
   invoiceKind?: string;
   placeOfSupply?: string | null;

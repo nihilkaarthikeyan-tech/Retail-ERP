@@ -143,7 +143,7 @@ Stock, accounts and tax are not affected by anything in this module.
 
 ### 3.2 A business customer with a GSTIN in another state
 - **When** a Wholesale customer is created with GSTIN `29…` (Karnataka) while the company is in Tamil Nadu
-- **Then** its state is recorded as 29 and the GST treatment helper answers "other state" for its billing address; a GSTIN whose state digits differ from the typed state is refused.
+- **Then** its state is recorded as 29 and billing it from Tamil Nadu is inter-state (IGST), by the same rule the till and the server use; a GSTIN whose state digits differ from the typed state is refused.
 
 ### 3.3 Due dates from payment terms
 - **Given** terms "Net 15" (15 days after bill date), "Month end + 10" and "50 % advance / 50 % at 30 days"
@@ -651,7 +651,7 @@ Reports only read. Each scenario checks that a report agrees with the documents 
 
 ## Module 8 — Tax (GST) (plan 08)
 
-Amounts use test rates entered for these scenarios; the CA approves the real rates before go-live.
+Amounts use test rates entered for these scenarios. There is no CA approval step: a rate applies as soon as it is saved, and bills are never provisional.
 
 ### 8.1 Consumer bill, same state (the CLAUDE.md "GST invoice" minimum)
 - **Given** MAIN in Tamil Nadu (33), a shirt priced ₹1,050 including 5% GST

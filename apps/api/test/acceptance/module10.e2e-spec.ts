@@ -218,11 +218,18 @@ describe('10.5–10.9 import and export', () => {
       [0, 1, 2],
     );
     expect(r.status).toMatchObject({ added: 3, failed: 0 });
-    const counts = await prisma.stockDocument.findMany({ where: { kind: 'count', countType: 'opening', status: 'draft' }, include: { lines: true } });
+    const counts = await prisma.stockDocument.findMany({ where: { kind: 'count', countType: 'opening', status: 'draft' }, include: { lines: true }, orderBy: { number: 'asc' } });
     expect(counts.map((c) => c.lines.length).sort((a, b) => a - b)).toEqual([1, 2]);
     expect(await prisma.stockLedgerEntry.count()).toBe(0);
-    await owner.post(`/stock/documents/${counts[0].id}/finalise`).expect(200);
-    expect(await prisma.stockLedgerEntry.count()).toBeGreaterThan(0);
+    for (const c of counts) await owner.post(`/stock/documents/${c.id}/finalise`).expect(200);
+    // One movement per imported row, and each shelf holds exactly what the sheet said, at its cost.
+    expect(await prisma.stockLedgerEntry.count()).toBe(3);
+    const positions = await prisma.stockPosition.findMany({ include: { item: true, location: true }, orderBy: [{ location: { code: 'asc' } }, { item: { name: 'asc' } }] });
+    expect(positions.map((p) => [p.location.code, p.item.name, p.quantity.toString(), p.unitCost.toFixed(2), p.value.toFixed(2)])).toEqual([
+      ['MAIN-BACK', 'Toor Dal 1 kg', '60', '150.00', '9000.00'],
+      ['MAIN-FLOOR', 'Salt 1 kg', '100', '20.00', '2000.00'],
+      ['MAIN-FLOOR', 'Toor Dal 1 kg', '40', '150.00', '6000.00'],
+    ]);
 
     const c = await prisma.customer.findFirstOrThrow({ where: { name: 'Hotel Saravana' } });
     const bills = await importSheet('opening_bills', [['Customer or supplier', 'Party code', 'Bill number', 'Bill date', 'Due date', 'Amount still owed'], ['customer', c.code, 'OLD/9', '01/09/2026', '30/09/2026', '1,200']], 'add', [1, 2]);

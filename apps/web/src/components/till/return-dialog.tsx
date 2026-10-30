@@ -10,12 +10,12 @@
 "use client";
 
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Decimal } from "shared";
+import { Decimal, returnSupplyOf } from "shared";
 import { Alert, Button, Dialog } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import type { RecentBill, TillEngine } from "@/lib/till/engine";
 import { qty, rupees } from "@/lib/till/format";
-import { type DraftBill, type DraftReturnLine, listPriceFor, scan, searchItems } from "@/lib/till/pricing";
+import { type DraftBill, type DraftReturnLine, listPriceFor, scan, searchItems, sellerStateOf } from "@/lib/till/pricing";
 import type { BillDto, SnapItem, StoredSnapshot } from "@/lib/till/types";
 
 export const NO_BILL_OFFLINE_HINT = "Returns without a bill need the connection: a manager approves them on the server. Try again when the till is online.";
@@ -53,6 +53,8 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
   const [number, setNumber] = useState("");
   const [bill, setBill] = useState<BillDto | null>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
+  /** Audit 14: the serial numbers ticked as coming back, by bill line (the server needs exactly these). */
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,6 +81,7 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
     if (b.status !== "completed") return setError(`Bill ${b.number} is cancelled`);
     setBill(b);
     setCounts({});
+    setPicked({});
     setError(null);
   }
 
@@ -99,7 +102,9 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
     if (!bill) return;
     const lines: DraftReturnLine[] = [];
     for (const l of bill.lines) {
-      const raw = counts[l.id];
+      const serials = l.serialNumbers?.length ? (picked[l.id] ?? []) : null;
+      // A serial-numbered line comes back by the serials ticked (in the line's own unit: ticked ÷ pieces per unit).
+      const raw = serials ? (serials.length ? new Decimal(serials.length).mul(l.quantity).div(l.basicQuantity).toString() : "") : counts[l.id];
       if (!raw) continue;
       let q: Decimal;
       try {
@@ -125,12 +130,15 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
         originalLineTotal: l.lineTotal,
         gstRate: l.gstRate,
         isFree: l.isFree,
+        ...(serials ? { serials } : {}),
       });
     }
     if (!lines.length) return setError("Choose what comes back");
     const paidOnAccount = bill.payments.some((p) => p.paymentMethod.kind === "on_account");
-    // Plan 08 G6: the credit note keeps the original bill's GST (IGST when it was to another state; none on a bill of supply).
-    const supply = { interState: !!bill.igst && !new Decimal(bill.igst).isZero(), noTax: bill.invoiceKind === "bill_of_supply" };
+    // Plan 08 G6: the credit note keeps the original bill's GST. Audit 14: by the server's own rule (returnSupplyOf), so after the
+    // credit-note time limit, or for a bill with no tax, the till shows no GST either.
+    const kept = returnSupplyOf({ invoiceKind: bill.invoiceKind, cgst: bill.cgst ?? "0", sgst: bill.sgst ?? "0", igst: bill.igst ?? "0", placeOfSupply: bill.placeOfSupply, businessDate: bill.businessDate }, sellerStateOf(snapshot), today);
+    const supply = { interState: kept.interState, noTax: kept.noTax };
     // Plan 13 (decision 16): points and gift card money paid on the bill go back in proportion (worked out as the server does).
     const allReturned = bill.lines.every((l) => {
       const left = leftToReturn(l);
@@ -370,6 +378,22 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
                     <td className="num">{qty(left)}</td>
                     <td className="num">{rupees(l.lineTotal)}</td>
                     <td className="num">
+                      {l.serialNumbers?.length ? (
+                        <fieldset className="till-serials">
+                          <legend className="sr-only">Serial numbers of {l.item.name} coming back</legend>
+                          {l.serialNumbers.map((s) => (
+                            <label key={s} className="till-row">
+                              <input
+                                type="checkbox"
+                                disabled={left.lte(0)}
+                                checked={(picked[l.id] ?? []).includes(s)}
+                                onChange={(e) => setPicked({ ...picked, [l.id]: e.target.checked ? [...(picked[l.id] ?? []), s] : (picked[l.id] ?? []).filter((x) => x !== s) })}
+                              />
+                              <span className="mono">{s}</span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      ) : (
                       <div className="till-row">
                         <input
                           className="input till-input-small"
@@ -383,6 +407,7 @@ export function ReturnDialog({ open, engine, snapshot, online, onClose, onChosen
                           All
                         </Button>
                       </div>
+                      )}
                     </td>
                   </tr>
                 );

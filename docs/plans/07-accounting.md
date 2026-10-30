@@ -159,12 +159,12 @@ Numbers: `JV-2026-27-00001` (journals), `RCT-…` (receipts), `PAY-…` (payment
 
 ## 7. API endpoints (all check permission and store on the backend)
 
-- `GET/POST/PATCH /accounts`, `/accounts/:id/lock`, `GET /accounts/tree`, `POST /accounts/approve-chart` (Owner records the CA's approval)
+- `GET/POST/PATCH /accounts`, `/accounts/:id/lock`, `POST /accounts/approve-chart` (Owner records the CA's approval)
 - `GET/PUT /accounting/defaults`, `GET/POST/PATCH /bank-accounts`
 - `GET/POST/PATCH /journals`, `POST /journals/:id/post`, `POST /journals/:id/cancel`
 - `GET/POST/PATCH /payments`, `/payments/:id/post`, `/payments/:id/cancel`, `GET /parties/:type/:id/open-items`, `POST /settlements`, `POST /settlements/:id/undo`
 - `GET/POST /opening-bills`, `GET /accounting/opening-check`
-- `GET /ledger/entries?document=…`, `GET /reports/general-ledger`, `/day-book`, `/trial-balance`, `/profit-and-loss`, `/balance-sheet`, `/party-statement`, `/ageing`, `/stock-vs-accounts`, `/book-health`
+- `GET /ledger/entries?documentType=…&documentId=…`, `GET /reports/general-ledger`, `/reports/cash-book`, `/reports/day-book`, `/reports/trial-balance`, `/reports/profit-and-loss`, `/reports/balance-sheet`, `/reports/party-statement/:type/:id`, `/reports/ageing`, `/reports/stock-vs-accounts`, `/reports/book-health`
 - `PATCH /accounting/lock-date`, `GET/POST /year-end-closings`, `POST /year-end-closings/:id/cancel`
 
 ## 8. Permissions (new keys and who gets them)

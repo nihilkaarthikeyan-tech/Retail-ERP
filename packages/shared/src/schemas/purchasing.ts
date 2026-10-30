@@ -3,13 +3,13 @@
 // returns, extra charges, reorder suggestions and settings (plan 05).
 import { z } from 'zod';
 import { isIsoDate } from '../financial-year.js';
-import { decimalString, nonNegativeDecimalString, positiveDecimalString } from './catalogue.js';
+import { nonNegativeDecimalString, positiveDecimalString } from './catalogue.js';
 
 const trimmed = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) => z.string().trim().max(max).optional().nullable();
 const isoDate = z.string().refine(isIsoDate, 'Choose a date');
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
-const uuid = z.string().uuid();
+const uuid = z.uuid();
 const percent = nonNegativeDecimalString.refine((v) => Number(v) <= 100, 'Must be 100 or less');
 
 export const ORDER_STATUSES = ['draft', 'to_receive_and_bill', 'to_receive', 'to_bill', 'completed', 'on_hold', 'closed', 'cancelled'] as const;
@@ -156,7 +156,7 @@ export type UpdateGoodsReceiptInput = z.infer<typeof updateGoodsReceiptSchema>;
 export const receiptCheckSchema = z.object({
   result: z.enum(CHECK_RESULTS),
   remarks: optionalText(500),
-  checkedAt: z.string().datetime({ offset: true }).optional(),
+  checkedAt: z.iso.datetime({ offset: true }).optional(),
 });
 export type ReceiptCheckInput = z.infer<typeof receiptCheckSchema>;
 
@@ -307,9 +307,6 @@ export const purchaseReportQuerySchema = z.object({
   to: isoDate.optional(),
 });
 export type PurchaseReportQuery = z.infer<typeof purchaseReportQuerySchema>;
-
-/** A plain decimal-string check for amounts typed in the web forms. */
-export const purchaseAmount = decimalString;
 
 // ---- Supplier sale-or-return (plan 11 part 2 §3) ----
 

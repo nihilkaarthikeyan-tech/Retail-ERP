@@ -1,7 +1,7 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
 // Input validation shared by the API (authoritative) and the web forms.
 import { z } from 'zod';
-import { GSTIN_RE, PAN_RE } from '../company.js';
+import { PAN_RE } from '../company.js';
 import { isIsoDate } from '../financial-year.js';
 import { gstinProblem } from '../gst-core.js';
 import { INDIAN_MOBILE, INDIAN_MOBILE_MESSAGE, isStateCode } from '../india.js';
@@ -155,7 +155,7 @@ export const createStoreSchema = z.object({
   ...addressFields,
   phone: optionalText(20),
   email: email.optional().nullable(),
-  gstRegistrationId: z.string().uuid().optional().nullable(),
+  gstRegistrationId: z.uuid().optional().nullable(),
 });
 export type CreateStoreInput = z.infer<typeof createStoreSchema>;
 
@@ -186,7 +186,7 @@ const patternSchema = z
   .trim()
   .min(1)
   .max(40)
-  .regex(/^[A-Z0-9\-\/{}_]+$/i, 'Pattern may contain letters, digits, - / _ and {TOKENS}')
+  .regex(/^[A-Z0-9\-/{}_]+$/i,'Pattern may contain letters, digits, - / _ and {TOKENS}')
   .refine((p) => {
     for (const m of p.matchAll(/\{([A-Z]+)\}/g)) {
       if (!(NUMBER_PATTERN_TOKENS as readonly string[]).includes(m[1])) return false;
@@ -201,7 +201,7 @@ export const createNumberSeriesSchema = z.object({
     .regex(/^[a-z_]{3,40}$/, 'Document kind must be lower-case letters and underscores'),
   pattern: patternSchema,
   counterLength: z.number().int().min(3).max(10).optional(),
-  storeId: z.string().uuid().optional().nullable(),
+  storeId: z.uuid().optional().nullable(),
 });
 export type CreateNumberSeriesInput = z.infer<typeof createNumberSeriesSchema>;
 
@@ -229,10 +229,10 @@ export const createUserSchema = z.object({
   email,
   mobile,
   temporaryPassword: z.string().min(1).max(200),
-  roleIds: z.array(z.string().uuid()).min(0),
+  roleIds: z.array(z.uuid()).min(0),
   allStores: z.boolean().optional(),
-  storeIds: z.array(z.string().uuid()).optional(),
-  defaultStoreId: z.string().uuid().optional().nullable(),
+  storeIds: z.array(z.uuid()).optional(),
+  defaultStoreId: z.uuid().optional().nullable(),
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
@@ -243,10 +243,10 @@ export const updateUserSchema = z
     email,
     mobile,
     active: z.boolean(),
-    roleIds: z.array(z.string().uuid()),
+    roleIds: z.array(z.uuid()),
     allStores: z.boolean(),
-    storeIds: z.array(z.string().uuid()),
-    defaultStoreId: z.string().uuid().nullable(),
+    storeIds: z.array(z.uuid()),
+    defaultStoreId: z.uuid().nullable(),
   })
   .partial();
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
@@ -285,7 +285,7 @@ export type UpdateRoleInput = z.infer<typeof updateRoleSchema>;
 // ---- Audit ----
 
 export const auditQuerySchema = z.object({
-  userId: z.string().uuid().optional(),
+  userId: z.uuid().optional(),
   entityType: z.string().max(40).optional(),
   entityId: z.string().max(60).optional(),
   from: isoDate.optional(),

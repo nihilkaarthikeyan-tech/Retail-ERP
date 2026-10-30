@@ -46,8 +46,8 @@ export const updateUnitSchema = z.object({ name: trimmed(40), allowsFractions: z
 export type UpdateUnitInput = z.infer<typeof updateUnitSchema>;
 
 export const createUnitConversionSchema = z.object({
-  fromUnitId: z.string().uuid(),
-  toUnitId: z.string().uuid(),
+  fromUnitId: z.uuid(),
+  toUnitId: z.uuid(),
   factor: positiveDecimalString,
 });
 export type CreateUnitConversionInput = z.infer<typeof createUnitConversionSchema>;
@@ -57,7 +57,7 @@ export type CreateUnitConversionInput = z.infer<typeof createUnitConversionSchem
 export const createItemGroupSchema = z.object({
   code: itemCode,
   name: trimmed(80),
-  parentId: z.string().uuid().optional().nullable(),
+  parentId: z.uuid().optional().nullable(),
   hsnCode: hsnCode.optional().nullable(),
 });
 export type CreateItemGroupInput = z.infer<typeof createItemGroupSchema>;
@@ -120,7 +120,7 @@ export type UpdateAttributeInput = z.infer<typeof updateAttributeSchema>;
 // ---- Items ----
 
 const itemUnit = z.object({
-  unitId: z.string().uuid(),
+  unitId: z.uuid(),
   factor: positiveDecimalString,
   mrp: nonNegativeDecimalString.optional().nullable(),
 });
@@ -129,9 +129,9 @@ export const itemBodySchema = z.object({
   code: itemCode.optional(),
   name: trimmed(120),
   description: optionalText(1000),
-  itemGroupId: z.string().uuid(),
-  brandId: z.string().uuid().optional().nullable(),
-  baseUnitId: z.string().uuid(),
+  itemGroupId: z.uuid(),
+  brandId: z.uuid().optional().nullable(),
+  baseUnitId: z.uuid(),
   hsnCode: hsnCode.optional().nullable(),
   mrp: nonNegativeDecimalString.optional().nullable(),
   maxDiscountPercent: decimalString
@@ -147,9 +147,9 @@ export const itemBodySchema = z.object({
   trackSerials: z.boolean().optional(),
   warrantyDays: z.number().int().min(0).optional().nullable(),
   /** Plan 11 C4: the season or collection. */
-  seasonId: z.string().uuid().optional().nullable(),
+  seasonId: z.uuid().optional().nullable(),
   /** Creates a style that varies by these attributes (no stock or prices on it). */
-  variantAttributeIds: z.array(z.string().uuid()).optional(),
+  variantAttributeIds: z.array(z.uuid()).optional(),
 });
 
 export const createItemSchema = itemBodySchema.extend({
@@ -176,24 +176,24 @@ export type SetItemUnitsInput = z.infer<typeof setItemUnitsSchema>;
 export const createBarcodeSchema = z.object({
   code: z.string().trim().min(1).max(64),
   type: z.enum(BARCODE_TYPES).optional(),
-  unitId: z.string().uuid().optional().nullable(),
+  unitId: z.uuid().optional().nullable(),
 });
 export type CreateBarcodeInput = z.infer<typeof createBarcodeSchema>;
 
-export const updateBarcodeSchema = z.object({ unitId: z.string().uuid().nullable(), active: z.boolean() }).partial();
+export const updateBarcodeSchema = z.object({ unitId: z.uuid().nullable(), active: z.boolean() }).partial();
 export type UpdateBarcodeInput = z.infer<typeof updateBarcodeSchema>;
 
 export const createVariantsSchema = z.object({
   /** attributeId → values to tick (list attributes) or numbers as strings (numeric ones). */
-  values: z.record(z.string().uuid(), z.array(trimmed(40)).min(1)),
+  values: z.record(z.uuid(), z.array(trimmed(40)).min(1)),
 });
 export type CreateVariantsInput = z.infer<typeof createVariantsSchema>;
 
 export const itemQuerySchema = z.object({
   search: z.string().trim().max(80).optional(),
-  groupId: z.string().uuid().optional(),
-  brandId: z.string().uuid().optional(),
-  seasonId: z.string().uuid().optional(),
+  groupId: z.uuid().optional(),
+  brandId: z.uuid().optional(),
+  seasonId: z.uuid().optional(),
   kind: z.enum(['stock', 'service', 'style']).optional(),
   active: z.enum(['true', 'false']).optional(),
   /** Audit 8: these items only (comma-separated ids, at most 200), for screens that hold item ids. */
@@ -201,7 +201,7 @@ export const itemQuerySchema = z.object({
     .string()
     .trim()
     .transform((v) => v.split(',').filter(Boolean))
-    .pipe(z.array(z.string().uuid()).max(200))
+    .pipe(z.array(z.uuid()).max(200))
     .optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
@@ -237,12 +237,12 @@ export type MarkdownRule = (typeof MARKDOWN_RULES)[number];
 export const markdownSchema = z
   .object({
     /** Empty = the default selling list. */
-    priceListId: z.string().uuid().optional().nullable(),
-    seasonId: z.string().uuid().optional().nullable(),
-    itemGroupIds: z.array(z.string().uuid()).max(200).optional(),
-    brandIds: z.array(z.string().uuid()).max(200).optional(),
+    priceListId: z.uuid().optional().nullable(),
+    seasonId: z.uuid().optional().nullable(),
+    itemGroupIds: z.array(z.uuid()).max(200).optional(),
+    brandIds: z.array(z.uuid()).max(200).optional(),
     /** Chosen items; a style stands for all its sizes and colours. */
-    itemIds: z.array(z.string().uuid()).max(2000).optional(),
+    itemIds: z.array(z.uuid()).max(2000).optional(),
     rule: z.enum(MARKDOWN_RULES),
     /** Percent off (rule "percent") or the new price per basic unit (rule "price"). */
     value: positiveDecimalString,
@@ -277,15 +277,15 @@ export type UpdatePriceListInput = z.infer<typeof updatePriceListSchema>;
 
 export const createPriceSchema = z
   .object({
-    priceListId: z.string().uuid(),
-    itemId: z.string().uuid(),
-    unitId: z.string().uuid().optional().nullable(),
+    priceListId: z.uuid(),
+    itemId: z.uuid(),
+    unitId: z.uuid().optional().nullable(),
     price: nonNegativeDecimalString,
     startDate: isoDate.optional(),
     endDate: isoDate.optional().nullable(),
     packSize: positiveDecimalString.optional().nullable(),
-    customerId: z.string().uuid().optional().nullable(),
-    supplierId: z.string().uuid().optional().nullable(),
+    customerId: z.uuid().optional().nullable(),
+    supplierId: z.uuid().optional().nullable(),
   })
   .refine((p) => !p.endDate || !p.startDate || p.endDate >= p.startDate, { message: 'End date cannot be before start date' })
   .refine((p) => !(p.customerId && p.supplierId), { message: 'A price is for a customer or a supplier, not both' });
@@ -298,8 +298,8 @@ export type CreatePriceInput = z.infer<typeof createPriceSchema>;
  * a price in the list on that date are left as they are.
  */
 export const stylePriceSchema = z.object({
-  styleId: z.string().uuid(),
-  priceListId: z.string().uuid(),
+  styleId: z.uuid(),
+  priceListId: z.uuid(),
   price: nonNegativeDecimalString,
   startDate: isoDate.optional(),
 });
@@ -309,32 +309,32 @@ export const updatePriceSchema = z.object({ price: nonNegativeDecimalString, end
 export type UpdatePriceInput = z.infer<typeof updatePriceSchema>;
 
 export const priceQuerySchema = z.object({
-  priceListId: z.string().uuid().optional(),
-  itemId: z.string().uuid().optional(),
+  priceListId: z.uuid().optional(),
+  itemId: z.uuid().optional(),
   date: isoDate.optional(),
   includeEnded: z.enum(['true', 'false']).optional(),
 });
 export type PriceQuery = z.infer<typeof priceQuerySchema>;
 
 export const priceLookupSchema = z.object({
-  itemId: z.string().uuid(),
-  unitId: z.string().uuid().optional(),
-  priceListId: z.string().uuid().optional(),
+  itemId: z.uuid(),
+  unitId: z.uuid().optional(),
+  priceListId: z.uuid().optional(),
   date: isoDate.optional(),
   quantity: positiveDecimalString.optional(),
-  customerId: z.string().uuid().optional(),
-  supplierId: z.string().uuid().optional(),
-  batchId: z.string().uuid().optional(),
+  customerId: z.uuid().optional(),
+  supplierId: z.uuid().optional(),
+  batchId: z.uuid().optional(),
 });
 export type PriceLookupInput = z.infer<typeof priceLookupSchema>;
 
 export const updateCatalogueSettingsSchema = z
   .object({
     autoItemCodes: z.boolean(),
-    defaultItemGroupId: z.string().uuid().nullable(),
-    defaultUnitId: z.string().uuid().nullable(),
-    defaultSellingPriceListId: z.string().uuid().nullable(),
-    defaultBuyingPriceListId: z.string().uuid().nullable(),
+    defaultItemGroupId: z.uuid().nullable(),
+    defaultUnitId: z.uuid().nullable(),
+    defaultSellingPriceListId: z.uuid().nullable(),
+    defaultBuyingPriceListId: z.uuid().nullable(),
     fallbackToDefaultSellingList: z.boolean(),
     allowPriceChangeOnBill: z.boolean(),
     blockSellingBelowCost: z.boolean(),

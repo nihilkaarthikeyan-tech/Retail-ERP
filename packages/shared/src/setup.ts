@@ -19,13 +19,7 @@ export const SETUP_STEPS = [
 export type SetupStepKey = (typeof SETUP_STEPS)[number]['key'];
 /** The steps whose answers are saved as you go ("done" only shows a summary). */
 export type SetupAnswerKey = Exclude<SetupStepKey, 'done'>;
-export const SETUP_ANSWER_KEYS: SetupAnswerKey[] = ['business', 'gst', 'shop', 'sell'];
 export const SETUP_LAST_STEP = SETUP_STEPS.length;
-
-/** Step number (1-based) of a step key. */
-export function setupStepNumber(key: SetupStepKey): number {
-  return SETUP_STEPS.findIndex((s) => s.key === key) + 1;
-}
 
 /**
  * The Indian financial year (1 April to 31 March) that holds today's Indian

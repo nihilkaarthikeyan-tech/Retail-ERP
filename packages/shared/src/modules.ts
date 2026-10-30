@@ -6,7 +6,7 @@
 export const OPTIONAL_MODULES = {
   variants: { label: 'Sizes and colours', description: 'Styles in sizes and colours, the size × colour grid, and reports by size and colour.', needs: [] },
   batches: { label: 'Batches and expiry', description: 'Batch numbers and expiry dates on items, with expiry checks at the till.', needs: [] },
-  serials: { label: 'Serial numbers and warranty', description: 'A serial number for every piece, at receipt and at sale, with warranty dates.', needs: [] },
+  serials: { label: 'Serial numbers and warranty', description: 'A serial number for every piece, at receipt and at sale.', needs: [] },
   seasons: { label: 'Seasons and markdowns', description: 'Season or collection on items, season sell-through, and the markdown tool.', needs: [] },
   purchase_orders: { label: 'Purchase orders', description: 'Orders to suppliers before the goods arrive, with follow-up of what is still due.', needs: [] },
   consignment: { label: 'Supplier sale-or-return', description: 'Goods you pay for only when sold; monthly statements turn sales into supplier bills.', needs: [] },

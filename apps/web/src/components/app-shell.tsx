@@ -35,7 +35,8 @@ function CurrentMenu({ user }: { user: CurrentUser }) {
   return <AppMenu user={user} pathname={pathname} />;
 }
 
-const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+/** Audit 14: navigator.platform is deprecated; the newer platform hint where the browser has it, else the user agent. */
+const isMac = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.userAgent);
 
 /**
  * Shell for every logged-in page: the menu on the left with the brand at its

@@ -29,6 +29,7 @@ import {
   quantityProblem,
   rateForLine,
   resolveSupply,
+  saleDocumentKind,
   roundBill,
   roundMoney,
   saleLineAmount,
@@ -130,6 +131,8 @@ export interface DraftBillReturnLine extends ReturnLineBase {
   originalLineTotal: string;
   gstRate: string;
   isFree: boolean;
+  /** Audit 14: serial-numbered items: the serials sold on the bill that come back (the server needs exactly these). */
+  serials?: string[];
 }
 
 export interface DraftCustomer {
@@ -467,9 +470,15 @@ export function gstRateFor(rates: SnapGstRate[], hsnCode: string | null, date: s
 }
 
 /** Plan 08 G1, G3, G4: the place of supply and invoice kind of the sale, as the server works them out. */
+/** The state the till's GSTIN is in. */
+export function sellerStateOf(snapshot: TillSnapshot): string {
+  const till = snapshot.till;
+  return till.gst?.sellerState ?? till.store.stateCode ?? till.company.stateCode;
+}
+
 export function supplyFor(snapshot: TillSnapshot, draft: Pick<DraftBill, "customer" | "buyer" | "delivery">): Supply {
   const till = snapshot.till;
-  const sellerState = till.gst?.sellerState ?? till.store.stateCode ?? till.company.stateCode;
+  const sellerState = sellerStateOf(snapshot);
   const customer = draft.customer;
   const typed = draft.buyer?.gstin?.trim().toUpperCase() || null;
   const own = !typed && customer?.gstin && taxSituationOf(customer.gstin, customer.taxSituation) !== "unregistered" ? customer.gstin : null;
@@ -570,11 +579,6 @@ export function bestBillOffer(offers: SnapOffer[], amount: Decimal): { offer: Sn
   const candidates = offers.filter((o) => o.appliesTo === "bill").map((o) => ({ offer: o, code: o.code, priority: o.priority, saving: lineOfferSaving(offerInput(o), { quantity: "1", price: amount }) }));
   const best = bestOffer(candidates);
   return best ? { offer: best.offer, saving: D(best.saving) } : null;
-}
-
-/** IGST for the sale (plan 08 G1): see supplyFor. */
-export function isInterState(snapshot: TillSnapshot, customer: DraftCustomer | null): boolean {
-  return supplyFor(snapshot, { customer, buyer: null, delivery: null }).interState;
 }
 
 // ---- Working out a bill ----
@@ -715,13 +719,17 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       const qtyProblem = quantity.lte(0) ? "Quantity must be above zero" : quantityProblem(dl.quantity, { code: unit?.code ?? "", allowsFractions: unit?.allowsFractions ?? false });
       if (qtyProblem) problem = qtyProblem;
       if (!item.active) problem = `${item.code} can no longer be sold`;
-      if (item.isStockItem && item.trackSerials && !problem && !quantity.eq(serialList(dl.serials).length)) problem = `scan the ${quantity.toString()} serial number(s) of ${item.code}`;
+      // Audit 14: one serial per piece, as the server counts (a box of 2 needs 2).
+      const pieces = quantity.mul(factor);
+      if (item.isStockItem && item.trackSerials && !problem && !pieces.eq(serialList(dl.serials).length)) problem = `scan the ${pieces.toString()} serial number(s) of ${item.code}`;
       const mrp = unit?.mrp ? D(unit.mrp) : item.mrp ? D(item.mrp).mul(factor) : null;
       // Plan 11 part 2: an ordered line is sold at the price agreed on the order (no list price, offers or approvals).
       const agreed = dl.orderLineId && dl.agreedPrice != null ? D(dl.agreedPrice) : null;
       const list = agreed ?? listPriceFor(snapshot, item, dl.unitId, quantity.gt(0) ? quantity : "1", customerIdForPrice, date);
-      if (list === null && !problem) problem = `${item.code} has no price in the till's price list`;
-      const listPrice = list ?? ZERO;
+      // Audit 14: with "save typed prices" on, a price typed for an item with no price is its price (the server saves it).
+      const typedNew = list === null && !agreed && !!till.saveTypedPrices && dl.priceOverride !== null && dl.priceOverride !== "";
+      if (list === null && !problem && !typedNew) problem = `${item.code} has no price in the till's price list`;
+      const listPrice = list ?? (typedNew ? roundMoney(dl.priceOverride!) : ZERO);
       const price = agreed ?? (dl.priceOverride !== null && dl.priceOverride !== "" ? roundMoney(dl.priceOverride) : listPrice);
       const priceChanged = !price.eq(listPrice);
       const rate = gstRateFor(snapshot.gstRates, item.hsnCode, date);
@@ -736,7 +744,7 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
         problem = problem ?? "The discount is not a number";
       }
       if (agreed && manualPercent.gt(0)) problem = problem ?? "an ordered item is sold at the agreed price, without a discount";
-      if (priceChanged && !till.allowPriceChange && !dl.approvalToken) approvals.push({ kind: "price_change", lineKey: dl.key, reason: `${item.code}: a price change needs a manager` });
+      if ((priceChanged || typedNew) && !till.allowPriceChange && !dl.approvalToken) approvals.push({ kind: "price_change", lineKey: dl.key, reason: `${item.code}: a price change needs a manager` });
       const verdict = checkDiscount({ listPrice, price, mrp, manualDiscountPercent: manualPercent, itemMaxPercent: item.maxDiscountPercent, cashierLimitPercent: cashierLimit, approved: !!dl.approvalToken });
       if (!verdict.ok) {
         if (verdict.needsApproval) approvals.push({ kind: "discount", lineKey: dl.key, reason: `${item.code}: ${verdict.reason}` });
@@ -969,6 +977,9 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       l.tax = supplyLineTax(l.amount, l.gstRate, supply);
     }
     sale = partTotals(lines);
+    // Audit 14: a business buyer gets taxable and exempt goods on separate bills, as the server requires.
+    const doc = saleDocumentKind(supply.invoiceKind, lines.map((l) => l.gstRate));
+    if (doc.problem) problems.push(doc.problem);
     // Plan 08 G4, G5: the buyer's details a business invoice or a large consumer bill needs.
     const b = draft.buyer;
     if (supply.invoiceKind === "business" && b?.gstin.trim() && (!b.name.trim() || !b.address.trim())) problems.push("A business tax invoice needs the buyer's name and address");
@@ -992,7 +1003,8 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
     draft.ret.lines.forEach((rl, index) => {
       const lineNo = index + 1;
       if (rl.originalLineId === null) {
-        const line = noBillReturnLine(rl, lineNo, snapshot, date, supply);
+        // Audit 14: no original invoice, so a return note: the GST is not reduced (rule 53(1A)(g)), as the server records it.
+        const line = noBillReturnLine(rl, lineNo, snapshot, date, { ...supply, noTax: true });
         if (line.problem) problems.push(`${rl.code}: ${line.problem}`);
         if (line.quantity.lt(0)) lines.push(line);
         return;
@@ -1023,6 +1035,11 @@ export function priceBill(draft: DraftBill, ctx: PricingContext): ComputedBill {
       }
       let problem: string | null = null;
       if (quantity.gt(D(rl.maxQuantity))) problem = `only ${rl.maxQuantity} left to return`;
+      // Audit 14: a serial-numbered item comes back with the serials that leave the customer, one per piece.
+      if (!problem && item.isStockItem && item.trackSerials) {
+        const pieces = quantity.mul(D(item.units.find((u) => u.unitId === rl.unitId)?.factor ?? "1"));
+        if (!pieces.eq(rl.serials?.length ?? 0)) problem = `tick the ${pieces.toString()} serial number(s) coming back`;
+      }
       const amount = D(rl.originalQuantity).isZero() ? ZERO : roundMoney(D(rl.originalLineTotal).mul(quantity).div(D(rl.originalQuantity))).neg();
       const price = D(rl.originalPrice);
       const discountAmount = D(rl.originalQuantity).isZero() ? ZERO : roundMoney(D(rl.originalDiscount).mul(quantity).div(D(rl.originalQuantity)));
@@ -1323,7 +1340,10 @@ export function buildTransaction(draft: DraftBill, bill: ComputedBill, methods: 
         number: o.numbers.ret,
         returnOfId: draft.ret.originalBillId,
         reason: draft.ret.reason,
-        lines: bill.ret.lines.map((l) => ({ lineNo: l.lineNo, itemId: l.item.id, unitId: l.unitId, quantity: l.quantity.abs().toString(), returnOfLineId: l.returnOfLineId })),
+        lines: bill.ret.lines.map((l) => {
+          const serials = (draft.ret!.lines.find((d) => d.originalLineId !== null && d.originalLineId === l.returnOfLineId) as DraftBillReturnLine | undefined)?.serials;
+          return { lineNo: l.lineNo, itemId: l.item.id, unitId: l.unitId, quantity: l.quantity.abs().toString(), returnOfLineId: l.returnOfLineId, ...(serials?.length ? { serialNumbers: serials } : {}) };
+        }),
       };
     } else {
       // Without a bill (plan 11 A9): no returnOfId, the manager's approval, and a typed price where there is one.

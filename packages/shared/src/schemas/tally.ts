@@ -10,11 +10,11 @@ export const tallyLedgerName = z
   .string()
   .trim()
   .max(100, 'A Tally ledger name can be at most 100 characters')
-  .refine((s) => !/[\u0000-\u001f<>]/.test(s), 'A Tally ledger name cannot contain < or > or control characters');
+  .refine((s) => !/[<>]/.test(s) && !s.split('').some((c) => c.charCodeAt(0) < 32),'A Tally ledger name cannot contain < or > or control characters');
 
 export const tallyLedgerMapSchema = z.object({
   rows: z
-    .array(z.object({ accountId: z.string().uuid(), tallyLedger: tallyLedgerName.nullable() }))
+    .array(z.object({ accountId: z.uuid(), tallyLedger: tallyLedgerName.nullable() }))
     .min(1)
     .max(2000),
 });
@@ -23,7 +23,7 @@ export type TallyLedgerMapInput = z.infer<typeof tallyLedgerMapSchema>;
 export const tallyExportQuerySchema = z.object({
   from: isoDate,
   to: isoDate,
-  storeId: z.string().uuid().optional(),
+  storeId: z.uuid().optional(),
 });
 export type TallyExportQuery = z.infer<typeof tallyExportQuerySchema>;
 

@@ -69,7 +69,7 @@ export function amountInWords(amount: DecimalInput): string {
 
 const EAN_L = ['0001101', '0011001', '0010011', '0111101', '0100011', '0110001', '0101111', '0111011', '0110111', '0001011'];
 const EAN_G = ['0100111', '0110011', '0011011', '0100001', '0011101', '0111001', '0000101', '0010001', '0001001', '0010111'];
-const EAN_R = EAN_L.map((p) => [...p].map((b) => (b === '1' ? '0' : '1')).join(''));
+const EAN_R = EAN_L.map((p) => p.split('').map((b) => (b === '1' ? '0' : '1')).join(''));
 /** The first digit of an EAN-13 sets which of the left six digits use the G set. */
 const EAN13_PARITY = ['LLLLLL', 'LLGLGG', 'LLGGLG', 'LLGGGL', 'LGLLGG', 'LGGLLG', 'LGGGLL', 'LGLGLG', 'LGLGGL', 'LGGLGL'];
 
@@ -192,8 +192,3 @@ export function labelsPerSheet(s: { width: number; height: number; marginTop?: n
   return { across, down, perSheet: across * down };
 }
 
-/** Amounts on prints: returns shown as plain numbers marked as returned (blueprint 16). */
-export function plainAmount(value: DecimalInput): { amount: Decimal; returned: boolean } {
-  const d = new Decimal(value);
-  return { amount: d.abs(), returned: d.lt(0) };
-}

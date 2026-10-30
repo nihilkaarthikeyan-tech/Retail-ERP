@@ -287,7 +287,6 @@ export type Heads = Record<Head, Decimal>;
 export type HeadsInput = Record<Head, DecimalInput | null | undefined>;
 
 export const HEADS: Head[] = ['igst', 'cgst', 'sgst'];
-export const HEAD_LABELS: Record<Head, string> = { igst: 'IGST', cgst: 'CGST', sgst: 'SGST' };
 
 const heads = (v?: Partial<HeadsInput>): Heads => ({ igst: D(v?.igst), cgst: D(v?.cgst), sgst: D(v?.sgst) });
 

@@ -3,7 +3,7 @@
 
 import { useState, type FormEvent } from "react";
 import { hasPermission, updatePartySettingsSchema } from "shared";
-import { Alert, Button, RadioInput, SelectInput, TextInput } from "@/components/ui";
+import { Alert, Button, SelectInput, TextInput } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { flattenGroups } from "@/lib/catalogue";
@@ -17,7 +17,6 @@ interface SettingsForm {
   defaultSupplierGroupId: string;
   defaultPaymentTermsId: string;
   defaultCreditLimit: string;
-  gstTreatmentFrom: "billing" | "delivery";
 }
 
 function fromDto(s: PartySettingsDto): SettingsForm {
@@ -26,7 +25,6 @@ function fromDto(s: PartySettingsDto): SettingsForm {
     defaultSupplierGroupId: s.defaultSupplierGroupId ?? "",
     defaultPaymentTermsId: s.defaultPaymentTermsId ?? "",
     defaultCreditLimit: s.defaultCreditLimit,
-    gstTreatmentFrom: s.gstTreatmentFrom,
   };
 }
 
@@ -57,7 +55,6 @@ function PartySettingsForm({ settings, customerGroups, supplierGroups, terms, ca
       ...(supplierGroups ? { defaultSupplierGroupId: form.defaultSupplierGroupId || null } : {}),
       defaultPaymentTermsId: form.defaultPaymentTermsId || null,
       defaultCreditLimit: form.defaultCreditLimit.trim() || "0",
-      gstTreatmentFrom: form.gstTreatmentFrom,
     });
     const issues = issuesToFieldErrors(parsed);
     setErrors(issues);
@@ -112,13 +109,6 @@ function PartySettingsForm({ settings, customerGroups, supplierGroups, terms, ca
             ))}
           </SelectInput>
           {creditOn ? <TextInput id="ps-creditLimit" label="Default credit limit" value={form.defaultCreditLimit} onChange={(e) => setForm({ ...form, defaultCreditLimit: e.target.value })} error={errors.defaultCreditLimit} inputMode="decimal" className="mono" hint="0 = no credit until a credit controller sets a limit (agreed default)." /> : null}
-        </div>
-      </fieldset>
-      <fieldset disabled={!canEdit}>
-        <legend>GST: which address decides same-state or other-state</legend>
-        <div className="check-list" role="radiogroup" aria-label="GST treatment from">
-          <RadioInput id="ps-gst-billing" name="gstTreatmentFrom" value="billing" label="Billing address" checked={form.gstTreatmentFrom === "billing"} onChange={() => setForm({ ...form, gstTreatmentFrom: "billing" })} />
-          <RadioInput id="ps-gst-delivery" name="gstTreatmentFrom" value="delivery" label="Delivery address" checked={form.gstTreatmentFrom === "delivery"} onChange={() => setForm({ ...form, gstTreatmentFrom: "delivery" })} />
         </div>
       </fieldset>
       {canEdit ? (

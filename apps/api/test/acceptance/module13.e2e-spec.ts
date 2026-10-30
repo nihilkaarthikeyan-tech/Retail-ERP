@@ -601,6 +601,10 @@ describe('13 accounts, switches and rights', () => {
     await openShift();
     await cashier.post('/pos/gift-cards/sell').set('x-till-token', tillToken).send({ clientId: randomUUID(), tillId, amount: '200', paymentMethodId: pm.CASH }).expect(201);
     const card = await prisma.giftCard.findFirstOrThrow();
+    // The ₹200 is on the card, owed in the books at once, and in the till's cash on top of the ₹2,000 float.
+    expect([card.status, card.balance.toFixed(2), card.loadedTotal.toFixed(2)]).toEqual(['active', '200.00', '200.00']);
+    expect(await credit('gift_card_liability')).toBe('200.00');
+    expect(await expectedCash()).toBe('2200.00');
     await cashier.post(`/gift-cards/${card.id}/block`).send({ reason: 'Lost' }).expect(403);
     await cashier.patch('/loyalty/settings').send({ minRedeem: 10 }).expect(403);
     await cashier.get('/gift-cards').expect(403);

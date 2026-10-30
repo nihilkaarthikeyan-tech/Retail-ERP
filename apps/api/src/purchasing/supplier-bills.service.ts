@@ -129,6 +129,19 @@ export class SupplierBillsService implements OnApplicationBootstrap {
     return { rows: rows.map((b) => this.header(b, user, due.get(b.id))), total, page, pageSize };
   }
 
+  /**
+   * Audit 14: whether a supplier's goods into this store are inter-state (IGST) or not, by the rule the
+   * bill itself uses, so the screens preview the same GST the bill will be saved with.
+   */
+  async placeOfSupply(supplierId: string, storeId: string | null, user: CurrentUser) {
+    this.common.requireRight(user, 'purchase.view');
+    const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
+    if (!supplier) throw new NotFoundException('Supplier not found');
+    if (storeId) assertStoreAccess(user, storeId);
+    const p = await this.common.placeOfSupply(this.prisma, supplier, storeId);
+    return { interState: p.interState, placeOfSupply: p.placeOfSupply, supplierState: p.supplierState };
+  }
+
   async get(id: string, user: CurrentUser) {
     const b = await this.getRow(this.prisma, id);
     if (b.storeId) assertStoreAccess(user, b.storeId);

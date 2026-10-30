@@ -142,7 +142,8 @@ export interface LinePreview {
 }
 
 /** Estimated taxable value, GST and total of a line, or null when the rate is not typed or a figure is not valid. */
-export function previewOrderLine(line: OrderLineDraft): LinePreview | null {
+/** Audit 14: `interState` from the server (useInterState), as the order is saved. */
+export function previewOrderLine(line: OrderLineDraft, interState = false): LinePreview | null {
   const quantity = parse(line.quantity);
   const rate = parse(line.rate);
   if (!quantity || !rate || quantity.lte(0) || rate.isNegative()) return null;
@@ -151,7 +152,7 @@ export function previewOrderLine(line: OrderLineDraft): LinePreview | null {
     const gstRate = line.gstRate.trim() ? parse(line.gstRate) : new Decimal(0);
     if (!gstRate) return null;
     // Within or between states only changes the split, not the amount.
-    const split = suggestGst(taxable, gstRate, false);
+    const split = suggestGst(taxable, gstRate, interState);
     const gst = split.cgst.add(split.sgst).add(split.igst);
     return { taxable, gst, total: taxable.add(gst) };
   } catch {
@@ -160,8 +161,8 @@ export function previewOrderLine(line: OrderLineDraft): LinePreview | null {
 }
 
 /** Estimated order totals, and how many lines could not be estimated (no rate typed). */
-export function previewOrderTotals(lines: OrderLineDraft[]): { taxable: Decimal; tax: Decimal; total: Decimal; roundingAdjustment: Decimal; missing: number } {
-  const previews = lines.map(previewOrderLine);
+export function previewOrderTotals(lines: OrderLineDraft[], interState = false): { taxable: Decimal; tax: Decimal; total: Decimal; roundingAdjustment: Decimal; missing: number } {
+  const previews = lines.map((l) => previewOrderLine(l, interState));
   const known = previews.filter((p): p is LinePreview => p !== null);
   const t = documentTotals(known.map((p) => ({ taxable: p.taxable, cgst: p.gst, sgst: 0, igst: 0 })));
   return { taxable: t.taxable, tax: t.tax, total: t.total, roundingAdjustment: t.roundingAdjustment, missing: previews.length - known.length };
@@ -177,9 +178,11 @@ interface OrderLineGridProps {
   /** Received and still-to-come columns (finalised orders). */
   withProgress: boolean;
   readOnly?: boolean;
+  /** Audit 14: the supplier is in another state (IGST). */
+  interState?: boolean;
 }
 
-export function OrderLineGrid({ lines, onChange, problems, withPrices, withProgress, readOnly }: OrderLineGridProps) {
+export function OrderLineGrid({ lines, onChange, problems, withPrices, withProgress, readOnly, interState = false }: OrderLineGridProps) {
   function update(key: string, patch: Partial<OrderLineDraft>) {
     onChange(lines.map((l) => (l.key === key ? { ...l, ...patch, changed: true } : l)));
   }
@@ -239,7 +242,7 @@ export function OrderLineGrid({ lines, onChange, problems, withPrices, withProgr
             const unit = units.find((u) => u.unitId === l.unitId);
             const problem = problems[l.key];
             const used = lineInUse(l);
-            const preview = withPrices && (l.changed || !l.saved?.lineTotal) ? previewOrderLine(l) : null;
+            const preview = withPrices && (l.changed || !l.saved?.lineTotal) ? previewOrderLine(l, interState) : null;
             const numeric = (label: string, field: "quantity" | "freeQuantity" | "rate" | "discountPercent" | "gstRate", decimal: boolean) => (
               <input
                 className="input"

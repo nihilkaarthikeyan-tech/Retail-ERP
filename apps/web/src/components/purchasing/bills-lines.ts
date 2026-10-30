@@ -242,7 +242,8 @@ export interface LinePreview {
  * suggested from the rate. The split does not change the totals, so the
  * preview does not need to know whether the supplier is in another state.
  */
-export function previewLine(l: BillLineDraft): LinePreview | null {
+/** Audit 14: `interState` from the server (useInterState), so a supplier in another state previews IGST as the bill is saved. */
+export function previewLine(l: BillLineDraft, interState = false): LinePreview | null {
   const quantity = parse(l.quantity);
   const rate = parse(l.rate);
   if (!quantity || !rate || quantity.lte(0) || rate.isNegative()) return null;
@@ -255,7 +256,7 @@ export function previewLine(l: BillLineDraft): LinePreview | null {
   const typed = [l.cgst, l.sgst, l.igst].some((v) => v.trim() !== "");
   const split = typed
     ? { cgst: parse(l.cgst) ?? new Decimal(0), sgst: parse(l.sgst) ?? new Decimal(0), igst: parse(l.igst) ?? new Decimal(0) }
-    : suggestGst(taxable, parse(l.gstRate) ?? new Decimal(0), false);
+    : suggestGst(taxable, parse(l.gstRate) ?? new Decimal(0), interState);
   const gst = split.cgst.add(split.sgst).add(split.igst);
   return { taxable, ...split, gst, total: taxable.add(gst), suggested: !typed };
 }
@@ -274,9 +275,9 @@ export interface BillPreview {
  * Under reverse charge (plan 08 G8) the supplier is owed the bill without
  * tax; the tax is still shown, as the shop pays it itself.
  */
-export function previewBill(lines: BillLineDraft[], reverseCharge = false): BillPreview {
+export function previewBill(lines: BillLineDraft[], reverseCharge = false, interState = false): BillPreview {
   const included = lines.filter((l) => l.include);
-  const previews = included.map(previewLine);
+  const previews = included.map((l) => previewLine(l, interState));
   const priced = previews.filter((p): p is LinePreview => p !== null);
   const zero = new Decimal(0);
   const t = documentTotals(priced.map((p) => (reverseCharge ? { taxable: p.taxable, cgst: zero, sgst: zero, igst: zero } : { taxable: p.taxable, cgst: p.cgst, sgst: p.sgst, igst: p.igst })));

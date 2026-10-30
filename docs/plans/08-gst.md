@@ -18,9 +18,9 @@ between businesses is a setting with a sensible default.
 ## 1. What is already in place (modules 1–7, 11)
 
 - GST registrations, each store linked to one (GSTIN and state); GSTIN and state on customers, suppliers and each address.
-- HSN code on items and item groups; a dated GST rate list per HSN, with cess and an "approved by the accountant" mark.
+- HSN code on items and item groups; a dated GST rate list per HSN, with cess (the "approved by the accountant" mark was removed on 22 October 2026).
 - CGST, SGST and IGST worked out and stored on every till line, purchase line and supplier bill line, tax-inclusive at the till.
-- Input and output GST accounts per head, posted from purchases and till shifts. Till bills are flagged "provisional".
+- Input and output GST accounts per head, posted from purchases and till shifts. Till bills were flagged "provisional" until 22 October 2026; new bills never are (old ones keep the mark as history).
 
 ## 2. Common core (built once, same for every business)
 
@@ -68,13 +68,13 @@ Every report is per GSTIN (decision 64), for a month or a quarter (monthly or qu
 
 **Registration:** each GSTIN and its state (from setup); regular or composition [regular]; monthly or quarterly returns
 [quarterly up to ₹5 crore]; turnover band for HSN digits and e-invoicing [up to ₹5 crore: 4 digits, no e-invoice].
-**Rates:** GST rate list per HSN with dates, price bands, exempt or nil; item group defaults; every new rate needs the
-accountant's approval before it is used for real bills (already so).
+**Rates:** GST rate list per HSN with dates, price bands, exempt or nil; item group defaults; a rate applies as soon
+as it is saved (no approval step since 22 October 2026; each change is kept in the history).
 **Documents:** business invoice layout (A4 or receipt); whether the receipt shows a tax table; the combined daily invoice
 for small sales [on]; free-sample tax treatment [CA to set].
 **Moving goods:** e-way bill limit per state [₹50,000]; the usual transporter.
-**Approval:** "GST settings approved by the CA" (who, when, note). Until this is ticked, every bill stays provisional and
-live billing stays off (the existing go-live switch).
+**Approval (removed 22 October 2026):** there is no "approved by the CA" setting. GST settings apply as soon as they are
+saved, bills are never provisional, and only the Owner's go-live switch turns live billing on.
 
 ## 6. Data model (outline)
 

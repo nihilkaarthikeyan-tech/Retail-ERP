@@ -106,9 +106,9 @@ describe("settings centre (12.8)", () => {
     const { fn } = mockApi(person(true), start);
     renderCentre();
 
-    const limit = await waitFor(() => row("Approval limit (₹)"));
-    await waitFor(() => expect(within(limit).queryByText("At default")).toBeNull());
-    fireEvent.click(within(limit).getByRole("button", { name: "Back to default: Approval limit (₹)" }));
+    // Audit 14: the row is looked up again each time (the screen redraws it once the settings arrive).
+    await waitFor(() => expect(within(row("Approval limit (₹)")).queryByText("At default")).toBeNull());
+    fireEvent.click(await waitFor(() => within(row("Approval limit (₹)")).getByRole("button", { name: "Back to default: Approval limit (₹)" })));
     await waitFor(() => expect(within(row("Approval limit (₹)")).getByText("At default")).toBeTruthy());
 
     fireEvent.click(within(row("Paper size")).getByRole("button", { name: /Back to default/ }));

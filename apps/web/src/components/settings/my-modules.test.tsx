@@ -140,8 +140,9 @@ describe("My modules", () => {
       },
     });
     renderScreen();
-    await waitFor(() => expect((screen.getByRole("switch", { name: "Alterations" }) as HTMLInputElement).checked).toBe(false));
-    expect(screen.getByText(/Needs Salesperson/)).toBeTruthy();
+    // Audit 14: wait for the shop's own modules (the switch may show off while they still load).
+    expect(await screen.findByText(/Needs Salesperson/)).toBeTruthy();
+    expect((screen.getByRole("switch", { name: "Alterations" }) as HTMLInputElement).checked).toBe(false);
     expect(screen.getByText("Alterations needs this.")).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Alterations" }));
     expect(await screen.findByText(/Salesperson is switched on too/)).toBeTruthy();

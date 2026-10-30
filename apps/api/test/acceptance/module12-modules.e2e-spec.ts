@@ -83,6 +83,17 @@ async function position(itemId: string) {
   return p?.quantity.toString() ?? '0';
 }
 
+/** Finalises a goods receipt; gives the back-room stock of the item (quantity, cost, value) and the receipt's ledger lines (account kind, debit, credit). */
+async function received(receiptId: string, itemId: string) {
+  await owner.post(`/purchase/receipts/${receiptId}/finalise`).expect(200);
+  const p = await prisma.stockPosition.findUniqueOrThrow({ where: { itemId_locationId: { itemId, locationId: loc['MAIN-BACK'] } } });
+  const lines = await prisma.ledgerLine.findMany({ where: { entry: { documentType: 'goods_receipt', documentId: receiptId } }, include: { account: true } });
+  return {
+    position: [p.quantity.toString(), p.unitCost.toFixed(2), p.value.toFixed(2)],
+    ledger: lines.map((l) => [l.account.kind, l.debit.toFixed(2), l.credit.toFixed(2)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  };
+}
+
 function sale(lines: Record<string, unknown>[], payments: Record<string, unknown>[], extra: Record<string, unknown> = {}) {
   return { clientId: randomUUID(), tillId, soldAt: new Date().toISOString(), sale: { number: num(), lines: lines.map((l, i) => ({ lineNo: i + 1, ...l })) }, payments, ...extra };
 }
@@ -199,9 +210,12 @@ describe('12.1 a fancy shop sees only what it needs', () => {
 
   it('a sale-or-return receipt is refused; an ordinary receipt is not', async () => {
     const s = await supplier();
-    const line = { itemId: necklace.id, receivedQuantity: '2', rate: '200' };
+    // Into the back room, so the shop-floor stock the till tests count is left alone.
+    const line = { itemId: necklace.id, receivedQuantity: '2', rate: '200', shelfLocationId: loc['MAIN-BACK'] };
     await refused(owner.post('/purchase/receipts').send({ supplierId: s.id, storeId: MAIN, isConsignment: true, lines: [line] }), 'consignment', 'Supplier sale-or-return');
-    await owner.post('/purchase/receipts').send({ supplierId: s.id, storeId: MAIN, noOrderReason: 'Walk-in supplier', lines: [line] }).expect(201);
+    const draft = (await owner.post('/purchase/receipts').send({ supplierId: s.id, storeId: MAIN, noOrderReason: 'Walk-in supplier', lines: [line] }).expect(201)).body;
+    // 2 × ₹200 before GST: ₹400.00 of stock in, owed to the supplier until the bill comes.
+    expect(await received(draft.id, necklace.id)).toEqual({ position: ['2', '200.00', '400.00'], ledger: [['grni', '0.00', '400.00'], ['stock', '400.00', '0.00']] });
   });
 
   it('the till gets the map and none of the hidden parts; a bill using them is refused online, and kept and flagged offline', async () => {
@@ -354,7 +368,8 @@ describe('12.3 warnings and dependencies', () => {
     await owner.patch('/modules/purchase_orders').send({ enabled: false }).expect(200);
     const s = await supplier();
     const kurta = await prisma.item.findFirstOrThrow({ where: { name: 'Silk kurta' } });
-    await owner.post('/purchase/receipts').send({ supplierId: s.id, storeId: MAIN, lines: [{ itemId: kurta.id, receivedQuantity: '1', rate: '1500' }] }).expect(201);
+    const draft = (await owner.post('/purchase/receipts').send({ supplierId: s.id, storeId: MAIN, lines: [{ itemId: kurta.id, receivedQuantity: '1', rate: '1500', shelfLocationId: loc['MAIN-BACK'] }] }).expect(201)).body;
+    expect(await received(draft.id, kurta.id)).toEqual({ position: ['1', '1500.00', '1500.00'], ledger: [['grni', '0.00', '1500.00'], ['stock', '1500.00', '0.00']] });
     await refused(owner.get('/purchase/orders'), 'purchase_orders', 'Purchase orders');
     await owner.patch('/modules/purchase_orders').send({ enabled: true }).expect(200);
   });

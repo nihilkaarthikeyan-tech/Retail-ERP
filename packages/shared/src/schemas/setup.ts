@@ -193,7 +193,7 @@ export const setupProgressSchema = z.object({
 export type SetupProgressInput = z.infer<typeof setupProgressSchema>;
 
 /** POST /setup/finish: nothing to send; the answers are the ones saved step by step. */
-export const setupFinishSchema = z.object({}).strict();
+export const setupFinishSchema = z.strictObject({});
 export type SetupFinishInput = z.infer<typeof setupFinishSchema>;
 
 /** PUT /getting-started: the owner hides or shows the checklist. */

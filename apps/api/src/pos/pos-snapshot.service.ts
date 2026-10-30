@@ -60,9 +60,28 @@ export class PosSnapshotService {
     const offers = modules.offers ? await this.prisma.offer.findMany({ where: { companyId: company.id, active: true, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } }) : [];
     const coupons = modules.offers ? await this.prisma.coupon.findMany({ where: { companyId: company.id, OR: [{ endDate: null }, { endDate: { gte: fromIso(today) } }] } }) : [];
     const partySettings = await this.prisma.partySettings.findUnique({ where: { companyId: company.id } });
-    const customers = await this.prisma.customer.findMany({
-      where: { companyId: company.id, OR: [{ mobile: { not: null } }, { id: partySettings?.walkInCustomerId ?? '00000000-0000-0000-0000-000000000000' }], ...(changedSince ? { updatedAt: { gt: changedSince } } : {}) },
+    // Audit 14: a customer whose billing address changed since is sent again too (its GSTIN may have).
+    const addressChanged = changedSince ? (await this.prisma.address.findMany({ where: { partyType: 'customer', updatedAt: { gt: changedSince } }, select: { partyId: true } })).map((a) => a.partyId) : [];
+    const rawCustomers = await this.prisma.customer.findMany({
+      where: {
+        companyId: company.id,
+        OR: [{ mobile: { not: null } }, { id: partySettings?.walkInCustomerId ?? '00000000-0000-0000-0000-000000000000' }],
+        ...(changedSince ? { AND: [{ OR: [{ updatedAt: { gt: changedSince } }, { id: { in: addressChanged } }] }] } : {}),
+      },
       select: { id: true, code: true, name: true, mobile: true, gstin: true, taxSituation: true, stateCode: true, customerGroupId: true, status: true },
+    });
+    // Audit 14: the till bills a business customer under the GSTIN the server uses (pos-bills buyerFor):
+    // the first active billing address with a GSTIN, the main one first, else the customer's own.
+    const billing = new Map<string, { gstin: string; taxSituation: string | null }>();
+    const withGstin = rawCustomers.filter((c) => c.gstin).map((c) => c.id);
+    if (withGstin.length) {
+      for (const a of await this.prisma.address.findMany({ where: { partyType: 'customer', partyId: { in: withGstin }, active: true, isBilling: true }, orderBy: [{ isMain: 'desc' }, { createdAt: 'asc' }], select: { partyId: true, gstin: true, taxSituation: true } })) {
+        if (!billing.has(a.partyId)) billing.set(a.partyId, { gstin: a.gstin ?? '', taxSituation: a.taxSituation });
+      }
+    }
+    const customers = rawCustomers.map((c) => {
+      const a = billing.get(c.id);
+      return a ? { ...c, gstin: a.gstin || c.gstin, taxSituation: a.taxSituation ?? c.taxSituation } : c;
     });
     const stock = await this.prisma.stockPosition.findMany({ where: { locationId: till.locationId }, select: { itemId: true, quantity: true } });
     // Plan 11 part 2: goods set aside for ready customer orders, so the till warns before selling them offline too.
@@ -102,6 +121,8 @@ export class PosSnapshotService {
         cashierDiscountPercent: till.cashierDiscountPercent.toString(),
         // Audit 5: the cashier changes prices freely only where both the till and the company allow it (as the server checks).
         allowPriceChange: till.allowPriceChange && catalogue.allowPriceChangeOnBill,
+        // Audit 14: an item with no price may be sold at a typed price, which then becomes its price (as the server allows).
+        saveTypedPrices: catalogue.saveTypedPrices,
         autoPrint: till.autoPrint,
         // Audit 5 (C6): receipts printed for each bill (0 = none unless asked).
         receiptCopies: settings.printReceiptCopies,

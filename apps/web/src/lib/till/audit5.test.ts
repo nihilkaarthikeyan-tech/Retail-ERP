@@ -458,7 +458,11 @@ describe("speed on a large catalogue (audit 5, item 13)", () => {
     expect(bill.sale!.lines).toHaveLength(40);
     // Item 29,000 costs 100 + (29000 % 50) = ₹100 (the 1 November price is not yet in force).
     expect(bill.sale!.lines[0].price.toFixed(2)).toBe("100.00");
-    expect(took).toBeLessThan(3_000);
+    // A coarse guard only, not a speed measurement: these 21 bills took about 0.2 seconds on a
+    // developer laptop (October 2026), and a busy CI machine can be many times slower, so the
+    // bound is set far above that so it does not fail by chance. It catches only a gross
+    // slowdown (dozens of times slower); a smaller loss of speed would still pass.
+    expect(took).toBeLessThan(15_000);
     // Look-ups give what a plain search of the lists gives.
     expect(scan(s, "890100029999")?.item.code).toBe("ITM-029999");
     expect(scan(s, "itm-000002")?.item.id).toBe(s.items.find((i) => i.code === "ITM-000002")!.id);

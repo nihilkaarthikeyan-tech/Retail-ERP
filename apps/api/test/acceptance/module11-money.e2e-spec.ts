@@ -161,12 +161,13 @@ describe('11.18 expense entry and cash book (C8)', () => {
     expect(page2.pageOpening).toBe('50000.00');
     expect(page2.rows[0].balance).toBe('20000.00');
     expect(page2.closing).toBe('20000.00');
-    // A day before the expense: the opening carries the earlier days.
-    if (today() > FY_START) {
-      const later = (await owner.get(`/reports/cash-book?storeId=${MAIN}&from=${today()}&to=${today()}`).expect(200)).body as CashBookDto;
-      expect(later.opening).toBe('50000.00');
-      expect(later.closing).toBe('20000.00');
-    }
+    // From the day after the 1 April opening entry: the opening carries the earlier day. A fixed
+    // date, so this runs the same whatever the date (the expense is dated today, after 2 April 2026).
+    const later = (await owner.get(`/reports/cash-book?storeId=${MAIN}&from=${addDays(FY_START, 1)}&to=${today()}`).expect(200)).body as CashBookDto;
+    expect(later.opening).toBe('50000.00');
+    expect(later.moneyIn).toBe('0.00');
+    expect(later.moneyOut).toBe('30000.00');
+    expect(later.closing).toBe('20000.00');
   });
 
   it('a bank book; only cash and bank accounts have a book', async () => {

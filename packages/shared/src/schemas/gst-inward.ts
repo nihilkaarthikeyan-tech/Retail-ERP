@@ -10,7 +10,7 @@ const period = z.string().regex(/^\d{4}-((0[1-9]|1[0-2])|Q[1-4])$/, 'A period is
 /** Per GSTIN (decision 64) and for a period, or between two dates. */
 export const purchaseTaxRegisterQuerySchema = z
   .object({
-    gstRegistrationId: z.string().uuid().optional(),
+    gstRegistrationId: z.uuid().optional(),
     period: period.optional(),
     from: isoDate.optional(),
     to: isoDate.optional(),
@@ -19,5 +19,5 @@ export const purchaseTaxRegisterQuerySchema = z
   .refine((q) => q.period || (q.from && q.to), { message: 'Choose a period, or a from and to date', path: ['period'] });
 export type PurchaseTaxRegisterQuery = z.infer<typeof purchaseTaxRegisterQuerySchema>;
 
-export const inwardStatementQuerySchema = z.object({ gstRegistrationId: z.string().uuid().optional() });
+export const inwardStatementQuerySchema = z.object({ gstRegistrationId: z.uuid().optional() });
 export type InwardStatementQuery = z.infer<typeof inwardStatementQuerySchema>;

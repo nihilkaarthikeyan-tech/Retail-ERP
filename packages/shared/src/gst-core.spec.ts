@@ -24,6 +24,7 @@ import {
 } from './gst-core.js';
 import { isStateCode } from './india.js';
 import { inclusiveTax } from './pos.js';
+import { Decimal } from './rounding.js';
 import { posBuyerSchema } from './schemas/gst-core.js';
 
 describe('GSTIN check character', () => {
@@ -142,7 +143,14 @@ describe('tax inside the price (G12) and rounding', () => {
   });
   it('per line rounding: line taxes add up to the HSN totals exactly', () => {
     const lines = ['99.99', '99.99', '99.99'].map((a) => inclusiveTax(a, '18'));
-    for (const l of lines) expect(l.taxable.add(l.cgst).add(l.sgst).toFixed(2)).toBe('99.99');
+    // Each line: CGST = SGST = 99.99 × 9 / 118 = 7.626… → ₹7.63; taxable = 99.99 − 15.26 = ₹84.73.
+    for (const l of lines) expect([l.taxable, l.cgst, l.sgst, l.igst].map((d) => d.toFixed(2))).toEqual(['84.73', '7.63', '7.63', '0.00']);
+    // The HSN summary is the sum of the rounded lines: 3 × 84.73, 3 × 7.63, 3 × 7.63, adding back to ₹299.97.
+    const sum = (k: 'taxable' | 'cgst' | 'sgst') => lines.reduce((a, l) => a.add(l[k]), new Decimal(0));
+    expect([sum('taxable'), sum('cgst'), sum('sgst')].map((d) => d.toFixed(2))).toEqual(['254.19', '22.89', '22.89']);
+    expect(sum('taxable').add(sum('cgst')).add(sum('sgst')).toFixed(2)).toBe('299.97');
+    // Taxing the ₹299.97 total once would give CGST ₹22.88 (299.97 × 9 / 118 = 22.879…), so the summary must add the lines, not re-tax the total.
+    expect(inclusiveTax('299.97', '18').cgst.toFixed(2)).toBe('22.88');
   });
 });
 

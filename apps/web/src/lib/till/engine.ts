@@ -151,7 +151,6 @@ export const APPROVAL_SPENT = "A manager approval on this bill was already used 
 
 /** Audit 5: the till's messages for the connection problems found in the billing counter audit. */
 export const TILL_NOT_REGISTERED_MESSAGE = "This computer is no longer registered as this till. The bills on it are kept; ask a manager to register it again under Billing counter → Tills.";
-export const SIGN_IN_AGAIN = "The session has ended: sign in again. The waiting bills are sent once you have signed in.";
 export const SEND_UNCERTAIN = "The connection dropped while this bill was being sent, so it may already be saved. The till checks with the server before the bill can be changed: wait until the till is online, then try again.";
 export const ALREADY_SAVED = "This bill had already reached the server; the saved bill is shown.";
 export const NO_DISK = "This browser cannot keep bills on this computer (its storage is blocked or full), so a bill cannot be kept offline. Connect to the internet to bill, and ask for this site's data to be allowed.";

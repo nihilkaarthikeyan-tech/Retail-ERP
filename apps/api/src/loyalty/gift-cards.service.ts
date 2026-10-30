@@ -29,6 +29,7 @@ import {
   type GiftCardDto,
   type GiftCardEntryDto,
   giftCardExpiresOn,
+  GIFT_CARD_NUMBER_LENGTH,
   giftCardNumberFrom,
   giftCardProblem,
   type GiftCardQuery,
@@ -175,7 +176,7 @@ export class GiftCardsService implements OnApplicationBootstrap {
   /** 15 random digits (the first not 0) and a check digit; not derived from anything, so not guessable. */
   private newNumber(): string {
     let body = String(randomInt(1, 10));
-    for (let i = 0; i < 14; i++) body += String(randomInt(0, 10));
+    for (let i = 0; i < GIFT_CARD_NUMBER_LENGTH - 2; i++) body += String(randomInt(0, 10));
     return giftCardNumberFrom(body);
   }
 

@@ -17,7 +17,7 @@ Sources: `docs/blueprint/05-customers.md`, `docs/blueprint/06-suppliers.md`, `do
 6. **Automatic numbers** `CUS-000001` / `SUP-000001` from the numbering engine, plus a standing **walk-in customer** per company.
 7. Everything above is logged in the history.
 
-What the module *provides* for later modules: `assertCustomerUsable`, `assertSupplierUsable` (status and holds), `creditLimitFor(customer)`, `dueDateFrom(terms, date)`, `gstTreatmentFor(party, address, company)` (same state / other state). The credit **check** itself needs balances and open orders, so it is built with Sales/POS/Accounting; the limits are stored now.
+What the module *provides* for later modules: `assertCustomerUsable`, `assertSupplierUsable` (status and holds), `creditLimitFor(customer)`, `dueDateFrom(terms, date)`, same state / other state (built later as the shared rule `resolveSupply` in `packages/shared/src/gst-core.ts`). The credit **check** itself needs balances and open orders, so it is built with Sales/POS/Accounting; the limits are stored now.
 
 ## 2. Data model (Prisma)
 
@@ -32,7 +32,9 @@ Every table has the four audit columns. Money is `Decimal`.
 | `Customer` | `companyId`, `code` (unique), `name`, `isBusiness`, `mobile`, `email`, `notes`, `customerGroupId` (leaf), `gstin`, `stateCode`, `priceListId`, `paymentTermsId`, `creditLimit` (0 = none), `overdueLimit`, `creditCheckAtDelivery`, `status` (`active` / `blocked` / `off`), `isWalkIn`, `linkedSupplierId`, `offlineTillRef` |
 | `SupplierGroup` | tree; defaults: `paymentTermsId`, `priceListId` |
 | `Supplier` | `companyId`, `code`, `name`, `isBusiness`, `mobile`, `email`, `notes`, `supplierGroupId` (leaf), `isTransporter`, `gstin`, `pan`, `stateCode`, `priceListId` (buying), `paymentTermsId`, `bankAccountNote`, `status`, `holdType` (`none` / `bills` / `payments` / `all`), `holdUntil`, `holdReason`, `allowBillWithoutOrder`, `allowBillWithoutReceipt`, `linkedCustomerId` |
-| `PartySettings` (one row per company) | `defaultCustomerGroupId`, `defaultSupplierGroupId`, `defaultPaymentTermsId`, `defaultCreditLimit`, `walkInCustomerId`, `gstTreatmentFrom` (`billing` / `delivery`) |
+| `PartySettings` (one row per company) | `defaultCustomerGroupId`, `defaultSupplierGroupId`, `defaultPaymentTermsId`, `defaultCreditLimit`, `walkInCustomerId` |
+
+*Changed 30 October 2026 (audit 14):* the planned setting `gstTreatmentFrom` (`billing` / `delivery`) was removed. Nothing ever read it: the place of supply is set by GST law, not by a shop setting, and is worked out in one shared rule, `resolveSupply` in `packages/shared/src/gst-core.ts`.
 
 Migration also adds real foreign keys from `Price.customerId`, `Price.supplierId` and `Item.preferredSupplierId`, and seeds payment terms Cash, Net 15, Net 30; groups Retail, Wholesale, Staff (customers) and Distributors, Local vendors, Services, Transporters (suppliers); number series `customer` (`CUS-`) and `supplier` (`SUP-`); the walk-in customer.
 

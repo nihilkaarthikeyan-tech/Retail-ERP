@@ -17,6 +17,7 @@ import { useLoad } from "@/lib/use-load";
 import { type FieldErrors, issuesToFieldErrors } from "@/lib/validation";
 import { OrdersItemAdder } from "./orders-item-adder";
 import { SizeColourGrid } from "./size-colour-grid";
+import { useInterState } from "./use-place-of-supply";
 import { emptyOrderLine, OrderLineGrid, type OrderLineDraft, orderLineFromDto, orderLineProblem, orderLineToInput, previewOrderTotals } from "./orders-lines";
 import { OrderStatusBadge, OrdersReasonDialog, useOrderStores } from "./orders-shared";
 import { useUnsavedChanges } from "@/lib/unsaved";
@@ -264,7 +265,8 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
     onSaved(after, messages[action], usedItems());
   }
 
-  const preview = rights.prices && (dirty || !order) && lines.length > 0 ? previewOrderTotals(lines) : null;
+  const interState = useInterState(header.supplier?.id, header.storeId);
+  const preview = rights.prices && (dirty || !order) && lines.length > 0 ? previewOrderTotals(lines, interState) : null;
   const withProgress = !!order && !isDraft;
   const title = order ? `Purchase order ${order.number}` : "New purchase order";
 
@@ -374,7 +376,7 @@ function OrderForm({ order, initialLines, stores, terms, notice, onNotice, onSav
           <SizeColourGrid onAdd={(more) => setLines([...lines, ...more.map((m) => ({ ...emptyOrderLine(m.item, null), quantity: m.quantity }))])} />
         </>
       ) : null}
-      <OrderLineGrid lines={lines} onChange={setLines} problems={problems} withPrices={rights.prices} withProgress={withProgress} readOnly={!editable} />
+      <OrderLineGrid lines={lines} onChange={setLines} problems={problems} withPrices={rights.prices} withProgress={withProgress} readOnly={!editable} interState={interState} />
       {editable && rights.prices ? <p className="muted">Rate is per the unit chosen on the line, before GST. Leave the rate blank to use the supplier&apos;s price list or the last purchase price.</p> : null}
       {editable && !rights.prices ? <p className="muted">Prices are filled in by the server from the supplier&apos;s price list or the last purchase price.</p> : null}
 

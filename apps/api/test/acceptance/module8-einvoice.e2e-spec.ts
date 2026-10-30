@@ -105,7 +105,13 @@ describe('8.10 e-invoice and e-way bill files', () => {
     expect(list.applies).toBe(true);
     expect(list.counts.waiting).toBe(1);
     expect(list.rows[0]).toMatchObject({ documentNumber: bill.number, documentKind: 'Invoice', status: 'waiting', buyerGstin: BUYER_GSTIN, total: '1050.00', irn: null, canCancel: false });
-    expect(list.rows[0].lastDay).toBeTruthy(); // ₹10 crore and above: 30 days to register
+    // ₹10 crore and above: 30 days to register, counted from the invoice date (shared
+    // gst-portal.ts eInvoiceLastDay = invoice date + EINVOICE_REPORTING_DAYS, which is 30).
+    // Worked here with plain calendar arithmetic, not the same helper.
+    const billDate = (await prisma.posBill.findUniqueOrThrow({ where: { id: bill.id }, select: { businessDate: true } })).businessDate.toISOString().slice(0, 10);
+    expect(list.rows[0].documentDate).toBe(billDate);
+    const [y, m, d] = billDate.split('-').map(Number);
+    expect(list.rows[0].lastDay).toBe(new Date(Date.UTC(y, m - 1, d + 30)).toISOString().slice(0, 10));
     const print = (await owner.get(`/print/pos_bill/${bill.id}`).expect(200)).body;
     expect(print.notice).toMatch(/not yet registered/);
     expect(print.details).toEqual(expect.arrayContaining([['E-invoice', 'Not yet registered']]));
@@ -260,11 +266,14 @@ describe('8.10 e-invoice and e-way bill files', () => {
   });
 
   it('the register shows made, expired and cancelled e-way bills; cancelling only within 24 hours', async () => {
-    // The one above was made on 18 October 2026 at 10:30; by the test clock it may already be past its validity.
+    // The one above was made on 18 October 2026, so by the real clock it may be past its validity;
+    // set it explicitly so the status does not depend on the day the test runs.
+    const ewb = await prisma.eWayBill.findFirstOrThrow({ where: { number: '123456789012' } });
+    await prisma.eWayBill.update({ where: { id: ewb.id }, data: { status: 'generated', validUntil: new Date(Date.now() + 24 * 3_600_000) } });
     const list = (await owner.get('/gst/e-way-bills').expect(200)).body;
     expect(list.rows).toHaveLength(1);
     const row = list.rows[0];
-    expect(['generated', 'expired']).toContain(row.status);
+    expect(row).toMatchObject({ id: ewb.id, status: 'generated' });
     const stale = await prisma.eWayBill.update({ where: { id: row.id }, data: { status: 'generated', generatedAt: new Date(Date.now() - 25 * 3_600_000), validUntil: new Date(Date.now() - 60_000) } });
     expect((await owner.post(`/gst/e-way-bills/${stale.id}/cancel`).send({ reason: 'Not moved' }).expect(400)).body.message).toMatch(/24 hours|expired/);
     const after = (await owner.get('/gst/e-way-bills?status=expired').expect(200)).body;

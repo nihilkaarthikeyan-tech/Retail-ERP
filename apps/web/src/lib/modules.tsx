@@ -48,28 +48,32 @@ const ModulesContext = createContext<ModulesContextValue>(DEFAULT_VALUE);
 /** Loads GET /modules once the user is known; again after login as someone else. */
 export function ModulesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [state, setStateRaw] = useState<{ modules: ModuleMap; shopType: ModulesState["shopType"] }>({ modules: allModulesOn(), shopType: null });
+  // Audit 14: changedAt is when a module was last switched here. A read of the list that started before
+  // that is old by the time it answers, and must not put the old state back.
+  const [state, setStateRaw] = useState<{ modules: ModuleMap; shopType: ModulesState["shopType"]; changedAt: number }>({ modules: allModulesOn(), shopType: null, changedAt: 0 });
   const [loading, setLoading] = useState(true);
   const userId = user?.id ?? null;
+  const loaded = useCallback((s: ModulesState, startedAt: number) => setStateRaw((prev) => (prev.changedAt >= startedAt && prev.changedAt > 0 ? prev : { modules: fullModuleMap(s.modules), shopType: s.shopType ?? null, changedAt: prev.changedAt })), []);
 
   const load = useCallback(async () => {
+    const startedAt = Date.now();
     try {
-      const s = await api.get<ModulesState>("/modules", { redirectOnUnauthorized: false });
-      setStateRaw({ modules: fullModuleMap(s.modules), shopType: s.shopType ?? null });
+      loaded(await api.get<ModulesState>("/modules", { redirectOnUnauthorized: false }), startedAt);
     } catch {
       // Unknown: keep everything showing; the API still refuses switched-off actions.
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loaded]);
 
   useEffect(() => {
     if (!userId) return;
     let cancelled = false;
+    const startedAt = Date.now();
     api
       .get<ModulesState>("/modules", { redirectOnUnauthorized: false })
       .then((s) => {
-        if (!cancelled) setStateRaw({ modules: fullModuleMap(s.modules), shopType: s.shopType ?? null });
+        if (!cancelled) loaded(s, startedAt);
       })
       .catch(() => {})
       .finally(() => {
@@ -78,9 +82,9 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, loaded]);
 
-  const setState = useCallback((s: ModulesState) => setStateRaw({ modules: fullModuleMap(s.modules), shopType: s.shopType ?? null }), []);
+  const setState = useCallback((s: ModulesState) => setStateRaw({ modules: fullModuleMap(s.modules), shopType: s.shopType ?? null, changedAt: Date.now() }), []);
   const value = useMemo(() => contextValue(state.modules, state.shopType, loading, load, setState), [state, loading, load, setState]);
   return <ModulesContext.Provider value={value}>{children}</ModulesContext.Provider>;
 }

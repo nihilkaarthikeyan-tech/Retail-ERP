@@ -159,7 +159,8 @@ describe("finalising a bill whose prices differ from the receipt", () => {
     expect(await screen.findByText(/differ from the goods receipts \(ITM-000001 \+20\.00\)/)).toBeTruthy();
     expect(onChanged).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Record the difference" }));
+    // Audit 14: the message can show a moment before its button (a busy full run caught it in between).
+    fireEvent.click(await screen.findByRole("button", { name: "Record the difference" }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledWith(finalised));
     // Only the finalise calls: under a busy full run other background requests can also be sent.
     expect(writes(fetchMock).filter((w) => w.path.endsWith("/finalise")).map((w) => w.body)).toEqual([{}, { confirmPriceDifference: true }]);
@@ -191,7 +192,16 @@ describe("finalising a bill whose prices differ from the receipt", () => {
       </AuthProvider>,
     );
     expect(await screen.findByText("Goods received, not billed")).toBeTruthy();
-    expect(screen.getAllByText("₹1,050.00").length).toBeGreaterThan(0);
+    // The amounts box shows the API's figures against their own labels.
+    const amounts = screen.getByLabelText("Bill amounts");
+    const pairs = [...amounts.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+    expect(pairs).toEqual([
+      ["Before GST", "₹1,000.00"],
+      ["GST", "₹50.00"],
+      ["Rounding", "₹0.00"],
+      ["Total", "₹1,050.00"],
+      ["Price difference from the receipts", "₹20.00"],
+    ]);
     // No purchase.bill right: no Finalise button.
     expect(screen.queryByRole("button", { name: "Finalise" })).toBeNull();
   });

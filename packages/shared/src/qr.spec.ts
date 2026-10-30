@@ -4,8 +4,8 @@ import { encodeQr, qrAlignmentPositions, qrBlockLayout, qrDataCodewords, qrForma
 
 // ---- An independent reader, written from the standard, to check what the encoder draws ----
 
-const EXP = new Array<number>(512);
-const LOG = new Array<number>(256);
+const EXP = Array.from({ length: 512 }, () => 0);
+const LOG = Array.from({ length: 256 }, () => 0);
 {
   let x = 1;
   for (let i = 0; i < 255; i++) {
@@ -66,7 +66,7 @@ function read(modules: boolean[][]): string {
   expect(level).not.toBeNull();
 
   // Which modules carry data.
-  const fixed = Array.from({ length: n }, () => new Array<boolean>(n).fill(false));
+  const fixed = Array.from({ length: n }, () => Array.from({ length: n }, () => false));
   const mark = (x0: number, y0: number, w: number, h: number) => {
     for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) if (x >= 0 && y >= 0 && x < n && y < n) fixed[y][x] = true;
   };

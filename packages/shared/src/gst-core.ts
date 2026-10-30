@@ -184,7 +184,8 @@ export function taxSituationOf(gstin: string | null | undefined, situation: stri
 export interface SupplyInput {
   /** The state of the seller's GST registration. */
   sellerState: string;
-  scheme: GstScheme | string;
+  /** A GstScheme, or the text stored for it. */
+  scheme: string;
   buyerGstin?: string | null;
   /** The buyer's state as written on the bill (unregistered buyers). */
   buyerState?: string | null;
@@ -281,6 +282,35 @@ export function isCreditNoteLate(saleDate: string, noteDate: string): boolean {
   return noteDate > creditNoteDeadline(saleDate);
 }
 
+/** The original sale, as a return against it sees it. */
+export interface ReturnedSale {
+  invoiceKind: string | null | undefined;
+  cgst: string | number;
+  sgst: string | number;
+  igst: string | number;
+  placeOfSupply: string | null | undefined;
+  /** "sez" for a supply to an SEZ; the till does not have it and need not (an SEZ bill has IGST or no tax). */
+  buyerSituation?: string | null;
+  businessDate: string;
+}
+
+/**
+ * Audit 14: the GST of a return against a bill, in one place for the till and the server. It keeps the
+ * original bill's GST: IGST when that was inter-state (or to an SEZ, IGST Act s.7(5)(b)), none on a bill
+ * of supply or a bill with no tax, and none after the credit-note time limit (CGST Act s.34(2): the
+ * customer is refunded but the GST is not reduced; the document is then a return note).
+ */
+export function returnSupplyOf(sale: ReturnedSale, sellerState: string | null, returnDate: string): { interState: boolean; noTax: boolean; late: boolean } {
+  const late = isCreditNoteLate(sale.businessDate, returnDate);
+  const place = sale.placeOfSupply ?? sellerState;
+  const taxed = !new Decimal(sale.cgst).add(new Decimal(sale.sgst)).add(new Decimal(sale.igst)).isZero();
+  return {
+    interState: !new Decimal(sale.igst).isZero() || place !== sellerState || sale.buyerSituation === 'sez',
+    noTax: sale.invoiceKind === 'bill_of_supply' || late || !taxed,
+    late,
+  };
+}
+
 // ---- Printing (plan 08 §2, decision 43) ----
 
 /**
@@ -327,7 +357,7 @@ export function saleDocumentKind(invoiceKind: string, lineRates: DecimalInput[])
  * after the credit-note time limit) is a return note, not a credit note (CGST Act s.34, rule 53).
  * Older bills have no stored document kind; theirs is worked out from the bill kind as before.
  */
-export function gstDocumentTitle(billKind: 'sale' | 'return' | string, invoiceKind: string, documentKind?: string | null): string {
+export function gstDocumentTitle(billKind: string, invoiceKind: string, documentKind?: string | null): string {
   if (documentKind && documentKind in DOCUMENT_TITLES) return DOCUMENT_TITLES[documentKind as DocumentKind];
   if (billKind === 'return') return 'Credit note';
   return invoiceKind === 'bill_of_supply' ? 'Bill of supply' : 'Tax invoice';

@@ -69,6 +69,11 @@ export class PurchasingController {
     private readonly settings: PurchaseSettingsService,
   ) {}
 
+  // Audit 14: whether this supplier's goods into this store are inter-state, for the screens' GST preview.
+  @Get('place-of-supply') @RequirePermission('purchase.view') placeOfSupply(@Query('supplierId', id()) supplierId: string, @Query('storeId', new ParseUUIDPipe({ optional: true })) storeId: string | undefined, @ReqUser() user: AuthUser) {
+    return this.bills.placeOfSupply(supplierId, storeId ?? null, user);
+  }
+
   // ---- Purchase orders ----
   @Get('orders') @RequireModule('purchase_orders') @RequirePermission('purchase.view') listOrders(@Query(new ZodValidationPipe(purchaseOrderQuerySchema)) q: PurchaseOrderQuery, @ReqUser() user: AuthUser) {
     return this.orders.list(q, user);

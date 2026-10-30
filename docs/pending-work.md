@@ -84,6 +84,9 @@ Full list with reasons: `docs/coverage-check.md`.
 - **Before relying on the Tally export:** the accountant test-imports a sample file into a copy of their Tally company.
 - **Known limits of part 2:** a card/UPI advance taken at the till is not in the shift's expected card/UPI totals; order collection, store credit and alteration billing need the connection; sale-or-return goods should be sold at the store that received them.
 - **Choices made while building, for the owner to confirm:** season sell-through % = sold ÷ (sold + in stock); a markdown skips items that already have a price starting that day; expense heads exclude accounts the system posts to itself; a customer is "no promotions" if any contact person opted out.
+- **Warranty dates (found in audit 14, 30 October 2026):** not built yet. A serial number has a place for a warranty end date and an item can store "warranty days", but nothing fills in or shows the warranty date. Build it when a mobiles or electronics shop needs it.
+- **Clearing a forgotten manager PIN (audit 14):** the server allows a manager to clear a cashier's PIN (tested), but no screen offers it yet; today the person sets a new PIN only after an owner clears it by other means. Add a button on the user's page.
+- **"Forget this till" (audit 14):** a computer set up as a till cannot be turned back into an ordinary computer from the screen (the code to forget it exists but nothing calls it). Add it to the till's settings, behind a manager PIN.
 - **Full-year speed test:** paused by the owner. The tools are ready (`pnpm --filter api perf:seed`, then `perf:measure`; `PERF_RESUME=1` continues a stopped run). Run it once on the company server before go-live.
 
 ---
@@ -94,6 +97,8 @@ Full list with reasons: `docs/coverage-check.md`.
 
 ## 4. Business decisions for the owner
 
+- **Renaming the top-level accounts (audit 14):** the blueprint says the top-level account groups (Assets, Liabilities and so on) cannot be edited; today they cannot be moved, switched off or change kind, but they can be renamed or renumbered (the approved plan lets the accountant rename accounts). Decide whether the top level should also keep its names.
+- **Daily summary email (audit 14):** decision 67 says it is on by default; it is built switched off until the owner turns it on. Decide which.
 - **First sector:** the manager suggested fancy stores, clothes and all retail stores. Record it in `docs/decisions.md` once confirmed; weighing-scale barcodes stay deferred unless grocery is included.
 - **Many client businesses:** today one installation runs one business. Either give each client their own installation and database (works today), or build one shared system for all clients (a bigger change that needs its own plan).
 - The other OPEN topics in `docs/decisions.md`: which shops need true offline billing, number of companies and GST registrations, card and UPI providers, bank statement formats, old software to import from.

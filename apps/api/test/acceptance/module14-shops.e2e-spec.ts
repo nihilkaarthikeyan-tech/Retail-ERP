@@ -123,8 +123,10 @@ describe('14.1 Two shops with the same codes', () => {
     const groupId = Array.isArray(aGroup) ? aGroup[0].id : aGroup.groups[0].id;
     const units = (await B.agent.get('/catalogue/units').expect(200)).body as { id: string; code: string }[];
     const res = await B.agent.post('/items').send({ name: 'Sneaky', itemGroupId: groupId, baseUnitId: units[0].id });
-    expect(res.status).toBeGreaterThanOrEqual(400);
+    // Shop B cannot see shop A's group at all, so it is "not found" (masters.service getGroup), not a different refusal.
+    expect([res.status, res.body.message]).toEqual([404, 'Item group not found']);
     expect(await prisma.item.count()).toBe(before);
+    expect(await prisma.item.count({ where: { name: 'Sneaky' } })).toBe(0);
   });
 
   it('the database itself shows a shop only its own rows, and nothing when no shop is known', async () => {

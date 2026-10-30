@@ -17,7 +17,7 @@ items, prices, customers, suppliers, stock, billing counter (till), accounts, GS
 | --- | --- | --- |
 | Sizes and colours | Styles with variants, size × colour grid, reports by size and colour | — |
 | Batches and expiry | Batch numbers, expiry dates, expiry checks | — |
-| Serial numbers and warranty | Serial numbers at receipt and sale, warranty dates | — |
+| Serial numbers and warranty | Serial numbers at receipt and sale (warranty dates not built yet; see `docs/pending-work.md`) | — |
 | Seasons and markdowns | Season tags, sell-through, markdown tool | — |
 | Purchase orders | Orders to suppliers before receiving | — |
 | Supplier sale-or-return | Consignment receipts, statements | Purchase receipts (core) |
@@ -54,7 +54,7 @@ anything later. Applying a different shop type later asks first and never delete
 | Clothing | Sizes and colours, seasons and markdowns, salesperson, alterations, customer orders, offers | Size and colour lists; garment HSN groups; price band GST rule ready for the CA |
 | Footwear | Sizes and colours, seasons and markdowns, salesperson, offers | Footwear size list (UK/EU) |
 | Cosmetics and beauty | Batches and expiry, offers | Shelf life defaults; expiry warnings |
-| Mobiles and electronics | Serial numbers and warranty, customer orders | Warranty days default |
+| Mobiles and electronics | Serial numbers and warranty, customer orders | Warranty days default (stored only; warranty dates not built yet) |
 | General store | Everything optional off except offers | — |
 
 Item group lists, size lists and colour lists are **starting suggestions** the owner can edit at once.

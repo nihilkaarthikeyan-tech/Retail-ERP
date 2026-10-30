@@ -35,10 +35,12 @@ interface BillLineGridProps {
   shelves: StockLocationDto[];
   /** Whether the user may see and type buying prices. */
   prices: boolean;
+  /** Audit 14: the supplier is in another state (IGST). */
+  interState?: boolean;
 }
 
 /** The editable lines of a supplier bill, with a live preview of each line's amounts. */
-export function BillLineGrid({ kind, lines, onChange, problems, shelves, prices }: BillLineGridProps) {
+export function BillLineGrid({ kind, lines, onChange, problems, shelves, prices, interState = false }: BillLineGridProps) {
   const unitCodes = useUnitCodes(lines.filter((l) => !l.units).map((l) => l.itemId));
   const receiving = kind === "receives_goods";
   const againstReceipt = kind === "against_receipt";
@@ -107,7 +109,7 @@ export function BillLineGrid({ kind, lines, onChange, problems, shelves, prices 
           {lines.map((l, i) => {
             const n = i + 1;
             const problem = problems[l.key];
-            const preview = prices ? previewLine(l) : null;
+            const preview = prices ? previewLine(l, interState) : null;
             const off = !l.include;
             return (
               <tr key={l.key} className={problem ? "row-alert" : off ? "row-muted" : undefined}>

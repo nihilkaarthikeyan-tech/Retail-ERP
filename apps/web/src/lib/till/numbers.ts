@@ -4,11 +4,12 @@
 // tills set up before keep STORE-TILL-FY-000001 until their prefix is set). The counter is saved BEFORE a number is used,
 // so a crash can never hand out the same number twice, and it never goes
 // below the last number the server has from this till.
-import { tillNumberSeries } from "shared";
+import { TILL_NUMBER_DIGITS, tillNumberSeries } from "shared";
 import type { KeyValueStore } from "./storage";
 import type { TillSnapshot } from "./types";
 
-const DIGITS = 6;
+/** Running digits of a till bill number (the server checks the same). */
+const DIGITS = TILL_NUMBER_DIGITS;
 
 export function formatNumber(prefix: string, n: number): string {
   return `${prefix}${String(n).padStart(DIGITS, "0")}`;

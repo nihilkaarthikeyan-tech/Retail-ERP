@@ -101,9 +101,9 @@ export type UpdatePaymentTermsInput = z.infer<typeof updatePaymentTermsSchema>;
 export const createCustomerGroupSchema = z.object({
   code: itemCode,
   name: trimmed(80),
-  parentId: z.string().uuid().optional().nullable(),
-  priceListId: z.string().uuid().optional().nullable(),
-  paymentTermsId: z.string().uuid().optional().nullable(),
+  parentId: z.uuid().optional().nullable(),
+  priceListId: z.uuid().optional().nullable(),
+  paymentTermsId: z.uuid().optional().nullable(),
   creditLimit: nonNegativeDecimalString.optional(),
   overdueLimit: nonNegativeDecimalString.optional(),
   skipCreditCheck: z.boolean().optional(),
@@ -115,9 +115,9 @@ export type UpdateCustomerGroupInput = z.infer<typeof updateCustomerGroupSchema>
 export const createSupplierGroupSchema = z.object({
   code: itemCode,
   name: trimmed(80),
-  parentId: z.string().uuid().optional().nullable(),
-  priceListId: z.string().uuid().optional().nullable(),
-  paymentTermsId: z.string().uuid().optional().nullable(),
+  parentId: z.uuid().optional().nullable(),
+  priceListId: z.uuid().optional().nullable(),
+  paymentTermsId: z.uuid().optional().nullable(),
 });
 export type CreateSupplierGroupInput = z.infer<typeof createSupplierGroupSchema>;
 export const updateSupplierGroupSchema = createSupplierGroupSchema.omit({ code: true, parentId: true }).extend({ active: z.boolean() }).partial();
@@ -158,14 +158,14 @@ const customerBody = z.object({
   mobile: mobile.optional().nullable(),
   email: email.optional().nullable(),
   notes: optionalText(1000),
-  customerGroupId: z.string().uuid().optional(),
+  customerGroupId: z.uuid().optional(),
   gstin: gstin.optional().nullable(),
   taxSituation,
   stateCode: stateCode.optional().nullable(),
-  priceListId: z.string().uuid().optional().nullable(),
-  paymentTermsId: z.string().uuid().optional().nullable(),
+  priceListId: z.uuid().optional().nullable(),
+  paymentTermsId: z.uuid().optional().nullable(),
   creditCheckAtDelivery: z.boolean().optional(),
-  linkedSupplierId: z.string().uuid().optional().nullable(),
+  linkedSupplierId: z.uuid().optional().nullable(),
   ...customerDates,
   /** Decision 20: a duplicate mobile is refused unless the user confirms. */
   confirmDuplicate: z.boolean().optional(),
@@ -206,7 +206,7 @@ export type CustomerCreditInput = z.infer<typeof customerCreditSchema>;
 
 export const customerQuerySchema = z.object({
   search: z.string().trim().max(80).optional(),
-  groupId: z.string().uuid().optional(),
+  groupId: z.uuid().optional(),
   status: z.enum(PARTY_STATUSES).optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
@@ -222,18 +222,18 @@ const supplierBody = z.object({
   mobile: mobile.optional().nullable(),
   email: email.optional().nullable(),
   notes: optionalText(1000),
-  supplierGroupId: z.string().uuid().optional(),
+  supplierGroupId: z.uuid().optional(),
   isTransporter: z.boolean().optional(),
   gstin: gstin.optional().nullable(),
   taxSituation,
   pan: pan.optional().nullable(),
   stateCode: stateCode.optional().nullable(),
-  priceListId: z.string().uuid().optional().nullable(),
-  paymentTermsId: z.string().uuid().optional().nullable(),
+  priceListId: z.uuid().optional().nullable(),
+  paymentTermsId: z.uuid().optional().nullable(),
   bankAccountNote: optionalText(120),
   allowBillWithoutOrder: z.boolean().optional(),
   allowBillWithoutReceipt: z.boolean().optional(),
-  linkedCustomerId: z.string().uuid().optional().nullable(),
+  linkedCustomerId: z.uuid().optional().nullable(),
 });
 
 /**
@@ -272,7 +272,7 @@ export type SupplierHoldInput = z.infer<typeof supplierHoldSchema>;
 
 export const supplierQuerySchema = z.object({
   search: z.string().trim().max(80).optional(),
-  groupId: z.string().uuid().optional(),
+  groupId: z.uuid().optional(),
   status: z.enum(PARTY_STATUSES).optional(),
   transporters: z.enum(['true', 'false']).optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -284,11 +284,10 @@ export type SupplierQuery = z.infer<typeof supplierQuerySchema>;
 
 export const updatePartySettingsSchema = z
   .object({
-    defaultCustomerGroupId: z.string().uuid().nullable(),
-    defaultSupplierGroupId: z.string().uuid().nullable(),
-    defaultPaymentTermsId: z.string().uuid().nullable(),
+    defaultCustomerGroupId: z.uuid().nullable(),
+    defaultSupplierGroupId: z.uuid().nullable(),
+    defaultPaymentTermsId: z.uuid().nullable(),
     defaultCreditLimit: nonNegativeDecimalString,
-    gstTreatmentFrom: z.enum(['billing', 'delivery']),
   })
   .partial();
 export type UpdatePartySettingsInput = z.infer<typeof updatePartySettingsSchema>;

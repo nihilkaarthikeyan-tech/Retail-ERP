@@ -114,8 +114,3 @@ export function useOpenItems(partyType: PartyKind | null, partyId: string | null
 export function partyText(ref: PartyRef | undefined | null): string {
   return ref ? `${ref.code} — ${ref.name}` : "—";
 }
-
-/** Class that highlights a negative amount. */
-export function signedClass(value: string | null | undefined): string | undefined {
-  return value?.startsWith("-") ? "num-negative" : undefined;
-}

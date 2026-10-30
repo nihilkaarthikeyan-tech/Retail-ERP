@@ -234,14 +234,21 @@ describe('audit 11: the minimum scenarios, stock + accounts + GST', () => {
     });
     const cash = [{ paymentMethodId: pm.CASH, amount: '-105' }];
     const approval = async () => (await owner.post('/pos/approvals').send({ tillId, managerId: ownerId, pin: '7391', action: 'return_without_bill' }).expect(200)).body.token as string;
-    expect((await T(owner.post('/pos/bills')).send(ret({}, cash))).status).toBeGreaterThanOrEqual(400);
+    // Without a manager's approval: refused as not allowed (pos-common.service useApproval).
+    const noApproval = await T(owner.post('/pos/bills')).send(ret({}, cash));
+    expect([noApproval.status, noApproval.body.message]).toEqual([403, 'A manager must approve this']);
     // Each approval is fetched before the bill request is made (supertest sends one request at a time).
     const a1 = await approval();
-    expect((await T(owner.post('/pos/bills')).send({ ...ret({ approvalToken: a1 }, cash), offline: true })).status).toBeGreaterThanOrEqual(400);
+    const offline = await T(owner.post('/pos/bills')).send({ ...ret({ approvalToken: a1 }, cash), offline: true });
+    expect([offline.status, offline.body.message]).toEqual([400, 'A return without a bill needs a manager and the connection']);
     // A shop that does not refund by UPI (refunds are allowed on every method by default).
     await prisma.paymentMethod.update({ where: { id: pm.UPI }, data: { allowRefund: false } });
     const a2 = await approval();
-    expect((await T(owner.post('/pos/bills')).send(ret({ approvalToken: a2 }, [{ paymentMethodId: pm.UPI, amount: '-105', reference: 'UPI-1' }]))).status).toBeGreaterThanOrEqual(400);
+    const byUpi = await T(owner.post('/pos/bills')).send(ret({ approvalToken: a2 }, [{ paymentMethodId: pm.UPI, amount: '-105', reference: 'UPI-1' }]));
+    expect([byUpi.status, byUpi.body.message]).toEqual([400, 'UPI cannot be used for refunds']);
+    // None of the three refused returns was saved, and the stock did not move.
+    expect(await prisma.posBill.count({ where: { kind: 'return', returnOfId: null } })).toBe(0);
+    expect(await position(rice.id)).toEqual({ quantity: '50', value: '3000.00' });
     const a3 = await approval();
     const ok = await T(owner.post('/pos/bills')).send(ret({ approvalToken: a3 }, cash));
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
