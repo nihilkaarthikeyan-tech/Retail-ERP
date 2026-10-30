@@ -34,6 +34,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter shared run build
+      # Next.js writes the page types (PageProps, LayoutProps) itself; a clean machine has none yet.
+      - run: pnpm --filter web exec next typegen
       - name: Type checks
         run: |
           for p in apps/api apps/web packages/shared apps/till-helper; do (cd $p && npx tsc --noEmit -p tsconfig.json); done
