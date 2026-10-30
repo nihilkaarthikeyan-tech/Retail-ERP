@@ -5,7 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import type { GoodsReceiptDto, SupplierBillDto } from "@/lib/purchasing";
 import { BillDebitNoteDialog } from "./bills-dialogs";
 import { BillEditor } from "./bills-editor";
-import { type BillLineDraft, billLineProblem, billLineToInput, linesFromReceipt, previewBill, previewLine } from "./bills-lines";
+import { type BillLineDraft, billLineProblem, billLineToInput, linesFromBill, linesFromDraftReceipt, linesFromReceipt, previewBill, previewLine } from "./bills-lines";
 import { BillView } from "./bills-view";
 import { PurchaseReports, REGISTER_COLUMNS, type RegisterRow, reportCsv } from "./reports-tabs";
 
@@ -215,7 +215,7 @@ describe("debit note", () => {
     fireEvent.change(screen.getByLabelText(/credit note number/), { target: { value: "CN-12" } });
     fireEvent.click(screen.getByRole("button", { name: "Make debit note" }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith(note));
-    expect(writes(fetchMock)[0].body).toEqual({ reason: "Damaged bags", supplierNoteNo: "CN-12", lines: [{ originalLineId: bill().lines[0].id, quantity: "2" }] });
+    expect(writes(fetchMock).filter((w) => w.path.endsWith("/debit-note")).map((w) => w.body)).toEqual([{ reason: "Damaged bags", supplierNoteNo: "CN-12", lines: [{ originalLineId: bill().lines[0].id, quantity: "2" }] }]);
   });
 
   it("explains that goods leave stock for a bill that received them", () => {
@@ -428,5 +428,100 @@ describe("purchase reports", () => {
     expect(await screen.findByText(/This report shows buying prices/)).toBeTruthy();
     const calls = fetchMock.mock.calls.map((c) => new URL(String(c[0])).pathname);
     expect(calls).not.toContain("/purchase/reports/register");
+  });
+});
+
+describe("audit 9 (A9.4): Finalise asks once before the accounts change", () => {
+  it("answering No sends nothing; answering Yes sends one finalise", async () => {
+    const finalised = bill({ status: "unpaid", finalisedAt: "2026-10-15T06:00:00.000Z" });
+    const fetchMock = mockApi({
+      ...commonRoutes(["purchase.view", "purchase.bill", "buying_prices.view"]),
+      [`POST /purchase/bills/${BILL_ID}/finalise`]: () => ({ status: 200, body: finalised }),
+    });
+    const asked: string[] = [];
+    const answers = [false, true];
+    const original = window.confirm;
+    window.confirm = (q?: string) => {
+      asked.push(String(q));
+      return answers.shift() ?? false;
+    };
+    try {
+      const onChanged = vi.fn();
+      render(
+        <AuthProvider>
+          <BillView bill={bill()} onChanged={onChanged} />
+        </AuthProvider>,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Finalise" }));
+      expect(asked).toHaveLength(1);
+      expect(asked[0]).toMatch(/^Finalise this supplier bill\?/);
+      expect(asked[0]).toMatch(/cancelled/);
+      expect(writes(fetchMock).filter((w) => w.path.endsWith("/finalise"))).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "Finalise" }));
+      await waitFor(() => expect(onChanged).toHaveBeenCalledWith(finalised));
+      expect(writes(fetchMock).filter((w) => w.path.endsWith("/finalise"))).toHaveLength(1);
+    } finally {
+      window.confirm = original;
+    }
+  });
+});
+
+describe("audit 11: a bill line's checks, and a saved draft back on screen", () => {
+  it("refuses bad numbers before anything is sent", () => {
+    expect(billLineProblem(draftLine({ quantity: "" }), "services")).toBe("ITM-000001: enter the quantity billed");
+    expect(billLineProblem(draftLine({ quantity: "0" }), "services")).toBe("ITM-000001: the quantity must be more than zero");
+    expect(billLineProblem(draftLine({ freeQuantity: "-1" }), "services")).toBe("ITM-000001: the free quantity must be zero or more");
+    expect(billLineProblem(draftLine({ rate: "-5" }), "services")).toBe("ITM-000001: the price must be zero or more");
+    expect(billLineProblem(draftLine({ discountPercent: "101" }), "services")).toBe("ITM-000001: the discount must be between 0 and 100 percent");
+    expect(billLineProblem(draftLine({ gstRate: "120" }), "services")).toBe("ITM-000001: the GST rate must be between 0 and 100");
+    expect(billLineProblem(draftLine({ igst: "-1" }), "services")).toBe("ITM-000001: IGST must be an amount of zero or more");
+    expect(billLineProblem(draftLine({ include: false, quantity: "" }), "services")).toBeNull();
+    expect(billLineProblem(draftLine(), "services")).toBeNull();
+  });
+
+  it("goods with batches or serial numbers need them listed exactly", () => {
+    expect(billLineProblem(draftLine({ trackBatches: true, autoNumberBatches: false }), "receives_goods")).toBe("ITM-000001: give the batch number");
+    expect(billLineProblem(draftLine({ trackBatches: true, autoNumberBatches: true }), "receives_goods")).toBeNull();
+    // 2 boxes of 6, plus 1 free box: 18 serial numbers.
+    const serials = (n: number) => Array.from({ length: n }, (_, i) => `SN${i + 1}`).join("\n");
+    const boxes = { trackSerials: true, quantity: "2", freeQuantity: "1", factor: "6" };
+    expect(billLineProblem(draftLine({ ...boxes, serials: serials(17) }), "receives_goods")).toBe("ITM-000001: list exactly 18 serial numbers, one per line");
+    expect(billLineProblem(draftLine({ ...boxes, serials: serials(17) + "\nSN1" }), "receives_goods")).toBe("ITM-000001: a serial number is listed twice");
+    expect(billLineProblem(draftLine({ ...boxes, serials: serials(18) }), "receives_goods")).toBeNull();
+  });
+
+  it("a saved draft bill's lines come back as typed (no zero free quantity or discount)", () => {
+    const [l] = linesFromBill(bill());
+    expect(l).toMatchObject({ itemId: ITEM_ID, itemCode: "ITM-000001", quantity: "10", freeQuantity: "", receiptLineId: "r1", creditClaimable: true });
+  });
+
+  it("a receiving bill's draft receipt comes back with its free units apart and its serials one per line", () => {
+    const receipt = {
+      lines: [
+        {
+          id: "gl1",
+          item: { id: ITEM_ID, code: "ITM-000001", name: "Rice", trackBatches: false, trackSerials: true },
+          unitId: PCS,
+          factor: "1",
+          orderLineId: null,
+          receivedQuantity: "3.000",
+          freeQuantity: "1.000",
+          rate: "50.0000",
+          discountPercent: "0",
+          gstRate: "18.00",
+          cgst: null,
+          sgst: null,
+          igst: null,
+          shelfLocationId: "",
+          newBatchNumber: null,
+          newExpiryOn: null,
+          serialNumbers: ["A", "B", "C"],
+        },
+      ],
+    } as unknown as GoodsReceiptDto;
+    const withBill = bill({ lines: [{ ...bill().lines[0], receiptLineId: "gl1", creditClaimable: false }] });
+    const [l] = linesFromDraftReceipt(receipt, withBill);
+    expect(l).toMatchObject({ quantity: "2", freeQuantity: "1", rate: "50", discountPercent: "", serials: "A\nB\nC", creditClaimable: false, trackSerials: true });
+    expect(linesFromDraftReceipt(receipt)[0].creditClaimable).toBe(true);
   });
 });

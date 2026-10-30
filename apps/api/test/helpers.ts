@@ -41,7 +41,7 @@ export async function resetDatabase(prisma: SystemPrisma): Promise<void> {
       "SummaryEmailSettings", "SummaryEmailRun", "PrintSettings", "StandardTerms", "LabelTemplate", "ImportRow", "ImportJob", "TrialClearing",
       "SalesStaff", "Season", "Markdown", "PosDelivery",
       "CustomerOrderLine", "CustomerOrder", "StockReservation", "AlterationJobLine", "AlterationJob", "ConsignmentStatementLine", "ConsignmentStatement", "TallyLedgerMap",
-      "GstSettings", "EInvoice", "EWayBill", "GstReturnUpload",
+      "GstSettings", "EInvoice", "EWayBill", "GstReturnUpload", "GstFiledPeriod",
       "CompanyModule", "SetupProgress",
       "LoyaltyEntry", "LoyaltyTier", "LoyaltySettings", "GiftCardEntry", "GiftCard",
       "GstinCheck", "Lead", "MailDay", "Company", "SecuritySettings"

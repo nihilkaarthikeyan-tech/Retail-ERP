@@ -4,8 +4,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type CurrentUser, GETTING_STARTED_STEPS, type GettingStartedDto } from "shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { GettingStarted } from "./getting-started";
+
+/** Audit 11: shown once the sign-in has loaded, so "nothing appeared" is checked after the screen has decided. */
+function SignedIn() {
+  const { user } = useAuth();
+  return user ? <span>signed in</span> : null;
+}
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
@@ -81,9 +87,13 @@ describe("getting-started checklist (12.7)", () => {
     cleanup();
 
     const fn = mockApi(person(false), checklist([]));
-    renderIt();
-    await waitFor(() => expect(fn).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
+    render(
+      <AuthProvider>
+        <GettingStarted />
+        <SignedIn />
+      </AuthProvider>,
+    );
+    await screen.findByText("signed in");
     expect(screen.queryByRole("heading", { name: "Getting started" })).toBeNull();
     expect(fn.mock.calls.some((c) => new URL(String(c[0])).pathname === "/getting-started")).toBe(false);
   });

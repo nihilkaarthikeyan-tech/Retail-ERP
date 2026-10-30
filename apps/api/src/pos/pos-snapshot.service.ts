@@ -15,6 +15,9 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { fromIso, iso, PosCommon } from './pos-common.service.js';
 import { offerDto } from './offers.service.js';
 
+/** How far back the next "changes since" download reaches (see snapshot()). */
+const CHANGES_OVERLAP_MS = 5 * 60_000;
+
 @Injectable()
 export class PosSnapshotService {
   constructor(
@@ -33,7 +36,10 @@ export class PosSnapshotService {
     const settings = await this.common.settings(this.prisma, company.id);
     const today = businessDate();
     const changedSince = since ? new Date(since) : null;
-    const serverTime = new Date();
+    // Audit 11: the time the till asks "what changed since" next reaches back 5 minutes (the longest a
+    // statement may run), so a save that began before this download and finished after it is not
+    // missed. The till merges by id, so the overlap only sends a few rows twice.
+    const serverTime = new Date(Date.now() - CHANGES_OVERLAP_MS);
 
     const items = await this.prisma.item.findMany({
       where: { canSell: true, isParentStyle: false, ...(changedSince ? { updatedAt: { gt: changedSince } } : { active: true }) },

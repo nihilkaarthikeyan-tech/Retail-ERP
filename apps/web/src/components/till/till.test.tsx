@@ -451,3 +451,53 @@ describe("a scan the till's copy does not know", () => {
     expect(screen.queryByText(/Nothing found/)).toBeNull();
   });
 });
+
+describe("audit 11: the till with the keyboard only (audit 9, A9.1 and A9.2)", () => {
+  async function till(opts: { locked?: boolean } = {}) {
+    if (opts.locked) sessionStorage.setItem("retail-erp:till-cashier:locked", "1");
+    const store = new MemoryStore();
+    await store.set("snapshot", sampleSnapshot());
+    const shift: LocalShift = { clientId: uuid(), id: "s1", businessDate: "2026-10-15", openedAt: at.toISOString(), openedByName: "Ravi", openingCash: [] };
+    await store.set("shift", shift);
+    await store.set("shiftid:" + shift.clientId, "s1");
+    const engine = new TillEngine({ store, api: fakeApi(), device, now: () => at, uuid });
+    render(<TillApp device={device} engine={engine} />);
+    return engine;
+  }
+
+  it("scan, F4, Enter, Enter, Enter: the bill is finished and the next one started without touching the mouse", async () => {
+    const engine = await till();
+    const box = await screen.findByLabelText(/Scan a barcode/);
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    fireEvent.change(box, { target: { value: "8900001" } });
+    fireEvent.submit(box.closest("form")!);
+    expect(screen.getByTestId("bill-total").textContent).toContain("₹120.00");
+
+    fireEvent.keyDown(window, { key: "F4" });
+    await screen.findByRole("dialog", { name: "Payment" });
+    // The till's usual way of paying has the cursor; Enter on it (the browser presses the button) takes the full amount.
+    const usual = document.activeElement as HTMLButtonElement;
+    expect(usual.tagName).toBe("BUTTON");
+    expect(usual.textContent).toMatch(/Cash/);
+    fireEvent.click(usual);
+    expect(screen.getByLabelText("Cash amount")).toHaveProperty("value", "120.00");
+    // A second Enter, still on that button, finishes the bill.
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement!, { key: "Enter" });
+    });
+    await screen.findByRole("dialog", { name: "Bill finished" });
+    expect((await engine.queue.items())[0]).toMatchObject({ kind: "bill" });
+    // The third Enter starts the next bill ("New bill (Enter)"), with the cursor in the scan box.
+    fireEvent.keyDown(document.activeElement ?? window, { key: "Enter" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(/Scan a barcode/)));
+    expect(screen.queryByRole("dialog", { name: "Bill finished" })).toBeNull();
+  });
+
+  it("a locked till ignores its keys: F4 does not open Pay behind the lock screen", async () => {
+    await till({ locked: true });
+    await screen.findByRole("search");
+    fireEvent.keyDown(window, { key: "F4" });
+    expect(screen.queryByRole("dialog", { name: "Payment" })).toBeNull();
+    expect(document.querySelector(".till-body")?.hasAttribute("inert")).toBe(true);
+  });
+});

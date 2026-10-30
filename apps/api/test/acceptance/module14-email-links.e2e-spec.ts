@@ -27,8 +27,8 @@ afterAll(async () => {
 const http = () => request(app.getHttpServer());
 /** The one-time code in the last email's link. */
 const linkCode = () => /token=([A-Za-z0-9_-]+)/.exec(outbox[outbox.length - 1].text)![1];
-/** Mail is sent in the background after sign-up; give it a moment. */
-const settle = () => new Promise((r) => setTimeout(r, 80));
+/** Mail is sent in the background after sign-up; wait until it has arrived (audit 11: not a fixed pause). */
+const settle = () => vi.waitFor(() => expect(outbox.length).toBeGreaterThan(0), { timeout: 5000 });
 
 describe('14.7 Forgot password', () => {
   beforeAll(async () => {

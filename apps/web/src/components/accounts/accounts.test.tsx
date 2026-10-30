@@ -2,12 +2,18 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type AccountDto, journalTotals, previewOldestFirst, type OpenItemDto } from "@/lib/accounts";
-import { AuthProvider } from "@/lib/auth-context";
+import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { ChartOfAccounts } from "./chart-of-accounts";
 import { JournalForm } from "./journal-form";
 import { LedgerEntryButton } from "./ledger-entry";
 import { PaymentForm } from "./payment-form";
 import { Decimal } from "shared";
+
+/** Audit 11: shown once the sign-in has loaded, so "nothing appeared" is checked after the screen has decided. */
+function SignedIn() {
+  const { user } = useAuth();
+  return user ? <span>signed in</span> : null;
+}
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
@@ -330,14 +336,14 @@ describe("LedgerEntryButton", () => {
     expect(within(dialog).getAllByText("₹4,750.00").length).toBe(4);
     cleanup();
 
-    const second = mockApi({ "/auth/me": ok(user(["purchase.view"])) });
+    mockApi({ "/auth/me": ok(user(["purchase.view"])) });
     render(
       <AuthProvider>
         <LedgerEntryButton documentType="supplier_bill" documentId="d0000000-0000-4000-8000-000000000001" />
+        <SignedIn />
       </AuthProvider>,
     );
-    await waitFor(() => expect(second).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 20));
+    await screen.findByText("signed in");
     expect(screen.queryByRole("button", { name: "View ledger entry" })).toBeNull();
   });
 });

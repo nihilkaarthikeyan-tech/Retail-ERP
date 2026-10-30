@@ -407,7 +407,6 @@ describe('the till hears of a new barcode', () => {
     const g = await group('ETHNIC', 'Ethnic wear');
     const kurta = await item('Cotton kurta', g, '6205', '1500');
     const first = (await T(owner.get(`/pos/till/${tillId}/snapshot`)).expect(200)).body;
-    await new Promise((r) => setTimeout(r, 20));
     await owner.post(`/items/${kurta.id}/barcodes`).send({ code: '8901234567890', type: 'EAN13' }).expect(201);
     const delta = (await T(owner.get(`/pos/till/${tillId}/snapshot?since=${encodeURIComponent(first.serverTime)}`)).expect(200)).body;
     const row = (delta.items as { id: string; barcodes: { code: string }[] }[]).find((i) => i.id === kurta.id);

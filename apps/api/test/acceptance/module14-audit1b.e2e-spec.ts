@@ -47,7 +47,7 @@ describe('audit 1 follow-ups', () => {
   it('changing the password stops a "forgot password" link sent before', async () => {
     outbox.length = 0;
     await http().post('/auth/forgot-password').send({ email: OWNER.email }).expect(200);
-    await new Promise((r) => setTimeout(r, 80));
+    await vi.waitFor(() => expect(outbox).toHaveLength(1), { timeout: 5000 });
     const code = /token=([A-Za-z0-9_-]+)/.exec(outbox[outbox.length - 1].text)![1];
     const me = await login(app, OWNER.email, OWNER.password);
     await me.post('/auth/change-password').send({ currentPassword: OWNER.password, newPassword: 'Changed-pass-2026' }).expect(204);
@@ -62,8 +62,10 @@ describe('audit 1 follow-ups', () => {
     await owner.post('/users').send({ firstName: 'Stranger', email: 'someone@elsewhere.test', temporaryPassword: 'Temp-pass-1234', roleIds: [], storeIds: [MAIN] }).expect(201);
     outbox.length = 0;
     await http().post('/auth/forgot-password').send({ email: 'someone@elsewhere.test' }).expect(200);
-    await new Promise((r) => setTimeout(r, 80));
-    expect(outbox).toHaveLength(0);
+    // Audit 11: a mail asked for afterwards does arrive, and it is the only one (a pause alone proved nothing).
+    await http().post('/auth/forgot-password').send({ email: OWNER.email }).expect(200);
+    await vi.waitFor(() => expect(outbox.length).toBeGreaterThan(0), { timeout: 5000 });
+    expect(outbox.map((m) => m.to)).toEqual([[OWNER.email]]);
   });
 
   it('a store manager sees only the staff of their own stores (owner, #24)', async () => {

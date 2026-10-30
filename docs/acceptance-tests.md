@@ -918,6 +918,17 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 ### 15.9 Cash accounts of a new store (L10)
 - **Then** a store added in Settings has "Cash in till" and "Cash in hand" at once, before its first till shift.
 
+## Audits 1–3: access, money and stock (27–28 October 2026)
+
+### A1 Each shop and each store sees only its own
+- **Then** a store manager cannot read, change or cancel another store's documents, the owner dashboard or the Owner's PIN; someone trusted with users cannot hand out stores they do not work in or reset a user with more rights; every GET route called by another shop or store carries none of the first one's ids; twenty PIN guesses sent together get five tries, then the PIN locks (`module14-audit1`, `module14-audit1b`, `module14-sweep`).
+
+### A2 Money and accounts
+- **Then** cancelling a return to the supplier gives its freight share back; a double click posts once; the books cannot be locked over an open till shift (`module15-audit2`).
+
+### A3 Two things at once, and minus stock
+- **Then** the same goods returned at two tills at once are refunded once; a phone is sold once and comes back only on its own bill; goods arriving into minus stock re-cost what was already sold, to the paisa; a transfer partly received can be closed short (`module15-audit3`).
+
 ## Audit 4: GST and the law (28 October 2026; automated in `module15-audit4.e2e-spec.ts`)
 
 ### A4.1 SEZ supply (T6)
@@ -955,7 +966,7 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 - **Then** a shift with a bill that "could not be sent" cannot close; the office posts it into the shift ("Post into shift"), and the close then expects its cash.
 
 ### A5.3 Approvals tied to the amount
-- **Then** a manager's approval of a ₹150 cash shortage does not cover a ₹2,150 shortage; a bill discount or cash out approval covers only the amount approved.
+- **Then** a manager's approval of a ₹150 cash shortage does not cover a ₹200 shortage; a bill discount or cash out approval covers only the amount approved.
 
 ### A5.4 A lost answer
 - **Then** a bill whose answer was lost after the server saved it is shown as saved; sending the same bill identity with other contents is refused.
@@ -990,7 +1001,7 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 - **Given** 504,719 bills over two years and 53,200 items
 - **Then** daily screens, reports for a day or a month and the till are under 2 seconds; no report takes the server down.
 
-## Audit 9: Screens and ease of use (30 October 2026; automated in `audit9.test.tsx`, the rest checked in the browser)
+## Audit 9: Screens and ease of use (30 October 2026; automated in `audit9.test.tsx`, `audit11.test.tsx`, `till.test.tsx` and `bills.test.tsx`)
 
 ### A9.1 A sale by keyboard alone
 - **Then** scan, + for quantity, F4, Enter (the till's usual payment), Enter (finish), Enter (next bill): the cursor is back in the scan box.
@@ -1003,3 +1014,61 @@ Starting values: ₹100 spent = 1 point; 1 point = ₹1; points last 365 days; m
 
 ### A9.4 Finalise and post
 - **Then** each asks once, in plain words, before stock or the accounts change.
+
+## Audit 11: The minimums end to end (30 October 2026; automated in `module20-audit11.e2e-spec.ts`)
+
+Rice (HSN 1006, 5%) sells at ₹105 (₹100 + ₹2.50 CGST + ₹2.50 SGST) and costs ₹60; soap (HSN 3402, 18%) sells at ₹118 and costs ₹70. Opening stock ₹4,400. Each scenario checks the stock, the accounts by account and the GST, and that the books agree with themselves and with the stock.
+
+### A11.1 Sale and GST tax invoice
+- **When** 2 rice are sold for ₹210 cash and the shift closes
+- **Then** the bill is taxable ₹200.00, CGST ₹5.00, SGST ₹5.00; 48 rice left worth ₹2,880.00; Sales −200.00, output CGST −5.00, output SGST −5.00, cost of goods sold 120.00, stock 4,280.00, cash in hand 210.00.
+
+### A11.2 Return
+- **When** 1 of the 2 comes back for ₹105 cash
+- **Then** the return is −100.00 / −2.50 / −2.50; 49 rice at ₹2,940.00; Sales −100.00, cost of goods sold 60.00, cash in hand 105.00.
+
+### A11.3 Exchange
+- **When** a soap goes back and a rice goes out, ₹13 refunded
+- **Then** the soap credit is at 18% (−100.00 / −9.00 / −9.00) and the rice sale at 5% (100.00 / 2.50 / 2.50); output CGST −2.50 overall.
+
+### A11.4 Negative-stock sale at the till
+- **When** 52 rice are sold with 50 on the shelf
+- **Then** the bill is flagged; stock −2 worth −120.00; cost of goods sold 3,120.00, stock 1,280.00.
+
+### A11.5 Shift closed ₹2 short
+- **Then** cash short or over 2.00, cash in hand 103.00, cash in till 0.00.
+
+### A11.6 Card and UPI at the till
+- **Then** card settlement 105.00, UPI settlement 118.00, cash untouched; output CGST −11.50; cost of goods sold 130.00.
+
+### A11.7 Return without the bill (11.8 in full)
+- **Then** refused without a manager PIN, offline, or by a method that does not allow refunds; with them, −105.00, stock 51 worth ₹3,060.00, cash in hand −105.00.
+
+### A11.8 E-way bill stops clearing (A7.2)
+- **Then** with a generated e-way bill, clearing the trial data is refused and nothing is deleted.
+
+### A11.9 Year-end with stock and accounts apart (11.9)
+- **Then** a ₹500 stock movement in March with no ledger entry stops the year-end closing, naming the store and the difference.
+
+### A11.10 The till hears of late saves
+- **Then** the till's "changes since" download reaches back 5 minutes, so an item saved by a change that began before the download still reaches the till next time.
+
+## Audit 11, part 2: routes no test called (30 October 2026; automated in `module21-audit11b.e2e-spec.ts`)
+
+### A11.11 The till and the server price alike
+- **Then** an offer, a typed discount and a return, a bill discount shared over 3 lines, and a Karnataka business buyer (IGST) are priced by the till's own code and by the server to the same paisa, line by line; a bill whose total the till got wrong is refused and not saved.
+
+### A11.12 Balance sheet
+- **Then** after a sale, a supplier bill, a part payment and rent, the balance sheet balances (assets = liabilities + capital + profit not yet closed); as of yesterday it is empty.
+
+### A11.13 Payment links and opening bills
+- **Then** undoing a ₹600 link on a ₹1,000 bill leaves ₹1,000 owed and ₹600 unused; a second undo is refused. An opening bill with a payment linked cannot be cancelled; once unlinked it is cancelled by a reversing entry, once only.
+
+### A11.14 Points and gift cards
+- **Then** they are paid only with their own buttons: a till cannot tick them, a bill paid with them as a plain method is refused, and a gift card cannot be bought on account or with points.
+
+### A11.15 Box sizes
+- **Then** changing a box from 12 to 10 leaves goods already received at 24 pieces; boxes received on an order made before the change come in at 12 a box; new receipts without an order use 10.
+
+### A11.16 Reports and draft edits
+- **Then** the purchase register, by supplier and by item agree; received-not-billed and order follow-up show what is pending; till hourly, by cashier and shifts add up to the day; returns show as minus; draft bills, receipts, payments and journals can be changed until posted, never after.

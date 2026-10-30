@@ -268,7 +268,10 @@ export class GoodsReceiptsService {
         withoutOrder = true;
       }
       const unitId = orderLine?.unitId ?? l.unitId;
-      const info = await this.common.itemUnit(db, l.itemId, unitId, [l.receivedQuantity, l.freeQuantity, l.rejectedQuantity], 'stock');
+      const unitInfo = await this.common.itemUnit(db, l.itemId, unitId, [l.receivedQuantity, l.freeQuantity, l.rejectedQuantity], 'stock');
+      // Audit 11: goods ordered by the box come in at the box size on the order, even if the item's
+      // box size changed since (2 boxes of 12 ordered at ₹600 a box are 24 pieces, not 20 at ₹60).
+      const info = orderLine ? { ...unitInfo, factor: D(orderLine.factor.toString()) } : unitInfo;
       const code = info.item.code;
       const received = D(l.receivedQuantity);
       const rejected = D(l.rejectedQuantity ?? '0');

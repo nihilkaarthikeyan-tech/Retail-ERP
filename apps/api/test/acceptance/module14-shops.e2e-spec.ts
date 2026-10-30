@@ -298,9 +298,8 @@ describe('14.3 The Retail ERP admin', () => {
     const leads = (await admin.get('/platform/leads').expect(200)).body as { id: string; name: string; handledAt: string | null }[];
     expect(leads.map((l) => l.name)).toEqual(['Ravi']);
     // Each real message is emailed to Rademics; the robot's is not.
-    await new Promise((r) => setTimeout(r, 50));
     const outbox = app.select(PlatformModule).get(MailerService, { strict: true }).outbox;
-    expect(outbox).toHaveLength(1);
+    await vi.waitFor(() => expect(outbox).toHaveLength(1), { timeout: 5000 });
     expect(outbox[0].to).toEqual([DEFAULT_LEAD_ALERT_TO]);
     expect(outbox[0].subject).toBe('New Retail ERP enquiry: Ravi, Ravi Footwear');
     expect(outbox[0].text).toContain('Phone: 9840012345');
