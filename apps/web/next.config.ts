@@ -1,7 +1,12 @@
 // Copyright (c) 2026, Rademics. All rights reserved.
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Audit 10: a self-contained server with only the files the site uses, for a small image.
+  // The tracing starts at the repository root, so the shared package is found.
+  output: "standalone",
+  outputFileTracingRoot: path.resolve(process.cwd(), "../.."),
   cacheComponents: true,
   // Image resizing needs the `sharp` package (LGPL libvips), which we exclude
   // in the root package.json under the licence rules. Images are served as-is.

@@ -4,20 +4,21 @@ CLAUDE.md rule 7: only packages under permissive licences (MIT, Apache-2.0, BSD,
 
 None of these libraries contain ERP logic. They are general building blocks (web framework, database driver, test runner, type checker). All business rules are written from the blueprint in our own code.
 
-Last checked: 15 October 2026 (Till Helper added; module 1 list unchanged).
+Last checked: 30 October 2026 (audit 10: full scan of every production package; @nestjs/throttler added; nodemailer moved to the running product, where it belongs).
 
 ## Used by the running product (apps/api, apps/web, packages/shared)
 
 | Library | What it does for us | Licence |
 | --- | --- | --- |
 | next, react, react-dom | Web app framework and UI rendering | MIT |
-| @nestjs/common, core, platform-express, schedule | Backend API framework, HTTP server, nightly jobs | MIT |
+| @nestjs/common, core, platform-express, schedule, throttler | Backend API framework, HTTP server, nightly jobs, flood limits | MIT |
 | @prisma/client, @prisma/adapter-pg, prisma | Database access and migrations | Apache-2.0 |
 | pg | PostgreSQL driver | MIT |
 | cookie-parser | Reads the session cookie | MIT |
 | zod | Input validation (shared by web and API) | MIT |
 | decimal.js | Exact decimal arithmetic for money and quantities | MIT |
 | reflect-metadata, rxjs | Required by NestJS | Apache-2.0 |
+| nodemailer | Sends e-mail: password links and the daily summary (module 9, plan 09 answer 1); no dependencies of its own | MIT-0 (MIT without the attribution clause; approved by the project owner on 16 Oct 2026) |
 
 QR codes printed on e-invoices (plan 08 §4) are drawn by our own encoder (`packages/shared/src/qr.ts`, written from the public QR code standard ISO/IEC 18004); no QR library is used.
 
@@ -40,7 +41,6 @@ Development only: typescript, vitest, oxlint, oxlint-tsgolint, @types/node (alre
 | @nestjs/cli, @nestjs/schematics, @nestjs/testing | NestJS tooling | MIT |
 | eslint, eslint-config-next, oxlint, oxlint-tsgolint, prettier | Code checks and formatting | MIT |
 | source-map-support, @types/* | Debugging and type definitions | MIT |
-| nodemailer | Sends the owner's daily summary email (module 9, plan 09 answer 1); no dependencies of its own | MIT-0 (MIT without the attribution clause; approved by the project owner on 16 Oct 2026) |
 
 ## Deliberately excluded
 
@@ -50,10 +50,18 @@ Development only: typescript, vitest, oxlint, oxlint-tsgolint, @types/node (alre
 
 ## Indirect dependencies
 
-The direct libraries above pull in about 700 smaller packages. A scan (`pnpm licenses list`) shows all are MIT, Apache-2.0, BSD, ISC or similar, except a few development-only tools under MPL-2.0 or EPL-2.0 (`lightningcss` in the Vite build tool, `axe-core` in the ESLint accessibility checker, `elkjs` in Prisma Studio). These never run on the server or in users' browsers. Re-run the scan after adding any library:
+The direct libraries above pull in about 700 smaller packages. A scan (`pnpm licenses list`) shows all are MIT, Apache-2.0, BSD, ISC or similar, except:
+
+- development-only tools under MPL-2.0 or EPL-2.0 (`lightningcss` in the Vite build tool, `axe-core` in the ESLint accessibility checker), which never run on the server or in users' browsers;
+- `elkjs` (EPL-2.0), part of Prisma Studio inside the Prisma command-line tool. The tool is in the server image because it applies database changes at start-up; Studio itself (a database browser) is never started there;
+- `caniuse-lite` (CC-BY-4.0), the browser-support table Next.js reads when the web app is built; its licence asks only for credit, given here (data by caniuse.com, Alexis Deveria);
+- `postgres` and `robust-predicates` (Unlicense) and `tslib` (0BSD): public-domain style, freer than MIT.
+
+Audit 10 (30 October 2026): `pnpm audit` shows no known holes. Re-run both scans after adding any library, and each month (`docs/library-updates.md`):
 
 ```bash
-pnpm licenses list
+pnpm licenses list --prod
+pnpm audit
 ```
 
 ## Official government data
