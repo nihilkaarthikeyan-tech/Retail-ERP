@@ -7,6 +7,7 @@ import { PrintButton } from "@/components/documents/print-button";
 import { Alert, Button, CheckInput, SelectInput, TextareaInput, TextInput } from "@/components/ui";
 import { api, errorMessage, query } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useModules } from "@/lib/modules";
 import { blankToNull } from "@/lib/format";
 import { defaultStoreId, indianTime, showQuantity, splitLines, stockLocationsOf, storesFromLocations, useBusinessToday } from "@/lib/stock";
 import type { BatchStockRow, ItemDto, StockBalanceResult, StockBalanceRow, StockDocLineDto, StockDocumentDto, StockLocationDto } from "@/lib/types";
@@ -150,6 +151,7 @@ interface CountEditorProps {
 /** Opening-stock load or normal stock count at one location, with a blind option. */
 export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
   const { user } = useAuth();
+  const batchesOn = useModules().isOn("batches");
   const today = useBusinessToday();
   const stores = storesFromLocations(locations);
   const canDraft = hasPermission(user, "stock.count");
@@ -203,9 +205,11 @@ export function CountEditor({ doc, locations, onSaved }: CountEditorProps) {
     setBusy("fill");
     setError(null);
     try {
+      // Video check, 3 November 2026: with batches switched off the API refuses /stock/batches,
+      // so the lines come from the balance alone.
       const [balance, batches] = await Promise.all([
         api.get<StockBalanceResult>(`/stock/balance${query({ storeId, locationId })}`),
-        api.get<BatchStockRow[]>("/stock/batches"),
+        batchesOn ? api.get<BatchStockRow[]>("/stock/batches") : Promise.resolve<BatchStockRow[]>([]),
       ]);
       // Audit 9: grouped by item once (each of thousands of stock rows searched every batch).
       const batchesByItem = new Map<string, BatchStockRow[]>();
