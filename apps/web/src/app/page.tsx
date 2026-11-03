@@ -306,7 +306,7 @@ export default function LandingPage() {
               <BrandMark />
               Retail ERP
             </Link>
-            <p>Billing, stock, GST and accounts for Indian shops. Built and run by Rademics.</p>
+            <p>Billing, stock, GST and accounts for Indian shops. Built and run by Rad InfoTech, a Rad Groups company.</p>
           </div>
           <div>
             <p className="label-mono">Product</p>
@@ -330,7 +330,7 @@ export default function LandingPage() {
             <Link href="/signup">Start free trial</Link>
           </div>
         </div>
-        <div className="lp-wrap lp-copy">© 2026 Rademics. All rights reserved.</div>
+        <div className="lp-wrap lp-copy">© 2026 Rad InfoTech, a Rad Groups company. All rights reserved.</div>
       </footer>
     </div>
   );

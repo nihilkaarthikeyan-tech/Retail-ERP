@@ -26,7 +26,7 @@ export function AuthLayout({ title, intro, children, footer }: { title: string; 
           {children}
           <p className="auth-switch">{footer}</p>
         </div>
-        <p className="auth-copy">© 2026 Rademics. All rights reserved.</p>
+        <p className="auth-copy">© 2026 Rad InfoTech, a Rad Groups company. All rights reserved.</p>
       </main>
       <aside className="auth-side" aria-hidden="true">
         <div className="auth-side-text">

@@ -88,7 +88,7 @@ export class GstinApiProvider implements GstinProvider {
         await pause(attempt);
         continue;
       }
-      if (res.status === 402) throw new GstinCheckUnavailable('No GSTIN check credits are left; Rademics will top them up', 'out_of_credits');
+      if (res.status === 402) throw new GstinCheckUnavailable('No GSTIN check credits are left; Rad InfoTech will top them up', 'out_of_credits');
       if (res.status === 429) throw new GstinCheckUnavailable('Too many GSTIN checks at once; it will be checked again shortly', 'busy');
       if (res.status === 401 || res.status === 403 || res.status === 400) throw new GstinCheckUnavailable('The GSTIN check service refused the request', 'refused');
       if (!res.ok) throw new GstinCheckUnavailable('The GST network is not answering just now', 'down');
