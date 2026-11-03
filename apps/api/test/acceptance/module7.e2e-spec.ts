@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { App } from 'supertest/types.js';
-import { businessDate, Decimal } from 'shared';
+import { addDays, businessDate, Decimal } from 'shared';
 import { SystemPrisma } from '../../src/prisma/prisma.service.js';
 import { type Agent, createTestApp, login, roleId, setUpCompany, storeId } from '../helpers.js';
 
@@ -470,7 +470,8 @@ describe('7.12 credit sale at the till (decision 22)', () => {
     await opening(rice.id, '100', '80');
     customer = (await owner.post('/customers').send({ name: 'Hotel Saravana', customerGroupId: customerGroups.RETAIL, mobile: '9840055667' }).expect(201)).body;
     await prisma.customer.update({ where: { id: customer.id }, data: { creditLimit: '5000', paymentTermsId: terms.NET30 } });
-    await owner.post('/opening-bills').send({ partyType: 'customer', partyId: customer.id, billNumber: 'OLD/7', billDate: '2026-10-01', dueDate: '2026-10-31', amount: '4500' }).expect(201);
+    // Not yet due on any day the test runs (a fixed due date went overdue on 1 November 2026).
+    await owner.post('/opening-bills').send({ partyType: 'customer', partyId: customer.id, billNumber: 'OLD/7', billDate: addDays(today(), -10), dueDate: addDays(today(), 20), amount: '4500' }).expect(201);
     const m = await staff('Priya', 'priya@rademics.test', 'store_manager');
     managerId = m.id;
     await m.agent.post('/pos/pin').send({ pin: '7391', currentPassword: 'Own-pass-12345' }).expect(200);
